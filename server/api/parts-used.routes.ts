@@ -1,14 +1,25 @@
 import { Router } from "express";
 import { workOrderCostScope } from "../lib/work-order-realtime-scope";
-import { isStockIssuer } from "../middleware/auth";
+import { WORK_ORDER_COST_READ_ROLES } from "@shared/constants/roles";
+import { authorize, isStockIssuer } from "../middleware/auth";
 import { parseRouteId } from "../lib/route-id";
 import { removePartUsed } from "../services/part-used-removal";
+import { storage } from "../storage";
 
 const router = Router();
 
+// Liste des pièces posées avec leur prix unitaire : rôles coût seulement (hors chauffeur).
+router.get("/", authorize([...WORK_ORDER_COST_READ_ROLES]), async (_req, res, next) => {
+  try {
+    return res.status(200).json(await storage.getAllPartsUsed());
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Retrait d'une pièce posée sur un OT : elle revient en stock (mouvement d'entrée attribué
 // à l'acteur). Magasin et atelier seulement : le technicien demande la pièce, il ne la
-// remet pas en stock. La garde est posée sur la route : `GET /api/parts-used` reste à routes.ts.
+// remet pas en stock.
 router.delete("/:id", isStockIssuer, async (req, res, next) => {
   try {
     const id = parseRouteId(req.params.id, "ID de pièce utilisée invalide");

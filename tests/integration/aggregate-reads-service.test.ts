@@ -152,7 +152,7 @@ describe("aggregateReadsService.pendingInvoices", () => {
     const res = await aggregateReadsService.pendingInvoices();
     const mine = res.find((r) => r.clientId === client.id);
     expect(mine).toEqual({
-      clientId: client.id, clientName: client.name, operationCount: 2, amount: 0, oldestOperationDate: "2019-01-10",
+      clientId: client.id, clientName: client.name, operationCount: 2, amount: 0, missionsWithoutPrice: 2, oldestOperationDate: "2019-01-10",
     });
   }, 30_000);
 });
