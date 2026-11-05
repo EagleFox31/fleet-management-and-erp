@@ -1,0 +1,127 @@
+import { createServer, type Server } from "http";
+import { and, eq, inArray } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { db } from "../../server/db";
+import { parts, partsStockMovements, partsUsed, workOrders } from "../../shared/schema";
+import { getContractApp } from "../support/app";
+import { cleanupCreated, createIdBag } from "../support/cleanup";
+import { createTestPart, createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
+
+/**
+ * Retrait d'une pièce posée sur un OT (`DELETE /api/parts-used/:id`) : la pièce revient en
+ * stock par un mouvement d'entrée attribué à l'acteur, la ligne posée disparaît. Un rôle hors
+ * atelier est refusé sans toucher au stock. Écrit en base ; tout est supprimé.
+ */
+
+let server: Server;
+let baseUrl = "";
+const ids = createIdBag();
+const workOrderIds: number[] = [];
+const previousBroadcast = (global as any).broadcastUpdate;
+
+async function sessionOf(role: TestUserRole) {
+  const user = await createTestUser({ role });
+  ids.userIds.push(user.id);
+  const res = await fetch(`${baseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username: user.username, password: TEST_USER_PASSWORD }),
+  });
+  expect(res.status).toBe(200);
+  return { user, cookie: res.headers.get("set-cookie")!.split(";")[0] };
+}
+
+/** Une pièce à 5 en stock, dont 2 posées sur un OT en cours. */
+async function partUsedOnWorkOrder() {
+  const vehicle = await createTestVehicle();
+  ids.vehicleIds.push(vehicle.id);
+  const part = await createTestPart({ quantity: 5, unitPrice: "4000.00" });
+  ids.partIds.push(part.id);
+  const [workOrder] = await db
+    .insert(workOrders)
+    .values({ vehicleId: vehicle.id, title: "TEST retrait pièce posée", status: "in_progress" })
+    .returning();
+  workOrderIds.push(workOrder.id);
+  const [used] = await db
+    .insert(partsUsed)
+    .values({ workOrderId: workOrder.id, partId: part.id, quantity: 2, unitPrice: "4000.00" })
+    .returning();
+  return { part, workOrder, used };
+}
+
+const remove = (id: number, cookie: string) => fetch(`${baseUrl}/api/parts-used/${id}`, { method: "DELETE", headers: { Cookie: cookie } });
+
+async function stockOf(partId: number) {
+  const [row] = await db.select({ quantity: parts.quantity }).from(parts).where(eq(parts.id, partId));
+  return row.quantity;
+}
+
+beforeAll(async () => {
+  (global as any).broadcastUpdate = () => {};
+  server = createServer(await getContractApp());
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const address = server.address();
+  baseUrl = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
+});
+
+afterAll(async () => {
+  (global as any).broadcastUpdate = previousBroadcast;
+  if (workOrderIds.length > 0) {
+    await db.delete(partsUsed).where(inArray(partsUsed.workOrderId, workOrderIds));
+    await db.delete(partsStockMovements).where(inArray(partsStockMovements.workOrderId, workOrderIds));
+    await db.delete(workOrders).where(inArray(workOrders.id, workOrderIds));
+  }
+  if (ids.partIds.length > 0) await db.delete(partsStockMovements).where(inArray(partsStockMovements.partId, ids.partIds));
+  await cleanupCreated(ids);
+  await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+});
+
+describe("DELETE /api/parts-used/:id : retrait d'une pièce posée", () => {
+  it("remet la quantité en stock par un mouvement d'entrée attribué à l'acteur, et retire la ligne", async () => {
+    const chef = await sessionOf("workshop_manager");
+    const { part, workOrder, used } = await partUsedOnWorkOrder();
+
+    const res = await remove(used.id, chef.cookie);
+
+    expect(res.status).toBe(204);
+    expect(await stockOf(part.id)).toBe(7);
+    expect(await db.select().from(partsUsed).where(eq(partsUsed.id, used.id))).toHaveLength(0);
+    const movements = await db
+      .select()
+      .from(partsStockMovements)
+      .where(and(eq(partsStockMovements.partId, part.id), eq(partsStockMovements.workOrderId, workOrder.id)));
+    expect(movements).toHaveLength(1);
+    expect(movements[0]).toMatchObject({ movementType: "in", quantity: 2, previousStock: 5, newStock: 7, createdBy: chef.user.id });
+  });
+
+  it("un second retrait de la même ligne ne recrédite pas le stock", async () => {
+    const chef = await sessionOf("workshop_manager");
+    const { part, used } = await partUsedOnWorkOrder();
+
+    await remove(used.id, chef.cookie);
+    await remove(used.id, chef.cookie);
+
+    expect(await stockOf(part.id)).toBe(7);
+    expect(await db.select().from(partsStockMovements).where(eq(partsStockMovements.partId, part.id))).toHaveLength(1);
+  });
+
+  it("un rôle hors atelier est refusé (403), stock et ligne intacts", async () => {
+    const secretary = await sessionOf("secretary");
+    const { part, used } = await partUsedOnWorkOrder();
+
+    const res = await remove(used.id, secretary.cookie);
+
+    expect(res.status).toBe(403);
+    expect(await stockOf(part.id)).toBe(5);
+    expect(await db.select().from(partsUsed).where(eq(partsUsed.id, used.id))).toHaveLength(1);
+  });
+
+  it("sans session : 401, stock intact", async () => {
+    const { part, used } = await partUsedOnWorkOrder();
+
+    const res = await fetch(`${baseUrl}/api/parts-used/${used.id}`, { method: "DELETE" });
+
+    expect(res.status).toBe(401);
+    expect(await stockOf(part.id)).toBe(5);
+  });
+});
