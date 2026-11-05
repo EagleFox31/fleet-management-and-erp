@@ -462,3 +462,7 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Quoi** : `GET /api/operations/missions/:id/costs` lit l'id par chiffres seuls puis `assertValidDbId` (400), la mission absente devient `AppError(404)` ; log du service migré vers `moduleLogger`. La cloison chauffeur (`refuseDriver`) était déjà en place et couverte.
 - **Pourquoi** : `parseInt("12abc")` visait la mission 12 ; une mission absente sortait en 500.
 - **Preuve** : contrat `operations-driver-scope` (cas id non strict et inconnu) rouge sur l'ancien code, vert après (10/10).
+## 2026-11-05 — Justificatif de renouvellement consultable
+- **Quoi** : `GET /api/document-renewals/requests/:id/proof` sert le justificatif déposé au renouvellement rapide. Rôles lecteurs des demandes (`DOCUMENT_RENEWAL_VIEWER_ROLES`), id par `parseRouteId`, cloison `canAccessOwned`, fichier servi depuis le seul dossier `uploads/document-renewals/proofs` (`uploadedFileCandidates` + `isInsideDirectory`), 404 lisible si la demande n'a pas de justificatif ou si le fichier a disparu.
+- **Pourquoi** : décision produit (option A) : le justificatif était écrit sur disque mais jamais consultable.
+- **Preuve** : contrat `document-renewal-proof-download` rouge sans la route (12/13), vert après (13/13) ; contrats renouvellement voisins 28/28 ; unitaires 2524, tsc 0.

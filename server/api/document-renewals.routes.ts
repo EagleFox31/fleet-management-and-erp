@@ -41,6 +41,8 @@ import {
   vehicles,
 } from "@shared/schema";
 import { withLogContext } from "../lib/error-log-context";
+import { parseRouteId } from "../lib/route-id";
+import { canAccessOwned, OUT_OF_SCOPE_MESSAGE } from "../lib/client-scope";
 
 const log = moduleLogger("document-renewals");
 const router = Router();
@@ -368,6 +370,47 @@ router.get("/requests", async (req, res, next) => {
     return res.status(200).json(rows);
   } catch (error) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur", { cause: error }), { event: "lecture des demandes de renouvellement" }));
+  }
+});
+
+/**
+ * Justificatif déposé au renouvellement rapide. Lecture réservée aux rôles qui lisent les demandes ;
+ * servi depuis le seul dossier des justificatifs (uploadedFileCandidates, AGENTS.md §9) ;
+ * 404 si la demande n'en a pas ou si le fichier a disparu.
+ */
+router.get("/requests/:id/proof", async (req, res, next) => {
+  try {
+    if (!hasRole(req.user?.role, VIEW_ROLES)) {
+      throw new AppError(403, "Accès non autorisé");
+    }
+    const requestId = parseRouteId(req.params.id, "Identifiant de demande invalide.");
+
+    const [row] = await db
+      .select({ proofFilePath: documentRenewalRequests.proofFilePath, ownerId: vehicles.ownerId })
+      .from(documentRenewalRequests)
+      .leftJoin(vehicles, eq(vehicles.id, documentRenewalRequests.vehicleId))
+      .where(eq(documentRenewalRequests.id, requestId))
+      .limit(1);
+    if (!row) {
+      throw new AppError(404, "Demande introuvable");
+    }
+    // Cloison client (AGENTS.md §11) : sans effet tant que le client n'est pas lecteur, garde si la liste s'ouvre.
+    if (!(await canAccessOwned(req.user, async () => row.ownerId))) {
+      throw new AppError(403, OUT_OF_SCOPE_MESSAGE);
+    }
+
+    const proofPath = uploadedFileCandidates(row.proofFilePath).find(
+      (candidate) => isInsideDirectory(renewalProofUploadDir, candidate) && fs.existsSync(candidate),
+    );
+    if (!proofPath) {
+      throw new AppError(404, "Justificatif introuvable");
+    }
+
+    return res.sendFile(proofPath, (err) => {
+      if (err && !res.headersSent) next(new AppError(404, "Justificatif introuvable", { cause: err }));
+    });
+  } catch (error) {
+    return next(error);
   }
 });
 
