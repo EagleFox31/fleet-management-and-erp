@@ -171,3 +171,20 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - contrat : `/check/{documents,tires,mileage,status-history}` en 200, `limit` -5, 0 et 999999 en 200 ;
   - `prefix-middleware-guardrail` : le renvoi `/check` est inscrit, de type sans base.
 - **Leçon** : une garde async reconnue par son nom doit être exigée attendue. Le test le vérifie désormais.
+
+## 2026-11-05T18:57:43+01:00 — Pleins d'un véhicule : même cloison que les sous-ressources (L1, suite de #490)
+
+- **Quoi** :
+  - `GET /api/fuel-records/vehicle/:vehicleId` sort de `server/routes.ts` vers `server/api/fuel-records.routes.ts` ;
+  - la garde `assertVehicleSubresourcesReadable` passe dans `server/lib/vehicle-subresource-guard.ts`, partagée par les deux routeurs ;
+  - un client propriétaire d'un véhicule retiré reçoit 403 (`canAccessOwned` seul le laissait lire) ;
+  - un client tiers reçoit 403, avec le même message.
+- **Contrat de réponse** : corps 200 inchangé (`pricePerLiter`, `totalCost`). Les 400 et 403 passent par `AppError`.
+- **Pourquoi** : les pleins sont une lecture rattachée au véhicule, comme les documents ou les pneus. Le retrait doit y valoir aussi.
+- **Preuve automatisée** :
+  - `tests/contract/fuel-records-vehicle-client-scope.contract.test.ts`, 8 cas :
+    - propriétaire actif et retiré, tiers, personnel sur le retiré, anonyme, id illisible ;
+    - témoins `/api/fuel-records`, `/statistics`, `/consumption-history` ;
+  - mutant « garde retirée » : 2 rouges au contrat, 1 rouge dans `routes-hygiene` ;
+  - contrats liés (`vehicle-subresources`, `vehicle-reads-client-scope`, `fuel-card-routes`) verts.
+- **Hors périmètre** : les autres lectures en `canAccessOwned` + `getVehicleOwnerId` ont été recensées pour l'orchestrateur. Elles ne sont pas élargies sans son accord.

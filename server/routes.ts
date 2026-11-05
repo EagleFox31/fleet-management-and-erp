@@ -2615,36 +2615,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   
   // Fuel Records Routes
-  app.get("/api/fuel-records/vehicle/:vehicleId", isAnyUser, async (req, res) => {
-    try {
-      const vehicleId = routeIdOrNaN(req.params.vehicleId);
-      
-      if (isNaN(vehicleId)) {
-        return res.status(400).json({ message: "ID de véhicule invalide" });
-      }
-
-      if (!(await canAccessOwned(req.user, () => vehicleDocumentationService.getVehicleOwnerId(vehicleId)))) {
-        return res.status(403).json({ message: OUT_OF_SCOPE_MESSAGE });
-      }
-
-      
-      // Récupérer les enregistrements de carburant depuis le service
-      const fuelRecords = await fuelService.getFuelRecordsByVehicleId(vehicleId);
-      
-      // Enrichir les données avec le prix par litre calculé
-      const enrichedFuelRecords = fuelRecords.map((record: any) => ({
-        ...record,
-        pricePerLiter: record.quantity > 0 ? Number(record.cost) / record.quantity : 0,
-        totalCost: Number(record.cost)
-      }));
-      
-      return res.status(200).json(enrichedFuelRecords);
-    } catch (error) {
-      log.error({ err: error, requestId: req.requestId }, "lecture des pleins du véhicule en échec");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
-
   // Nombre saisi dans un formulaire : "12" accepté, "12abc" refusé (parseFloat
   // le tronquait en 12, et "abc" donnait NaN, stocké tel quel en colonne real).
   const formNumber = (schema: z.ZodNumber) =>
