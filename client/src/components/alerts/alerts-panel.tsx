@@ -172,32 +172,32 @@ const getAlertTypeLabel = (type: string): string => {
 const getAlertIcon = (type: string) => {
   switch (type) {
     case "document_expired":
-      return <FileWarning className="h-4 w-4 text-destructive" />;
+      return <FileWarning className="h-4 w-4 text-destructive-text" />;
     case "document_expiring":
       return <FileWarning className="h-4 w-4 text-amber-500" />;
     case "maintenance_overdue":
-      return <Clock className="h-4 w-4 text-destructive" />;
+      return <Clock className="h-4 w-4 text-destructive-text" />;
     case "maintenance_due":
       return <Calendar className="h-4 w-4 text-amber-500" />;
     case "maintenance_mileage_exceeded":
-      return <Gauge className="h-4 w-4 text-destructive" />;
+      return <Gauge className="h-4 w-4 text-destructive-text" />;
     case "maintenance_mileage_approaching":
       return <Gauge className="h-4 w-4 text-amber-500" />;
     case "stock_critical":
-      return <Package className="h-4 w-4 text-destructive" />;
+      return <Package className="h-4 w-4 text-destructive-text" />;
     case "stock_warning":
       return <Package className="h-4 w-4 text-amber-500" />;
     case "stock_info":
       return <Package className="h-4 w-4 text-blue-500" />;
     case "work_order_overdue":
     case "work_order_critical":
-      return <Clock className="h-4 w-4 text-destructive" />;
+      return <Clock className="h-4 w-4 text-destructive-text" />;
     case "fuel_alert":
       return <Gauge className="h-4 w-4 text-orange-500" />;
     case "tire_alert":
-      return <AlertTriangle className="h-4 w-4 text-destructive" />;
+      return <AlertTriangle className="h-4 w-4 text-destructive-text" />;
     case "mission_departure_overdue":
-      return <Truck className="h-4 w-4 text-destructive" />;
+      return <Truck className="h-4 w-4 text-destructive-text" />;
     case "mission_delivery_overdue":
       return <Truck className="h-4 w-4 text-orange-500" />;
     default:

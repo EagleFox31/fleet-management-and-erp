@@ -113,7 +113,7 @@ export default function AuditLogsPage() {
         </div>
       </div>
       {rangeInvalid ? (
-        <p className="text-sm text-destructive">La date de début doit précéder la date de fin.</p>
+        <p className="text-sm text-destructive-text">La date de début doit précéder la date de fin.</p>
       ) : query.isLoading || query.error ? (
         <LoadingError isLoading={query.isLoading} error={query.error} onRetry={() => query.refetch()} />
       ) : (
