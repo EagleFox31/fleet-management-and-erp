@@ -13,7 +13,7 @@ import * as XLSX from "xlsx";
 import fs from "fs";
 import path from "path";
 import { moduleLogger } from "../lib/logger";
-import { uploadedFileCandidates } from "../lib/uploaded-file";
+import { settlementProofPath } from "../lib/settlement-proof";
 import { canonicalWorkbookArchive } from "../lib/xlsx-import-guard";
 import { compactImportSheet, importTooLongError, isBlankCell } from "../lib/supplier-invoice-import-sheet";
 import {
@@ -596,9 +596,9 @@ router.get("/:id/settlements/:settlementId/proof", checkReadPermission, async (r
 
     const settlements = await threeWayMatchingService.getInvoiceSettlements(invoiceId);
     const settlement = settlements.find((item) => item.id === settlementId);
-    // Chemin stocké (libre via l'endpoint legacy /payment) : servi seulement s'il est sous uploads/.
-    const proofPath = uploadedFileCandidates(settlement?.proofReference).find((candidate) => fs.existsSync(candidate));
-    if (!proofPath) {
+    // Servi seulement depuis le dossier des justificatifs, y compris pour une ligne ancienne.
+    const proofPath = settlementProofPath(settlement?.proofReference);
+    if (!proofPath || !fs.existsSync(proofPath)) {
       throw new AppError(404, "Justificatif introuvable");
     }
 
