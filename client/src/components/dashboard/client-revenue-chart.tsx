@@ -12,6 +12,8 @@ import {
 } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatPrice } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
+import { canReadClientBilling } from "@shared/constants/roles";
 import { Building2, TrendingUp } from "lucide-react";
 
 // Palette raffinée Emerald & Cyan pour Yaro FleetOS
@@ -49,13 +51,15 @@ function CustomGlassmorphicTooltip({ active, payload }: any) {
 }
 
 export function ClientRevenueChart() {
-  const { data, isLoading } = useQuery<any>({
+  const { user } = useAuth();
+  // Route serveur réservée à admin, secrétaire et logistique : pas de requête pour les autres rôles.
+  const allowed = canReadClientBilling(user?.role);
+  const { data, isLoading, isError } = useQuery<any>({
     queryKey: ["/api/billing/statistics"],
-    queryFn: async () => {
-      const res = await fetch("/api/billing/statistics");
-      return res.json();
-    },
+    enabled: allowed,
   });
+
+  if (!allowed) return null;
 
   const raw = Array.isArray(data) ? data : (data?.byClient || data?.clients || []);
 
@@ -104,6 +108,14 @@ export function ClientRevenueChart() {
       <CardContent className="pt-4">
         {isLoading ? (
           <Skeleton className="h-[260px] w-full rounded-xl" />
+        ) : isError ? (
+          <div
+            className="h-[260px] flex flex-col items-center justify-center gap-2 text-muted-foreground text-sm"
+            data-testid="client-revenue-unavailable"
+          >
+            <Building2 className="h-8 w-8 text-muted-foreground/40" />
+            <p>Chiffre d'affaires momentanément indisponible.</p>
+          </div>
         ) : chartData.length > 0 ? (
           <div className="h-[260px] w-full">
             <ResponsiveContainer width="100%" height="100%">

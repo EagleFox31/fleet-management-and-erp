@@ -103,13 +103,6 @@ export const operationsService = {
     return await response.json();
   },
 
-  async getStatsSummary(): Promise<MissionStatistics> {
-    const response = await apiRequest("GET", "/api/operations/stats/summary");
-    if (!response.ok) {
-      throw new Error("Failed to fetch stats summary");
-    }
-    return await response.json();
-  },
 
   async getMissionsByClient(
     clientName: string,

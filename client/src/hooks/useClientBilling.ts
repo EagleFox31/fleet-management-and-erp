@@ -7,12 +7,16 @@ import {
 } from "@/services/clientBillingService";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
+import { canReadClientBilling } from "@shared/constants/roles";
 
 export function useClientBilling() {
   const { toast } = useToast();
 
+  const { user } = useAuth();
   const statistics = useQuery<any>({
     queryKey: ["/api/billing/statistics"],
+    enabled: canReadClientBilling(user?.role),
     queryFn: () => clientBillingService.getStatistics(),
   });
 

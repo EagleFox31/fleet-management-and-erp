@@ -1233,6 +1233,55 @@ async function applyCdcSchema() {
   await reportCdcConstraintGaps(pool);
 }
 
+/** Journal de trésorerie (lot T1) : tables et index, idempotents. Jumelle de shared/schema.ts (treasuryAccounts, treasuryEntries). */
+export const TREASURY_SCHEMA_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS treasury_accounts (
+    id serial PRIMARY KEY,
+    code text NOT NULL UNIQUE,
+    label text NOT NULL,
+    kind text NOT NULL,
+    bank_name text,
+    opening_balance numeric(15,2) NOT NULL DEFAULT 0,
+    opening_date date,
+    is_active boolean NOT NULL DEFAULT true,
+    created_by integer REFERENCES users(id),
+    updated_by integer REFERENCES users(id),
+    created_at timestamp NOT NULL DEFAULT now(),
+    updated_at timestamp NOT NULL DEFAULT now(),
+    CONSTRAINT treasury_accounts_kind_check CHECK (kind IN ('bank', 'cash', 'fuel_card'))
+  )`,
+  `CREATE TABLE IF NOT EXISTS treasury_entries (
+    id serial PRIMARY KEY,
+    account_id integer NOT NULL REFERENCES treasury_accounts(id),
+    entry_date date NOT NULL,
+    piece_ref text,
+    label text NOT NULL,
+    direction text NOT NULL,
+    amount numeric(15,2) NOT NULL,
+    category text NOT NULL DEFAULT 'autre',
+    counterparty_label text,
+    transfer_group text,
+    notes text,
+    vehicle_id integer REFERENCES vehicles(id),
+    mission_id integer REFERENCES missions(id),
+    client_id integer REFERENCES clients(id),
+    supplier_id integer REFERENCES suppliers(id),
+    request_key text UNIQUE,
+    created_by integer REFERENCES users(id),
+    updated_by integer REFERENCES users(id),
+    created_at timestamp NOT NULL DEFAULT now(),
+    updated_at timestamp NOT NULL DEFAULT now(),
+    CONSTRAINT treasury_entries_amount_check CHECK (amount > 0),
+    CONSTRAINT treasury_entries_direction_check CHECK (direction IN ('in', 'out'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_treasury_entries_account_date ON treasury_entries (account_id, entry_date, id)`,
+  `CREATE INDEX IF NOT EXISTS idx_treasury_entries_transfer_group ON treasury_entries (transfer_group)`,
+];
+
+async function applyTreasurySchema() {
+  for (const statement of TREASURY_SCHEMA_STATEMENTS) await pool.query(statement);
+}
+
 export async function initializeDatabase() {
   console.log('🌱 Vérification de la base de données...');
 
@@ -1508,8 +1557,30 @@ export async function initializeDatabase() {
     await db.execute(sql`ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS rejected_by integer REFERENCES users(id)`);
     await db.execute(sql`ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS rejected_at timestamp`);
     await db.execute(sql`ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS rejection_reason text`);
+    // Suivi des opérations clients (O1) : 1-1 avec missions.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS mission_operations (
+        id serial PRIMARY KEY,
+        mission_id integer NOT NULL UNIQUE REFERENCES missions(id) ON DELETE CASCADE,
+        trailer_vehicle_id integer REFERENCES vehicles(id),
+        container_number text,
+        bl_number text,
+        sector text,
+        loading_date timestamp,
+        departure_date timestamp,
+        return_date timestamp,
+        unloading_date timestamp,
+        goods_nature text,
+        comment text,
+        created_by integer REFERENCES users(id),
+        updated_by integer REFERENCES users(id),
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now()
+      )
+    `);
     await applyLotRecetteSchema();
     await applyCdcSchema();
+    await applyTreasurySchema();
     // Triggers de statut véhicule (libération, ré-immobilisation) — jumelles de
     // server/db/migrations/20261102_work_orders_release_vehicle.sql et 20261102_work_orders_hold_vehicle.sql.
     await applyWorkOrderVehicleStatusTriggers();
