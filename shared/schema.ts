@@ -6,6 +6,7 @@ import { PART_UNITS } from "./constants/parts";
 import { MAX_DB_INTEGER_ID } from "./contracts/common";
 import { WORK_ORDER_ITEM_STATUSES } from "./constants/work-order-items";
 import { TREASURY_ACCOUNT_KINDS, TREASURY_CATEGORIES, TREASURY_DIRECTIONS } from "./contracts/treasury";
+import { PAYMENT_INSTRUMENT_DIRECTIONS, PAYMENT_INSTRUMENT_KINDS, PAYMENT_INSTRUMENT_STATUSES } from "./contracts/payment-instruments";
 
 // Users and authentication
 export const users = pgTable("users", {
@@ -2165,6 +2166,59 @@ export const insertTreasuryEntrySchema = createInsertSchema(treasuryEntries).omi
 });
 export type TreasuryAccountRow = typeof treasuryAccounts.$inferSelect;
 export type TreasuryEntryRow = typeof treasuryEntries.$inferSelect;
+
+// Traites et chèques (lot T4). Jumelle SQL : TREASURY_SCHEMA_STATEMENTS (server/init-database.ts).
+// « Payée » exige la date et l'écriture du journal, et inversement (payment_instruments_paid_check).
+export const paymentInstruments = pgTable("payment_instruments", {
+  id: serial("id").primaryKey(),
+  kind: text("kind", { enum: PAYMENT_INSTRUMENT_KINDS }).notNull(),
+  direction: text("direction", { enum: PAYMENT_INSTRUMENT_DIRECTIONS }).notNull().default("outgoing"),
+  number: text("number").notNull(),
+  drawer: text("drawer").notNull(),
+  drawee: text("drawee").notNull(),
+  payingBank: text("paying_bank"),
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
+  issueDate: date("issue_date").notNull(),
+  dueDate: date("due_date").notNull(),
+  status: text("status", { enum: PAYMENT_INSTRUMENT_STATUSES }).notNull().default("pending"),
+  paidAt: date("paid_at"),
+  treasuryEntryId: integer("treasury_entry_id")
+    .references(() => treasuryEntries.id)
+    .unique("payment_instruments_treasury_entry_id_key"),
+  supplierId: integer("supplier_id").references(() => suppliers.id),
+  clientId: integer("client_id").references(() => clients.id),
+  vehicleId: integer("vehicle_id").references(() => vehicles.id),
+  observations: text("observations"),
+  requestKey: text("request_key").unique("payment_instruments_request_key_key"),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_payment_instruments_status_due").on(table.status, table.dueDate),
+  check("payment_instruments_kind_check", sql`${table.kind} IN ('traite', 'cheque')`),
+  check("payment_instruments_direction_check", sql`${table.direction} IN ('outgoing', 'incoming')`),
+  check("payment_instruments_status_check", sql`${table.status} IN ('pending', 'paid', 'bounced', 'cancelled')`),
+  check("payment_instruments_amount_check", sql`${table.amount} > 0`),
+  check("payment_instruments_dates_check", sql`${table.dueDate} >= ${table.issueDate}`),
+  check(
+    "payment_instruments_paid_check",
+    sql`(${table.status} = 'paid') = (${table.paidAt} IS NOT NULL AND ${table.treasuryEntryId} IS NOT NULL)`,
+  ),
+]);
+
+export const insertPaymentInstrumentSchema = createInsertSchema(paymentInstruments).omit({
+  id: true,
+  status: true,
+  paidAt: true,
+  treasuryEntryId: true,
+  requestKey: true,
+  createdBy: true,
+  updatedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type PaymentInstrumentRow = typeof paymentInstruments.$inferSelect;
 
 // Contrôles inopinés QHSE (lot Q1, drapeau `qhse`). Jumelle SQL : QHSE_INSPECTIONS_SQL dans
 // server/init-database.ts et server/db/migrations/20261105_qhse_inspections.sql (AGENTS.md §5).

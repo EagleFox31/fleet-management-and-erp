@@ -25,6 +25,7 @@ import {
   tireRotationDetails,
   tireRotations,
   supplierInvoiceSettlements,
+  paymentInstruments,
   treasuryAccounts,
   treasuryEntries,
   vehicleAcquisitionWorkflows,
@@ -77,15 +78,19 @@ export async function cleanupCreated(ids: CreatedIds): Promise<void> {
     // Contrôles QHSE sur un véhicule de test : qhse_inspections_vehicle_id_fkey bloquerait la suppression.
     await db.delete(qhseInspections).where(inArray(qhseInspections.vehicleId, ids.vehicleIds));
     // Écriture de trésorerie liée au véhicule (recharge carte, lot T2) : bloquerait la suppression (FK).
+    await db.delete(paymentInstruments).where(inArray(paymentInstruments.vehicleId, ids.vehicleIds));
+    await deleteInstrumentsOfEntries(db.select({ id: treasuryEntries.id }).from(treasuryEntries).where(inArray(treasuryEntries.vehicleId, ids.vehicleIds)));
     await db.delete(treasuryEntries).where(inArray(treasuryEntries.vehicleId, ids.vehicleIds));
     await db.delete(vehicles).where(inArray(vehicles.id, ids.vehicleIds));
   }
   if (ids.supplierIds.length > 0) {
     // Factures créées sans id connu du test (import Excel) : bloquaient la suppression (FK).
     await deleteSupplierInvoicesOf(db.select({ id: suppliers.id }).from(suppliers).where(inArray(suppliers.id, ids.supplierIds)));
+    await db.delete(paymentInstruments).where(inArray(paymentInstruments.supplierId, ids.supplierIds));
     await db.delete(suppliers).where(inArray(suppliers.id, ids.supplierIds));
   }
   if (ids.clientIds.length > 0) {
+    await db.delete(paymentInstruments).where(inArray(paymentInstruments.clientId, ids.clientIds));
     await db.delete(clients).where(inArray(clients.id, ids.clientIds));
   }
   if (ids.userIds.length > 0) {
@@ -127,9 +132,18 @@ async function deleteTreasuryOfUsers(userIds: number[]): Promise<void> {
     .from(treasuryAccounts)
     .where(or(inArray(treasuryAccounts.createdBy, userIds), inArray(treasuryAccounts.updatedBy, userIds)));
   await db.update(supplierInvoiceSettlements).set({ treasuryAccountId: null }).where(inArray(supplierInvoiceSettlements.treasuryAccountId, accounts));
+  // Traites et chèques (T4) : créés par ces comptes, ou payés par une écriture qui va disparaître.
+  await db.delete(paymentInstruments).where(or(inArray(paymentInstruments.createdBy, userIds), inArray(paymentInstruments.updatedBy, userIds)));
+  await deleteInstrumentsOfEntries(db.select({ id: treasuryEntries.id }).from(treasuryEntries).where(inArray(treasuryEntries.accountId, accounts)));
+  await deleteInstrumentsOfEntries(db.select({ id: treasuryEntries.id }).from(treasuryEntries).where(or(inArray(treasuryEntries.createdBy, userIds), inArray(treasuryEntries.updatedBy, userIds))));
   await db.delete(treasuryEntries).where(inArray(treasuryEntries.accountId, accounts));
   await db.delete(treasuryEntries).where(or(inArray(treasuryEntries.createdBy, userIds), inArray(treasuryEntries.updatedBy, userIds)));
   await db.delete(treasuryAccounts).where(or(inArray(treasuryAccounts.createdBy, userIds), inArray(treasuryAccounts.updatedBy, userIds)));
+}
+
+/** Traite ou chèque payé par ces écritures : payment_instruments_treasury_entry_id_fkey bloquerait leur suppression. */
+async function deleteInstrumentsOfEntries(entryIds: SQLWrapper): Promise<void> {
+  await db.delete(paymentInstruments).where(inArray(paymentInstruments.treasuryEntryId, entryIds as any));
 }
 
 /** Une écriture de plein garde sa mission (FK sans cascade) : à supprimer avant la mission. */
@@ -267,6 +281,9 @@ async function deleteOrphanTestRows(): Promise<void> {
     .from(treasuryAccounts)
     .where(or(inArray(treasuryAccounts.createdBy, testUsers), inArray(treasuryAccounts.updatedBy, testUsers)));
   await db.update(supplierInvoiceSettlements).set({ treasuryAccountId: null }).where(inArray(supplierInvoiceSettlements.treasuryAccountId, testTreasuryAccounts));
+  await db.delete(paymentInstruments).where(or(inArray(paymentInstruments.createdBy, testUsers), inArray(paymentInstruments.updatedBy, testUsers)));
+  await deleteInstrumentsOfEntries(db.select({ id: treasuryEntries.id }).from(treasuryEntries).where(inArray(treasuryEntries.accountId, testTreasuryAccounts)));
+  await deleteInstrumentsOfEntries(db.select({ id: treasuryEntries.id }).from(treasuryEntries).where(or(inArray(treasuryEntries.createdBy, testUsers), inArray(treasuryEntries.updatedBy, testUsers))));
   await db.delete(treasuryEntries).where(inArray(treasuryEntries.accountId, testTreasuryAccounts));
   await db.delete(treasuryEntries).where(or(inArray(treasuryEntries.createdBy, testUsers), inArray(treasuryEntries.updatedBy, testUsers)));
   await db.delete(treasuryAccounts).where(or(inArray(treasuryAccounts.createdBy, testUsers), inArray(treasuryAccounts.updatedBy, testUsers)));
