@@ -134,9 +134,13 @@ describe("GET /api/billing/pending-invoices : contenu", () => {
   it("compte par client les missions terminées ou livrées sans facture active", async () => {
     const rows = await pending();
     const a = rows.find((r) => r.clientId === clientA);
-    expect(a).toMatchObject({ operationCount: 3, oldestOperationDate: "2003-01-20", amount: 0 });
+    expect(a).toMatchObject({ operationCount: 3, oldestOperationDate: "2003-01-20" });
     expect(rows.find((r) => r.clientId === clientB)).toMatchObject({ operationCount: 1, oldestOperationDate: "2002-12-31" });
   });
+
+  // Défaut produit signalé : le service renvoie toujours amount = 0 alors que les missions portent
+  // `agreed_price` (#487, #498). À écrire avec le correctif, sans figer le zéro actuel.
+  it.todo("amount = somme des prix convenus (agreed_price) des opérations à facturer du client");
 
   it("un client dont toutes les opérations sont facturées n'apparaît pas", async () => {
     const rows = await pending();
