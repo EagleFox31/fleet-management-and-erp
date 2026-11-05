@@ -3,6 +3,8 @@ import { MAX_DB_INTEGER_ID as MAX_ID_FOR_TEST } from "../../../shared/contracts/
 import {
   computeMissionBudget,
   createMissionBudgetRequestSchema,
+  isBudgetDateInWindow,
+  missionBudgetTransitionRequestSchema,
   updateMissionBudgetRequestSchema,
 } from "../../../shared/contracts/mission-budgets";
 
@@ -51,5 +53,22 @@ describe("L1 : contrat de saisie", () => {
     expect(updateMissionBudgetRequestSchema.safeParse({ missionId: 2 }).success).toBe(false);
     expect(updateMissionBudgetRequestSchema.safeParse({}).success).toBe(false);
     expect(updateMissionBudgetRequestSchema.safeParse({ fdrAmount: 1 }).success).toBe(true);
+  });
+});
+
+describe("L1 : garde-fous de sécurité", () => {
+  it("date du budget : fenêtre de 60 jours de part et d'autre, bornes incluses, passage d'année", () => {
+    expect(isBudgetDateInWindow("2026-11-05", "2026-11-05")).toBe(true);
+    expect(isBudgetDateInWindow("2027-01-04", "2026-11-05")).toBe(true);
+    expect(isBudgetDateInWindow("2027-01-05", "2026-11-05")).toBe(false);
+    expect(isBudgetDateInWindow("2026-09-06", "2026-11-05")).toBe(true);
+    expect(isBudgetDateInWindow("2026-09-05", "2026-11-05")).toBe(false);
+  });
+
+  it("approbation et décaissement exigent la version lue, rien d'autre", () => {
+    expect(missionBudgetTransitionRequestSchema.safeParse({}).success).toBe(false);
+    expect(missionBudgetTransitionRequestSchema.safeParse({ expectedUpdatedAt: "hier" }).success).toBe(false);
+    expect(missionBudgetTransitionRequestSchema.safeParse({ expectedUpdatedAt: "2026-11-05T10:00:00.000Z", status: "disbursed" }).success).toBe(false);
+    expect(missionBudgetTransitionRequestSchema.safeParse({ expectedUpdatedAt: "2026-11-05T10:00:00.000Z" }).success).toBe(true);
   });
 });

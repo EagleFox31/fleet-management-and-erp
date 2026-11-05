@@ -935,7 +935,53 @@ CREATE TABLE IF NOT EXISTS mission_budgets (
     CHECK (fuel_liters >= 0 AND fuel_unit_price >= 0 AND fdr_amount >= 0 AND extras_amount >= 0)
 );
 
-CREATE INDEX IF NOT EXISTS idx_mission_budgets_budget_date ON mission_budgets (budget_date);`;
+CREATE INDEX IF NOT EXISTS idx_mission_budgets_budget_date ON mission_budgets (budget_date);
+
+DO $$
+DECLARE
+  c record;
+  existing text;
+BEGIN
+  -- Table déjà créée sans ces contraintes (drizzle-kit push antérieur, push --force) : la création
+  -- conditionnelle est sautée. CHECK posé NOT VALID puis validé : une ligne non conforme laisse un WARNING, relu par
+  -- reportCdcConstraintGaps (CDC_RECONCILED_CONSTRAINTS), pas un démarrage bloqué. Noms identiques à shared/schema.ts.
+  FOR c IN SELECT * FROM (VALUES
+    ('mission_budgets_status_check', 'CHECK (status IN (''requested'', ''approved'', ''disbursed''))'),
+    ('mission_budgets_amounts_check', 'CHECK (fuel_liters >= 0 AND fuel_unit_price >= 0 AND fdr_amount >= 0 AND extras_amount >= 0)')
+  ) AS v(name, def) LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budgets'::regclass AND conname = c.name) THEN
+      EXECUTE format('ALTER TABLE mission_budgets ADD CONSTRAINT %I %s NOT VALID', c.name, c.def);
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budgets'::regclass AND conname = c.name AND NOT convalidated) THEN
+      BEGIN
+        EXECUTE format('ALTER TABLE mission_budgets VALIDATE CONSTRAINT %I', c.name);
+      EXCEPTION WHEN check_violation THEN
+        RAISE WARNING 'mission_budgets : lignes hors contrainte %, laissée NOT VALID', c.name;
+      END;
+    END IF;
+  END LOOP;
+  -- Un budget par mission, sous le nom attendu par le service (409) : une unicité posée sous un autre nom
+  -- sur mission_id est renommée ; des doublons laissent un WARNING.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budgets'::regclass
+                 AND conname = 'mission_budgets_mission_id_unique') THEN
+    SELECT k.conname INTO existing FROM pg_constraint k
+    JOIN pg_attribute a ON a.attrelid = k.conrelid AND a.attnum = k.conkey[1]
+    WHERE k.conrelid = 'mission_budgets'::regclass AND k.contype = 'u'
+      AND cardinality(k.conkey) = 1 AND a.attname = 'mission_id'
+    LIMIT 1;
+    IF existing IS NOT NULL THEN
+      EXECUTE format('ALTER TABLE mission_budgets RENAME CONSTRAINT %I TO mission_budgets_mission_id_unique', existing);
+    ELSE
+      BEGIN
+        ALTER TABLE mission_budgets ADD CONSTRAINT mission_budgets_mission_id_unique UNIQUE (mission_id);
+      EXCEPTION WHEN unique_violation THEN
+        RAISE WARNING 'mission_budgets : missions en double, contrainte mission_budgets_mission_id_unique non posée';
+      END;
+    END IF;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'contraintes mission_budgets non réconciliées : verrou de table indisponible';
+END $$;`;
 
 // Barème FDR par destination (L1b) — jumelle de server/db/migrations/20261105_mission_destinations.sql.
 // Après MISSION_BUDGETS_SQL : ajoute destination_id à mission_budgets.
@@ -1164,6 +1210,10 @@ export const CDC_RECONCILED_CONSTRAINTS: readonly string[] = [
   'idempotency_keys_state_check',
   'workshop_labor_rates_effective_from_key',
   'idempotency_keys_user_id_key_key',
+  // Posées par MISSION_BUDGETS_SQL (lot L1), relues ici au même titre.
+  'mission_budgets_status_check',
+  'mission_budgets_amounts_check',
+  'mission_budgets_mission_id_unique',
 ];
 
 type Queryable = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };
@@ -1189,7 +1239,55 @@ export async function reportCdcConstraintGaps(client: Queryable, log: WarnLogger
 
 async function applyCdcSchema() {
   await pool.query(CDC_SCHEMA_STATEMENTS.map((statement) => `${statement};`).join(String.fromCharCode(10)));
-  await reportCdcConstraintGaps(pool);
+}
+
+/** Journal de trésorerie (lot T1) : tables et index, idempotents. Jumelle de shared/schema.ts (treasuryAccounts, treasuryEntries). */
+export const TREASURY_SCHEMA_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS treasury_accounts (
+    id serial PRIMARY KEY,
+    code text NOT NULL UNIQUE,
+    label text NOT NULL,
+    kind text NOT NULL,
+    bank_name text,
+    opening_balance numeric(15,2) NOT NULL DEFAULT 0,
+    opening_date date,
+    is_active boolean NOT NULL DEFAULT true,
+    created_by integer REFERENCES users(id),
+    updated_by integer REFERENCES users(id),
+    created_at timestamp NOT NULL DEFAULT now(),
+    updated_at timestamp NOT NULL DEFAULT now(),
+    CONSTRAINT treasury_accounts_kind_check CHECK (kind IN ('bank', 'cash', 'fuel_card'))
+  )`,
+  `CREATE TABLE IF NOT EXISTS treasury_entries (
+    id serial PRIMARY KEY,
+    account_id integer NOT NULL REFERENCES treasury_accounts(id),
+    entry_date date NOT NULL,
+    piece_ref text,
+    label text NOT NULL,
+    direction text NOT NULL,
+    amount numeric(15,2) NOT NULL,
+    category text NOT NULL DEFAULT 'autre',
+    counterparty_label text,
+    transfer_group text,
+    notes text,
+    vehicle_id integer REFERENCES vehicles(id),
+    mission_id integer REFERENCES missions(id),
+    client_id integer REFERENCES clients(id),
+    supplier_id integer REFERENCES suppliers(id),
+    request_key text UNIQUE,
+    created_by integer REFERENCES users(id),
+    updated_by integer REFERENCES users(id),
+    created_at timestamp NOT NULL DEFAULT now(),
+    updated_at timestamp NOT NULL DEFAULT now(),
+    CONSTRAINT treasury_entries_amount_check CHECK (amount > 0),
+    CONSTRAINT treasury_entries_direction_check CHECK (direction IN ('in', 'out'))
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_treasury_entries_account_date ON treasury_entries (account_id, entry_date, id)`,
+  `CREATE INDEX IF NOT EXISTS idx_treasury_entries_transfer_group ON treasury_entries (transfer_group)`,
+];
+
+async function applyTreasurySchema() {
+  for (const statement of TREASURY_SCHEMA_STATEMENTS) await pool.query(statement);
 }
 
 export async function initializeDatabase() {
@@ -1465,8 +1563,30 @@ export async function initializeDatabase() {
     await db.execute(sql`ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS rejected_by integer REFERENCES users(id)`);
     await db.execute(sql`ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS rejected_at timestamp`);
     await db.execute(sql`ALTER TABLE supplier_invoice_settlements ADD COLUMN IF NOT EXISTS rejection_reason text`);
+    // Suivi des opérations clients (O1) : 1-1 avec missions.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS mission_operations (
+        id serial PRIMARY KEY,
+        mission_id integer NOT NULL UNIQUE REFERENCES missions(id) ON DELETE CASCADE,
+        trailer_vehicle_id integer REFERENCES vehicles(id),
+        container_number text,
+        bl_number text,
+        sector text,
+        loading_date timestamp,
+        departure_date timestamp,
+        return_date timestamp,
+        unloading_date timestamp,
+        goods_nature text,
+        comment text,
+        created_by integer REFERENCES users(id),
+        updated_by integer REFERENCES users(id),
+        created_at timestamp NOT NULL DEFAULT now(),
+        updated_at timestamp NOT NULL DEFAULT now()
+      )
+    `);
     await applyLotRecetteSchema();
     await applyCdcSchema();
+    await applyTreasurySchema();
     // Triggers de statut véhicule (libération, ré-immobilisation) — jumelles de
     // server/db/migrations/20261102_work_orders_release_vehicle.sql et 20261102_work_orders_hold_vehicle.sql.
     await applyWorkOrderVehicleStatusTriggers();
@@ -1489,6 +1609,9 @@ export async function initializeDatabase() {
     await pool.query(MISSION_BUDGETS_SQL);
     // Barème FDR par destination (L1b) — jumelle de server/db/migrations/20261105_mission_destinations.sql.
     await pool.query(MISSION_DESTINATIONS_SQL);
+    // Relu après le dernier SQL qui pose une contrainte réconciliée : au premier démarrage, une table
+    // pas encore créée serait signalée à tort.
+    await reportCdcConstraintGaps(pool);
 
     // Vérifier si des utilisateurs existent déjà
     const existingUsers = await db.select().from(users).limit(1);

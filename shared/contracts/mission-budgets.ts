@@ -32,10 +32,32 @@ export const MISSION_BUDGET_STATUS_LABELS: Record<MissionBudgetStatus, string> =
   disbursed: "Décaissé",
 };
 
+/** Mission close : plus de budget à saisir pour elle (409). */
+export const MISSION_STATUSES_WITHOUT_BUDGET = ["completed", "cancelled"] as const;
+
 /** Plafond d'un montant saisi : numeric(15,2) en base. */
 export const MISSION_BUDGET_MAX_AMOUNT = 1_000_000_000;
 /** Plafond des litres d'un budget : numeric(12,2) en base, très au-delà d'un plein de convoi. */
 export const MISSION_BUDGET_MAX_LITERS = 100_000;
+
+/**
+ * Fenêtre de `budgetDate` autour du jour courant (UTC) : au-delà, le prix figé n'a pas de sens
+ * (budget saisi pour un passé lointain ou un futur sans prix posé).
+ */
+export const MISSION_BUDGET_DATE_WINDOW_DAYS = 60;
+
+/** `budgetDate` dans [today - fenêtre ; today + fenêtre], dates AAAA-MM-JJ comparées en UTC. */
+export function isBudgetDateInWindow(budgetDate: string, today: string): boolean {
+  const day = (iso: string) => Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)) - 1, Number(iso.slice(8, 10))) / 86_400_000;
+  return Math.abs(day(budgetDate) - day(today)) <= MISSION_BUDGET_DATE_WINDOW_DAYS;
+}
+
+/**
+ * Approbation et décaissement portent la version lue : `expectedUpdatedAt` est le `updatedAt`
+ * affiché. Si le budget a changé depuis (correction, autre transition), la transition répond 409.
+ */
+export const missionBudgetTransitionRequestSchema = z.object({ expectedUpdatedAt: isoDateTimeSchema }).strict();
+export type MissionBudgetTransitionRequest = z.infer<typeof missionBudgetTransitionRequestSchema>;
 
 const amountSchema = z.number().finite().min(0).max(MISSION_BUDGET_MAX_AMOUNT);
 

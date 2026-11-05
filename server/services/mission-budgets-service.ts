@@ -1,7 +1,10 @@
 import { and, asc, eq, sql, type SQL } from "drizzle-orm";
 import {
   computeMissionBudget,
+  isBudgetDateInWindow,
+  MISSION_BUDGET_DATE_WINDOW_DAYS,
   MISSION_BUDGET_STATUSES,
+  MISSION_STATUSES_WITHOUT_BUDGET,
   type CreateMissionBudgetRequest,
   type DailyNeed,
   type MissionBudget,
@@ -14,7 +17,7 @@ import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { isUniqueViolation } from "../lib/pg-errors";
-import { getFuelPriceAt } from "./fuel-price-service";
+import { findFuelPriceAt, todayIsoDate } from "./fuel-price-service";
 
 const log = moduleLogger("mission-budgets");
 
@@ -46,9 +49,26 @@ function toMissionBudget(row: MissionBudgetRow): MissionBudget {
   };
 }
 
+/**
+ * Prix du litre à `date` pour un budget : jamais de prix par défaut figé en silence.
+ * Aucun prix posé à cette date ou avant : 409. Une erreur de lecture remonte (500 + référence).
+ */
+export async function resolveBudgetFuelPrice(date: string): Promise<number> {
+  const price = await findFuelPriceAt(date);
+  if (price === null) throw new AppError(409, "Aucun prix carburant pour cette date : faites poser le prix avant de saisir le budget.");
+  return price;
+}
+
+function assertBudgetDate(budgetDate: string) {
+  if (!isBudgetDateInWindow(budgetDate, todayIsoDate())) {
+    throw new AppError(400, `La date du budget doit être à moins de ${MISSION_BUDGET_DATE_WINDOW_DAYS} jours d'aujourd'hui.`);
+  }
+}
+
 /** Colonnes de montant, prix du jour de `budgetDate` figé au moment de l'écriture. */
 async function amountColumns(input: { budgetDate: string; fuelLiters: number; fdrAmount: number; extrasAmount: number }) {
-  const fuelUnitPrice = await getFuelPriceAt(input.budgetDate);
+  assertBudgetDate(input.budgetDate);
+  const fuelUnitPrice = await resolveBudgetFuelPrice(input.budgetDate);
   const { fuelAmount, totalAmount } = computeMissionBudget({ ...input, fuelUnitPrice });
   return {
     budgetDate: input.budgetDate,
@@ -105,8 +125,11 @@ export async function getMissionBudget(id: number): Promise<MissionBudget> {
 }
 
 export async function createMissionBudget(userId: number, input: CreateMissionBudgetRequest): Promise<MissionBudget> {
-  const [mission] = await db.select({ id: missions.id }).from(missions).where(eq(missions.id, input.missionId));
+  const [mission] = await db.select({ id: missions.id, status: missions.status }).from(missions).where(eq(missions.id, input.missionId));
   if (!mission) throw new AppError(404, "Mission introuvable.");
+  if ((MISSION_STATUSES_WITHOUT_BUDGET as readonly string[]).includes(mission.status)) {
+    throw new AppError(409, "Cette mission est terminée ou annulée : elle ne reçoit plus de budget.");
+  }
   // Barème : complète litres et FDR absents du corps ; une valeur fournie l'emporte.
   const destination = input.destinationId != null ? await activeDestination(input.destinationId) : null;
   const fuelLiters = input.fuelLiters ?? (destination ? Number(destination.fuelLiters) : undefined);
@@ -136,9 +159,12 @@ export async function createMissionBudget(userId: number, input: CreateMissionBu
   }
 }
 
-/** Correction d'un budget encore demandé ; montants recalculés au prix du jour de la date retenue. */
+/**
+ * Correction d'un budget encore demandé. Seul un changement de date ou de montant recalcule et re-fige
+ * le prix du jour ; des notes seules le laissent tel quel. Aucun changement : aucune écriture.
+ */
 export async function updateMissionBudget(id: number, userId: number, input: UpdateMissionBudgetRequest): Promise<MissionBudget> {
-  const budget = await db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     const [current] = await tx.select().from(missionBudgets).where(eq(missionBudgets.id, id)).for("update");
     if (!current) throw new AppError(404, "Budget de mission introuvable.");
     if (current.status !== "requested") throw new AppError(409, "Ce budget n'est plus modifiable : il a déjà été approuvé.");
@@ -149,21 +175,35 @@ export async function updateMissionBudget(id: number, userId: number, input: Upd
       fdrAmount: input.fdrAmount ?? Number(current.fdrAmount),
       extrasAmount: input.extrasAmount ?? Number(current.extrasAmount),
     };
+    // Comparaison au centime, sur la forme stockée (numeric relu en texte).
+    const amountsChanged =
+      merged.budgetDate !== current.budgetDate ||
+      money(merged.fuelLiters) !== money(Number(current.fuelLiters)) ||
+      money(merged.fdrAmount) !== money(Number(current.fdrAmount)) ||
+      money(merged.extrasAmount) !== money(Number(current.extrasAmount));
+    const notes = input.notes === undefined ? (current.notes ?? null) : (input.notes ?? null);
+    const notesChanged = notes !== (current.notes ?? null);
+    const destinationChanged =
+      input.destinationId !== undefined && (input.destinationId ?? null) !== (current.destinationId ?? null);
+    if (!amountsChanged && !notesChanged && !destinationChanged) return { budget: toMissionBudget(current), written: false, amountsChanged };
     const [row] = await tx
       .update(missionBudgets)
       .set({
-        ...(await amountColumns(merged)),
-        ...(input.notes !== undefined ? { notes: input.notes ?? null } : {}),
-        ...(input.destinationId !== undefined ? { destinationId: input.destinationId ?? null } : {}),
+        ...(amountsChanged ? await amountColumns(merged) : {}),
+        ...(notesChanged ? { notes } : {}),
+        ...(destinationChanged ? { destinationId: input.destinationId ?? null } : {}),
         updatedBy: userId,
         updatedAt: new Date(),
       })
       .where(eq(missionBudgets.id, id))
       .returning();
-    return toMissionBudget(row);
+    return { budget: toMissionBudget(row), written: true, amountsChanged };
   });
-  notify(budget);
-  return budget;
+  if (result.written) {
+    log.info({ budgetId: id, userId, amountsChanged: result.amountsChanged }, "budget de mission corrigé");
+    notify(result.budget);
+  }
+  return result.budget;
 }
 
 const TRANSITIONS = {
@@ -171,23 +211,34 @@ const TRANSITIONS = {
   disburse: { from: "approved", to: "disbursed", conflict: "Ce budget doit être approuvé avant d'être décaissé." },
 } as const;
 
+/** `updatedAt` lu par le client (ISO, milliseconde) comparé à la colonne tronquée à la milliseconde. */
+const sameVersion = (expectedUpdatedAt: string) =>
+  sql`date_trunc('milliseconds', ${missionBudgets.updatedAt}) = ${new Date(expectedUpdatedAt).toISOString().replace("T", " ").replace("Z", "")}::timestamp`;
+
 /**
- * Transition par UPDATE conditionnel sur le statut attendu : un rejeu ou deux clics simultanés
- * ne trouvent plus la ligne au statut de départ et répondent 409, sans double écriture.
+ * Transition par UPDATE conditionnel sur le statut attendu ET la version lue (`expectedUpdatedAt`) :
+ * un rejeu, deux clics simultanés ou un budget corrigé entre la lecture et la validation ne
+ * trouvent plus la ligne et répondent 409, sans écriture.
  * `disbursed` est un marquage tant que le journal de trésorerie (T1) n'est pas branché.
  */
-export async function transitionMissionBudget(id: number, userId: number, action: keyof typeof TRANSITIONS): Promise<MissionBudget> {
+export async function transitionMissionBudget(
+  id: number,
+  userId: number,
+  action: keyof typeof TRANSITIONS,
+  expectedUpdatedAt: string,
+): Promise<MissionBudget> {
   const t = TRANSITIONS[action];
   const now = new Date();
   const stamp = action === "approve" ? { approvedBy: userId, approvedAt: now } : { disbursedBy: userId, disbursedAt: now };
   const [row] = await db
     .update(missionBudgets)
     .set({ status: t.to, ...stamp, updatedBy: userId, updatedAt: now })
-    .where(and(eq(missionBudgets.id, id), eq(missionBudgets.status, t.from)))
+    .where(and(eq(missionBudgets.id, id), eq(missionBudgets.status, t.from), sameVersion(expectedUpdatedAt)))
     .returning();
   if (!row) {
-    await getMissionBudget(id); // 404 si le budget n'existe pas
-    throw new AppError(409, t.conflict);
+    const current = await getMissionBudget(id); // 404 si le budget n'existe pas
+    if (current.status !== t.from) throw new AppError(409, t.conflict);
+    throw new AppError(409, "Ce budget a changé depuis votre lecture : rechargez-le avant de valider.");
   }
   const budget = toMissionBudget(row);
   log.info({ budgetId: id, userId, status: budget.status }, "budget de mission : transition");

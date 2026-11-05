@@ -5,6 +5,7 @@ import { z } from "zod";
 import { PART_UNITS } from "./constants/parts";
 import { MAX_DB_INTEGER_ID } from "./contracts/common";
 import { WORK_ORDER_ITEM_STATUSES } from "./constants/work-order-items";
+import { TREASURY_ACCOUNT_KINDS, TREASURY_CATEGORIES, TREASURY_DIRECTIONS } from "./contracts/treasury";
 
 // Users and authentication
 export const users = pgTable("users", {
@@ -1415,6 +1416,26 @@ export const missionDestinations = pgTable("mission_destinations", {
 ]);
 export type MissionDestinationRow = typeof missionDestinations.$inferSelect;
 
+// Suivi des opérations clients (O1) : une ligne par mission, colonnes de la feuille de suivi client.
+export const missionOperations = pgTable("mission_operations", {
+  id: serial("id").primaryKey(),
+  missionId: integer("mission_id").notNull().unique().references(() => missions.id, { onDelete: "cascade" }),
+  trailerVehicleId: integer("trailer_vehicle_id").references(() => vehicles.id),
+  containerNumber: text("container_number"),
+  blNumber: text("bl_number"),
+  sector: text("sector"),
+  loadingDate: timestamp("loading_date"),
+  departureDate: timestamp("departure_date"),
+  returnDate: timestamp("return_date"),
+  unloadingDate: timestamp("unloading_date"),
+  goodsNature: text("goods_nature"),
+  comment: text("comment"),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Table assignments - Affectation véhicule + chauffeur à une mission
 export const assignments = pgTable("assignments", {
   id: serial("id").primaryKey(),
@@ -1578,6 +1599,17 @@ export const insertClientSchema = createInsertSchema(clients).omit({
   createdAt: true,
   updatedAt: true,
 });
+
+export const insertMissionOperationSchema = createInsertSchema(missionOperations).omit({
+  id: true,
+  missionId: true,
+  createdBy: true,
+  updatedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type MissionOperation = typeof missionOperations.$inferSelect;
+export type InsertMissionOperation = z.infer<typeof insertMissionOperationSchema>;
 
 export const insertMissionSchema = createInsertSchema(missions).omit({
   id: true,
@@ -2049,3 +2081,69 @@ export type IdempotencyKeyRow = typeof idempotencyKeys.$inferSelect;
 export type NewIdempotencyKey = typeof idempotencyKeys.$inferInsert;
 export type WorkOrderPlanningRow = typeof workOrderPlanning.$inferSelect;
 export type VehicleImportRow = typeof vehicleImports.$inferSelect;
+
+// Journal de trésorerie (lot T1) : comptes (banque, caisse, carte carburant) et écritures.
+// Le solde courant n'est jamais stocké : il se calcule par fonction fenêtre sur (entry_date, id).
+export const treasuryAccounts = pgTable("treasury_accounts", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull().unique(),
+  label: text("label").notNull(),
+  kind: text("kind", { enum: TREASURY_ACCOUNT_KINDS }).notNull(),
+  bankName: text("bank_name"),
+  openingBalance: numeric("opening_balance", { precision: 15, scale: 2 }).notNull().default("0"),
+  openingDate: date("opening_date"),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  check("treasury_accounts_kind_check", sql`${table.kind} IN ('bank', 'cash', 'fuel_card')`),
+]);
+
+export const treasuryEntries = pgTable("treasury_entries", {
+  id: serial("id").primaryKey(),
+  accountId: integer("account_id").notNull().references(() => treasuryAccounts.id),
+  entryDate: date("entry_date").notNull(),
+  pieceRef: text("piece_ref"),
+  label: text("label").notNull(),
+  direction: text("direction", { enum: TREASURY_DIRECTIONS }).notNull(),
+  amount: numeric("amount", { precision: 15, scale: 2 }).notNull(),
+  category: text("category", { enum: TREASURY_CATEGORIES }).notNull().default("autre"),
+  counterpartyLabel: text("counterparty_label"),
+  transferGroup: text("transfer_group"),
+  notes: text("notes"),
+  vehicleId: integer("vehicle_id").references(() => vehicles.id),
+  missionId: integer("mission_id").references(() => missions.id),
+  clientId: integer("client_id").references(() => clients.id),
+  supplierId: integer("supplier_id").references(() => suppliers.id),
+  // Clé de rejeu choisie par l'appelant : une même clé ne crée jamais deux lignes.
+  requestKey: text("request_key").unique(),
+  createdBy: integer("created_by").references(() => users.id),
+  updatedBy: integer("updated_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  index("idx_treasury_entries_account_date").on(table.accountId, table.entryDate, table.id),
+  index("idx_treasury_entries_transfer_group").on(table.transferGroup),
+  check("treasury_entries_amount_check", sql`${table.amount} > 0`),
+  check("treasury_entries_direction_check", sql`${table.direction} IN ('in', 'out')`),
+]);
+
+export const insertTreasuryAccountSchema = createInsertSchema(treasuryAccounts).omit({
+  id: true,
+  createdBy: true,
+  updatedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export const insertTreasuryEntrySchema = createInsertSchema(treasuryEntries).omit({
+  id: true,
+  transferGroup: true,
+  createdBy: true,
+  updatedBy: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type TreasuryAccountRow = typeof treasuryAccounts.$inferSelect;
+export type TreasuryEntryRow = typeof treasuryEntries.$inferSelect;
