@@ -537,21 +537,21 @@ export default function NewMission() {
                   </Select>
 
                   {selectedDriver && (
-                    <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
+                    <div className="bg-muted p-4 rounded-lg">
                       <div className="space-y-2 text-sm">
                         <div>
-                          <span className="text-gray-600 dark:text-gray-400">Statut CPC:</span>
+                          <span className="text-muted-foreground">Statut CPC:</span>
                           <p className={`font-medium inline-block ml-2 px-2 py-1 rounded ${
-                            driverCpc.eligible ? 'bg-green-100 text-green-800' :
-                            normalizeCpcStatus(driverCpcStatus) === 'A FORMER' ? 'bg-orange-100 text-orange-800' :
-                            'bg-red-100 text-red-800'
+                            driverCpc.eligible ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300' :
+                            normalizeCpcStatus(driverCpcStatus) === 'A FORMER' ? 'bg-warning/10 text-warning-text' :
+                            'bg-destructive/10 text-destructive'
                           }`}>
                             {driverCpcStatus ?? "Non défini"}
                           </p>
                         </div>
                         {selectedDriver.licenseNumber ? (
                           <div>
-                            <span className="text-gray-600 dark:text-gray-400">Permis N°:</span>
+                            <span className="text-muted-foreground">Permis N°:</span>
                             <p className="font-medium">{selectedDriver.licenseNumber}</p>
                           </div>
                         ) : null}
@@ -561,8 +561,8 @@ export default function NewMission() {
                 </div>
               </div>
 
-              <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg border border-yellow-200 dark:border-yellow-800">
-                <p className="text-sm text-yellow-800 dark:text-yellow-200">
+              <div className="bg-warning/10 p-4 rounded-lg border border-warning/30">
+                <p className="text-sm text-foreground">
                   <strong>Astuce :</strong> Vérifiez que le tonnage du véhicule correspond au poids du cargo et que le chauffeur a une formation CPC valide pour ce type de mission.
                 </p>
               </div>
@@ -570,8 +570,8 @@ export default function NewMission() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className={`rounded-lg border p-4 ${
                   isWeightCompatible
-                    ? "border-green-200 bg-green-50 text-green-800"
-                    : "border-red-200 bg-red-50 text-red-800"
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-800"
+                    : "bg-destructive/10 text-destructive border-destructive/30"
                 }`}>
                   <p className="text-xs uppercase tracking-wide mb-1 font-semibold">Contrôle tonnage</p>
                   {!formData.vehicleId ? (
@@ -588,8 +588,8 @@ export default function NewMission() {
 
                 <div className={`rounded-lg border p-4 ${
                   isDriverCpcCompatible
-                    ? "border-green-200 bg-green-50 text-green-800"
-                    : "border-red-200 bg-red-50 text-red-800"
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-300 dark:border-emerald-800"
+                    : "bg-destructive/10 text-destructive border-destructive/30"
                 }`}>
                   <p className="text-xs uppercase tracking-wide mb-1 font-semibold">Contrôle CPC</p>
                   {!formData.driverId ? (
