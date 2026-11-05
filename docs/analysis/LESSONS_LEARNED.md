@@ -3158,6 +3158,7 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
   - `deploy/backup-db.sh` date le journal et le dump par `printf '%(...)T'` (bash >= 4.2) au lieu de `date`, et n'appelle plus `dirname`. Sortie identique à `date` vérifiée sur 20 cas (5 fuseaux, bascules d'heure d'été). Comportement hors journal inchangé : même code de sortie, même nom de dump, même rétention.
 - **Prévention vérifiable** : 3 suites unitaires complètes vertes (2697 chacune) ; le test 1 vérifie le format de chaque ligne du journal. Le commentaire du `describe` fixe la règle : réduire les processus, ne pas rallonger le délai.
 - **Leçon généralisée** : un test lent sous charge se diagnostique par une mesure prise sous charge, étape par étape, avant de toucher au délai. Pour un test qui lance des processus, le coût à réduire est le nombre de processus, et l'état préalable s'écrit, il ne se rejoue pas.
+
 ## 2026-11-05 — Fausse perte de fichiers : seules les fins de ligne différaient
 
 - **Contexte** : après l'incident du `git checkout -- .` (entrée « Modifications non commitées perdues : `cd` en échec… », même date), des fichiers ont paru perdus ou réécrits : `git status` et `git diff --stat` les marquaient modifiés, parfois en entier. Leur contenu était intact : seules les fins de ligne (CRLF contre LF) différaient.
