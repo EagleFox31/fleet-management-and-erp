@@ -28,7 +28,6 @@ import { describe, expect, it } from "vitest";
 const FROZEN: Record<string, number> = {
   // Dont une via `.set(missionUpdates)`, visible depuis la résolution des variables.
   "server/api/missions.routes.ts": 3,
-  "server/api/quality-check.routes.ts": 1,
   // Journal d'exécution de la sauvegarde : ligne créée par le même job, pas de transition concurrente.
   "server/jobs/backup-production.ts": 1,
   "server/services/client-billing-service.ts": 1,

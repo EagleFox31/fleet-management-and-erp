@@ -2,11 +2,12 @@ import { createServer, type Server } from "http";
 import { desc, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { qualityCheckResponseSchema } from "../../shared/contracts/quality-check";
-import { db } from "../../server/db";
+import { db, pool } from "../../server/db";
 import { statusHistory, vehicles, workOrderQuality, workOrders } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
+import { waitForBlockedWriter } from "../support/row-lock";
 
 /** T-47 : POST /api/work-orders/:id/quality-check (drapeau `quality-check`). */
 
@@ -140,5 +141,49 @@ describe("POST /api/work-orders/:id/quality-check", () => {
     const history = await db.select().from(statusHistory).where(eq(statusHistory.vehicleId, vehicle.id)).orderBy(desc(statusHistory.id));
     expect(history[0]?.status).toBe("maintenance");
     expect(history[0]?.notes).toContain(`#${wo.id}`);
+  });
+
+  /**
+   * Course : l'OT quitte `completed` entre la lecture de la route et son écriture. Le refus passe par
+   * le compare-and-set de `transitionWorkOrderStatus` : 409, ni statut ni contrôle écrits.
+   */
+  async function raceAgainstReopen(result: "failed" | "passed") {
+    const id = await newWorkOrder("completed");
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT id FROM work_orders WHERE id = $1 FOR UPDATE", [id]);
+      const holderPid = (await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid as number;
+      const pending = call("POST", `/api/work-orders/${id}/quality-check`, {
+        cookie: cookies.get("workshop_manager"),
+        body: { result, reason: "Course" },
+      });
+      await waitForBlockedWriter(holderPid, "l'OT");
+      await client.query("UPDATE work_orders SET status = 'in_progress' WHERE id = $1", [id]);
+      await client.query("COMMIT");
+      const res = await pending;
+      expect(res.status, JSON.stringify(res.body)).toBe(409);
+    } finally {
+      client.release();
+    }
+    const [qc] = await db.select().from(workOrderQuality).where(eq(workOrderQuality.id, id));
+    expect(qc.qcStatus ?? null).toBeNull();
+    expect(qc.qcReason ?? null).toBeNull();
+  }
+
+  it("course : refus sur un OT rouvert entre-temps, 409 sans écriture du contrôle", async () => {
+    await raceAgainstReopen("failed");
+  });
+
+  it("course : validation sur un OT rouvert entre-temps, 409 sans écriture du contrôle", async () => {
+    await raceAgainstReopen("passed");
+  });
+
+  it("rejette : l'auteur du refus est tracé sur l'OT", async () => {
+    const id = await newWorkOrder("completed");
+    const res = await call("POST", `/api/work-orders/${id}/quality-check`, { cookie: cookies.get("workshop_manager"), body: { result: "failed", reason: "Serrage" } });
+    expect(res.status).toBe(200);
+    const [row] = await db.select().from(workOrders).where(eq(workOrders.id, id));
+    expect(row.updatedBy).toBe(res.body.qcBy);
   });
 });

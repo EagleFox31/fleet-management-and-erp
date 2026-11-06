@@ -29,4 +29,17 @@ describe("checkWorkOrderTransition", () => {
     expect(checkWorkOrderTransition("in_progress", "cancelled", "technician")).toMatchObject({ allowed: false, status: 403 });
     expect(checkWorkOrderTransition("in_progress", "pending", "technician")).toMatchObject({ allowed: false, status: 403 });
   });
+
+  it("contrôle qualité : seule voie qui rouvre un OT terminé, et seulement vers en cours", () => {
+    expect(checkWorkOrderTransition("completed", "in_progress", "workshop_manager", "quality_check")).toEqual({ allowed: true });
+    expect(checkWorkOrderTransition("completed", "completed", "workshop_manager", "quality_check")).toEqual({ allowed: true });
+    for (const to of ["pending", "awaiting_parts", "cancelled"]) {
+      expect(checkWorkOrderTransition("completed", to, "workshop_manager", "quality_check")).toMatchObject({ allowed: false, status: 409 });
+    }
+    for (const from of ["pending", "in_progress", "awaiting_parts", "cancelled"]) {
+      expect(checkWorkOrderTransition(from, "in_progress", "workshop_manager", "quality_check").allowed, from).toBe(from === "in_progress");
+    }
+    // Sans cette voie, la modification générique reste fermée sur un OT terminé.
+    expect(checkWorkOrderTransition("completed", "in_progress", "admin")).toMatchObject({ allowed: false, status: 409 });
+  });
 });
