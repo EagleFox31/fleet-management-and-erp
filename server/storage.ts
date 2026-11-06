@@ -257,7 +257,6 @@ export interface IStorage {
   getAllPartsUsed(): Promise<PartUsed[]>;
   getPartsUsedForWorkOrder(workOrderId: number): Promise<PartUsed[]>;
   addPartToWorkOrder(partUsed: InsertPartUsed, actorUserId?: number, options?: StockWriteOptions): Promise<PartUsed>;
-  updatePartUsed(id: number, partUsed: Partial<InsertPartUsed>): Promise<PartUsed | undefined>;
   
   // Parts stock movements methods
   getPartStockHistory(partId: number): Promise<PartStockHistoryItem[]>;
@@ -285,7 +284,6 @@ export interface IStorage {
   getPartRequirements(status?: string): Promise<PartRequirementWithRelations[]>;
   getPartRequirementsByPartId(partId: number): Promise<PartRequirementWithRelations[]>;
   createPartRequirement(requirement: InsertPartRequirement): Promise<PartRequirement>;
-  updatePartRequirement(id: number, requirement: Partial<InsertPartRequirement>): Promise<PartRequirement | undefined>;
   deletePartRequirement(id: number): Promise<boolean>;
   
   // Dashboard methods
@@ -1836,20 +1834,6 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async updatePartUsed(id: number, partUsed: Partial<InsertPartUsed>): Promise<PartUsed | undefined> {
-    try {
-      const [updatedPartUsed] = await db
-        .update(partsUsed)
-        .set(partUsed)
-        .where(eq(partsUsed.id, id))
-        .returning();
-      return updatedPartUsed;
-    } catch (error) {
-      console.error('Error updating part used:', error);
-      return undefined;
-    }
-  }
-
   async getPartStockHistory(partId: number): Promise<PartStockHistoryItem[]> {
     try {
       const stockMovements = await db
@@ -2326,23 +2310,6 @@ export class DatabaseStorage implements IStorage {
     } catch (error) {
       console.error('Error creating part requirement:', error);
       throw new Error('Erreur lors de la création de la demande');
-    }
-  }
-
-  async updatePartRequirement(id: number, requirement: Partial<InsertPartRequirement>): Promise<PartRequirement | undefined> {
-    try {
-      const [updatedRequirement] = await db
-        .update(partRequirements)
-        .set({
-          ...requirement,
-          updatedAt: new Date()
-        })
-        .where(eq(partRequirements.id, id))
-        .returning();
-      return updatedRequirement;
-    } catch (error) {
-      console.error('Error updating part requirement:', error);
-      return undefined;
     }
   }
 
