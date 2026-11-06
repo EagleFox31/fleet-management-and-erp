@@ -21,6 +21,13 @@ export const STOCK_ISSUE_REVOKED_ERROR =
 /** Annule la transaction quand une autre requête a déjà fait passer la demande. */
 class StaleStatusError extends Error {}
 
+/** Annule la réception directe d'une demande qu'une commande fournisseur porte. */
+class OrderLinkedReceptionError extends Error {
+  constructor(readonly purchaseOrderId: number) {
+    super("demande rattachée à une commande");
+  }
+}
+
 export class PartRequirementsService {
   private appendAuditNote(existing: string | null | undefined, note: string): string {
     const base = (existing || "").trim();
@@ -376,20 +383,6 @@ export class PartRequirementsService {
 
       const statusChanges = Boolean(requirement.status && requirement.status !== current.status);
 
-      // Rattachée à une commande non annulée : le stock est crédité par la commande, pas ici.
-      if (statusChanges && (requirement.status === 'received' || requirement.status === 'partially_received')) {
-        const [orderLink] = await db
-          .select({ purchaseOrderId: purchaseOrderLines.purchaseOrderId })
-          .from(purchaseOrderLines)
-          .innerJoin(purchaseOrders, eq(purchaseOrderLines.purchaseOrderId, purchaseOrders.id))
-          .where(and(eq(purchaseOrderLines.partRequirementId, id), ne(purchaseOrders.status, 'cancelled')))
-          .limit(1);
-        if (orderLink) {
-          log.info({ requirementId: id, purchaseOrderId: orderLink.purchaseOrderId, userId: currentUserId }, 'réception directe refusée : demande rattachée à une commande');
-          return { success: false, error: ORDER_LINKED_RECEPTION_ERROR, status: 409 };
-        }
-      }
-
       if (requirement.status === 'received' && statusChanges && !updateData.actualDeliveryDate) {
         updateData.actualDeliveryDate = this.getTodayLocalDate();
       }
@@ -419,6 +412,18 @@ export class PartRequirementsService {
           .returning();
         if (!updated) throw new StaleStatusError();
 
+        // Rattachée à une commande non annulée : le stock est crédité par la commande, pas ici.
+        // Lu après le CAS, demande verrouillée : une commande créée entre-temps est vue ici.
+        if (requirement.status === 'received' || requirement.status === 'partially_received') {
+          const [orderLink] = await tx
+            .select({ purchaseOrderId: purchaseOrderLines.purchaseOrderId })
+            .from(purchaseOrderLines)
+            .innerJoin(purchaseOrders, eq(purchaseOrderLines.purchaseOrderId, purchaseOrders.id))
+            .where(and(eq(purchaseOrderLines.partRequirementId, id), ne(purchaseOrders.status, 'cancelled')))
+            .limit(1);
+          if (orderLink) throw new OrderLinkedReceptionError(orderLink.purchaseOrderId);
+        }
+
         const actorId = currentUserId ?? current.requestedBy;
         if (requirement.status === 'received') {
           await this.handlePartDelivery(tx, current, actorId);
@@ -434,6 +439,10 @@ export class PartRequirementsService {
 
       return { success: true, data: updatedRequirement, overrideApplied };
     } catch (error) {
+      if (error instanceof OrderLinkedReceptionError) {
+        log.info({ requirementId: id, purchaseOrderId: error.purchaseOrderId, userId: currentUserId }, 'réception directe refusée : demande rattachée à une commande');
+        return { success: false, error: ORDER_LINKED_RECEPTION_ERROR, status: 409 };
+      }
       if (error instanceof StaleStatusError) {
         log.info({ requirementId: id, targetStatus: requirement.status, userId: currentUserId }, 'transition ignorée : statut déjà modifié par une autre requête');
         return { success: false, error: STALE_STATUS_ERROR };

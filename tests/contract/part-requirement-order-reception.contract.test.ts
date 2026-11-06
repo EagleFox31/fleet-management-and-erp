@@ -2,6 +2,7 @@ import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { ORDER_LINKED_RECEPTION_ERROR } from "../../server/services/part-requirements-service";
+import { REQUIREMENT_NOT_ORDERABLE_ERROR } from "../../server/services/procurement-service";
 import {
   alerts,
   partRequirements,
@@ -37,6 +38,9 @@ beforeAll(async () => {
 }, 60000);
 
 afterAll(async () => {
+  // Les commandes créées par HTTP s'ajoutent à celles posées en base.
+  const created = await db.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.supplierId, supplierId));
+  orderIds.push(...created.map((o) => o.id).filter((id) => !orderIds.includes(id)));
   if (orderIds.length > 0) {
     await db.delete(supplierInvoices).where(inArray(supplierInvoices.purchaseOrderId, orderIds));
     await db.delete(purchaseOrderLines).where(inArray(purchaseOrderLines.purchaseOrderId, orderIds));
@@ -55,12 +59,12 @@ afterAll(async () => {
 });
 
 /** Demande « commandée » de 2 pièces (stock initial 5), rattachée ou non à une commande au statut voulu. */
-async function orderedRequirement(orderStatus?: string) {
+async function orderedRequirement(orderStatus?: string, requirementStatus: "ordered" | "received" = "ordered") {
   const part = await createTestPart({ quantity: 5, unitPrice: "1000.00" });
   session.ids.partIds.push(part.id);
   const [requirement] = await db
     .insert(partRequirements)
-    .values({ partId: part.id, quantityNeeded: 2, reason: "TEST Q25", status: "ordered", requestedBy: session.userId("technician") })
+    .values({ partId: part.id, quantityNeeded: 2, reason: "TEST Q25", status: requirementStatus, requestedBy: session.userId("technician") })
     .returning();
   requirementIds.push(requirement.id);
   let orderId: number | null = null;
@@ -154,5 +158,21 @@ describe("Q25 réception d'une pièce commandée", { timeout: 120000 }, () => {
 
     expect(res.status).toBe(200);
     expect(await stockOf(partId)).toEqual({ quantity: 7, movements: 1 });
+  });
+
+  it("demande déjà reçue : la recommander est refusée (409), aucune commande, statut inchangé", async () => {
+    const { requirementId } = await orderedRequirement(undefined, "received");
+    const linesBefore = await db.select().from(purchaseOrderLines).where(eq(purchaseOrderLines.partRequirementId, requirementId));
+
+    const res = await session.call("POST", "/api/purchase-orders", {
+      actor: "warehouse",
+      body: { supplierId, requirementIds: [requirementId] },
+    });
+
+    expect(res.status).toBe(409);
+    expect(res.body.message).toBe(REQUIREMENT_NOT_ORDERABLE_ERROR);
+    expect(await statusOf(requirementId)).toBe("received");
+    const linesAfter = await db.select().from(purchaseOrderLines).where(eq(purchaseOrderLines.partRequirementId, requirementId));
+    expect(linesAfter).toHaveLength(linesBefore.length);
   });
 });
