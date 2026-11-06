@@ -32,7 +32,6 @@ const FROZEN: Record<string, number> = {
   // Journal d'exécution de la sauvegarde : ligne créée par le même job, pas de transition concurrente.
   "server/jobs/backup-production.ts": 1,
   "server/services/client-billing-service.ts": 1,
-  "server/services/three-way-matching-service.ts": 1,
   "server/services/vehicle-status-service.ts": 3,
   "server/services/work-order-part-request.ts": 1,
 };

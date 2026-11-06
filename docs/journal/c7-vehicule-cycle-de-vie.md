@@ -646,3 +646,30 @@ WHERE po.status IN ('delivered', 'completed')
   - aucun timeout de test n'est fixé, donc vitest applique son défaut de 5 s : une attente de verrou aurait échoué à 5 s ;
   - 94 min veulent dire que le minuteur du processus ne tournait pas, donc processus suspendu (veille probable, nuit de 04 h 25 à 06 h 05) ;
   - campagne rejouée avec un échantillon de `pg_stat_activity` toutes les 15 s : 18 fichiers, 170 tests verts en 65 s, aucune session `idle in transaction`, aucune attente de verrou.
+## 2026-11-06 — Clôture automatique de commande : verrou et CAS, plus de note perdue
+
+- **Contexte** : `autoCloseDeliveredOrderIfFinanceDone` (`three-way-matching-service.ts`) passe la commande de `delivered` à `completed` quand toutes ses factures sont soldées. C'était la dernière écriture de statut de ce fichier sans condition sur l'état lu, gelée dans `status-update-cas-hygiene`.
+- **Défaut** : la commande était lue hors transaction puis réécrite en entier (statut et notes) par un `UPDATE … WHERE id`. Deux factures soldées en même temps, ou une modification des notes pendant la clôture, donnaient deux transitions et des notes réécrites à partir d'une lecture périmée : la note ajoutée entre-temps était effacée.
+- **Correctif** : une transaction qui verrouille la commande (`FOR NO KEY UPDATE`), relit sous ce verrou son statut, ses notes et les factures liées, puis écrit `WHERE id AND status = 'delivered'` avec `returning`. La seconde clôture devient un no-op : pas de deuxième trace, pas de log en double. `no key update` reste compatible avec le `key share` des contrôles de clé étrangère des factures. Aucun déclencheur sur `purchase_orders`. La clôture s'exécute après le commit du rapprochement et ne prend que ce verrou, donc pas de cycle possible. Le `console.log` de la clôture passe par `moduleLogger("three-way-matching")`.
+- **Preuve** :
+  - `tests/integration/purchase-order-auto-close.test.ts` : témoin, une facture non soldée, commande déjà clôturée ou annulée. Cas concurrent : le test tient le verrou de la commande, modifie ses notes, attend dans `pg_stat_activity` deux clôtures bloquées, puis relâche le verrou. Résultat attendu : une transition, une trace, la note conservée ;
+  - mutant (code d'origine) : le cas concurrent échoue, la note ajoutée est perdue. Avant l'ajout de cette note, le test passait aussi sur le code d'origine, parce que l'écrasement par la seconde clôture laissait une seule trace ;
+  - contrats liés (`purchase-order-three-way`, `supplier-settlement*`, `supplier-invoice*`) : 13 fichiers, 125 tests verts. Suite unitaire verte.
+- **Prévention** : l'entrée gelée est retirée de `status-update-cas-hygiene` : toute nouvelle écriture de statut non conditionnée dans ce fichier fait échouer le test.
+- **Leçon** : pour tester un CAS, compter les traces ne suffit pas, car un écrasement en laisse une seule lui aussi. Il faut un observable que seule la mise à jour perdue détruit, par exemple une écriture concurrente qui doit survivre.
+
+## 2026-11-06 — Clôture automatique : factures liées lues `for share`
+
+- **Contexte** : remarque de la relecture sécurité de #557. Sous le verrou de la commande, la clôture lisait les factures liées sans verrou.
+- **Défaut** : une transaction en cours pouvait rendre une facture non soldée, par exemple en annulant un règlement (`paid -> approved`) ou en ouvrant un litige. La clôture lisait encore l'état soldé déjà commité et clôturait la commande. Elle restait alors `completed` avec une facture non soldée.
+- **Correctif** : les factures liées sont lues `for share`, donc la clôture attend l'issue de la transaction puis relit la facture.
+- **Ordre des verrous** : commande d'abord, factures ensuite. Aucun chemin ne verrouille une facture puis la commande :
+  - aucun déclencheur ne touche `purchase_orders` (vérifié dans `pg_trigger` et dans le corps des fonctions de recalcul) ;
+  - la clé de commande d'une facture ne prend que `key share`, qui reste compatible avec `no key update`.
+- **Hors périmètre** : une facture créée pendant la clôture équivaut à une facture créée après. Ce cas relève d'une règle métier (peut-on facturer une commande clôturée ?), pas de la concurrence.
+- **Test** : l'attente ne filtre plus sur `ILIKE '%purchase_orders%'`, que n'importe quelle autre suite pouvait fausser. Elle compte, par `pg_blocking_pids` récursif, les seules sessions bloquées derrière le pid qui tient le verrou.
+- **Preuve** :
+  - nouveau cas « facture repassée non soldée pendant la clôture » : la commande reste `delivered` ;
+  - mutant (#557 sans `for share`) : la clôture n'attend pas et le cas échoue ;
+  - suites liées vertes : 5 tests d'intégration, 16 fichiers et 147 tests de contrats, 293 fichiers unitaires.
+- **Constat transmis à 0a** : la clôture manuelle (`procurement-service.ts`, `update(purchaseOrders).set(updateData)`) lit sans verrou et écrit sans condition sur le statut. Le garde-fou ne la voit pas, parce que `.set(variable)` est une limite connue de `status-update-cas-hygiene`.

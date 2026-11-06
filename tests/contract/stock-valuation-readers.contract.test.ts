@@ -49,7 +49,7 @@ beforeAll(async () => {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const address = server.address();
   baseUrl = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
-  for (const role of ["warehouse", "technician", "driver", "client"] as const) await login(role);
+  for (const role of ["warehouse", "technician", "secretary", "logistics", "driver", "client"] as const) await login(role);
 }, 120000);
 
 afterAll(async () => {
@@ -97,7 +97,8 @@ describe("GET /api/invoices/:id/parts (prix et valeur par pièce)", { timeout: 1
     expect((await get("/API/Invoices/999999999/Parts/", "driver")).status).toBe(403);
   });
 
-  it.each(["warehouse", "technician"] as const)("%s : franchit la garde (ni 401 ni 403)", async (role) => {
+  // Comptabilité (secrétariat) et logistique lisent les factures : elles gardent l'accès.
+  it.each(["warehouse", "technician", "secretary", "logistics"] as const)("%s : franchit la garde (ni 401 ni 403)", async (role) => {
     expect([401, 403]).not.toContain((await get(path, role)).status);
   });
 });
