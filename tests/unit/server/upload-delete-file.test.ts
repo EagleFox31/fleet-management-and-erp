@@ -6,7 +6,7 @@ import { deleteFile } from "../../../server/middleware/upload";
 
 /**
  * Dette AGENTS.md §9 : `deleteFile` supprimait n'importe quel chemin. Un chemin lu en base
- * (`services/documentStorage.ts`, code mort) pouvait donc viser un fichier hors de `uploads/`.
+ * (`services/documentStorage.ts`, code mort supprimé depuis) pouvait donc viser un fichier hors de `uploads/`.
  * Désormais : refus sans suppression, message sans le chemin.
  */
 

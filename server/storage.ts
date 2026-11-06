@@ -192,6 +192,9 @@ type PartRequirementWithRelations = PartRequirement & {
   requesterName: User["name"] | null;
 };
 
+/** Ce qu'une correction de document peut changer (PATCH /api/documents/:id). */
+export type VehicleDocumentCorrection = Partial<Pick<InsertVehicleDocument, "name" | "description" | "expiryDate" | "updatedBy">>;
+
 export interface IStorage {
   // User methods
   getUser(id: number): Promise<User | undefined>;
@@ -223,7 +226,7 @@ export interface IStorage {
   getVehicleDocuments(vehicleId: number): Promise<VehicleDocument[]>;
   getVehicleDocumentsByType(vehicleId: number, type: string): Promise<VehicleDocument[]>;
   createVehicleDocument(document: InsertVehicleDocument): Promise<VehicleDocument>;
-  updateVehicleDocument(id: number, document: Partial<InsertVehicleDocument>): Promise<VehicleDocument | undefined>;
+  updateVehicleDocument(id: number, changes: VehicleDocumentCorrection): Promise<VehicleDocument | undefined>;
   deleteVehicleDocument(id: number): Promise<boolean>;
   
   // Maintenance schedule methods
@@ -1066,18 +1069,22 @@ export class DatabaseStorage implements IStorage {
       throw error;
     }
   }
-  async updateVehicleDocument(id: number, document: Partial<InsertVehicleDocument>): Promise<VehicleDocument | undefined> {
-    try {
-      const [updated] = await db
-        .update(vehicleDocuments)
-        .set({ ...document, updatedAt: new Date() })
-        .where(eq(vehicleDocuments.id, id))
-        .returning();
-      return updated;
-    } catch (error) {
-      console.error("Update vehicle document error:", error);
-      return undefined;
-    }
+  // Champs écrits nommés un à un : un appelant ne peut plus faire passer `vehicleId`,
+  // `filePath` ou `uploadedBy` par un objet générique. Drizzle ignore les clés `undefined`.
+  // L'erreur SQL n'est plus avalée : elle remonte au gestionnaire central au lieu d'un faux 404.
+  async updateVehicleDocument(id: number, changes: VehicleDocumentCorrection): Promise<VehicleDocument | undefined> {
+    const [updated] = await db
+      .update(vehicleDocuments)
+      .set({
+        name: changes.name,
+        description: changes.description,
+        expiryDate: changes.expiryDate,
+        updatedBy: changes.updatedBy,
+        updatedAt: new Date(),
+      })
+      .where(eq(vehicleDocuments.id, id))
+      .returning();
+    return updated;
   }
   // Était un bouchon renvoyant false : DELETE /api/documents/:id répondait 204
   // sans rien supprimer. La ligne part d'abord : un fichier orphelin vaut mieux
