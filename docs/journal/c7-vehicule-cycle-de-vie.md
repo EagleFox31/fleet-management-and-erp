@@ -520,3 +520,14 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
 - **Gelés** : 14 appels dans 8 fichiers. Ce sont des paiements, recharges et consommations carburant, le prix convenu de mission, des statistiques en `console.log`. Le compte par fichier ne fait que baisser.
 - **Pourquoi** : les journaux sont lus bien au-delà des rôles finance. L'identifiant de l'objet suffit à retrouver le montant en base.
 - **Reste** : décider si les journaux d'audit métier (paiement enregistré, prix convenu modifié) gardent le montant. C'est à trancher par 0a ; d'ici là, ils sont gelés.
+
+## 2026-11-06 — Journaux de statistiques migrés vers `moduleLogger`, sans montant (décision Q24)
+
+- **Décision 0a (Q24)** : les journaux d'audit métier gardent le montant (paiement client, prix convenu, carburant, dépense de budget). Ils restent gelés dans `log-amounts-hygiene`. Les `console.log` de statistiques sont migrés sans montant.
+- **Quoi** : 6 `console.log` migrés vers `moduleLogger`. Ils journalisent maintenant des comptes et des identifiants, plus de totaux FCFA :
+  - `client-billing-service` : rapport, paiements d'une facture, statistiques ;
+  - `excel-export-service` : export de l'inventaire ;
+  - `procurement-service` : commande créée (avec la ligne « Order object » adjacente, fusionnée) ;
+  - `vat-billing-service` : statistiques TVA mensuelles.
+- **Cliquet** : les comptes gelés baissent. `client-billing-service` passe de 4 à 1, et `excel-export`, `procurement` et `vat-billing` sortent de la liste.
+- **Hors lot** : les 40 autres `console.*` de ces quatre fichiers n'ont pas de montant. Ils seront migrés au fil des modifications (AGENTS.md §9).
