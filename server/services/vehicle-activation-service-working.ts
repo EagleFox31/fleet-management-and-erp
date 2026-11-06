@@ -2,8 +2,12 @@ import { db } from '../db';
 import { vehicles, vehicleDocuments, workOrders, statusHistory, activityLogs } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 import type { VehicleDocumentTypeCode } from '@shared/constants/vehicle-document-types';
+import { resolveActiveVehicleDocumentTypes } from '../lib/vehicle-document-type';
 import fs from 'fs/promises';
-import path from 'path';
+import { uploadedFileCandidates } from '../lib/uploaded-file';
+import { moduleLogger } from '../lib/logger';
+
+const log = moduleLogger('vehicle-activation');
 
 interface WorkflowData {
   registrationNumber: string;
@@ -38,7 +42,27 @@ interface WorkflowData {
   vehicleId?: number;
 }
 
+// Codes de la graine du référentiel (vérifiés à la compilation) : vehicle_documents.type a une clé étrangère,
+// et un code peut avoir été désactivé : il est relu actif avant toute écriture.
+const ACTIVATION_DOCUMENT_TYPES: readonly { key: string; type: VehicleDocumentTypeCode; expiryField: string | null }[] = [
+  { key: 'carteGrise', type: 'carte_grise', expiryField: 'licensePlateExpiry' },
+  { key: 'assurance', type: 'assurance', expiryField: 'insuranceExpiry' },
+  { key: 'visiteTechnique', type: 'visite_technique', expiryField: 'technicalInspectionDate' },
+  { key: 'facturAchat', type: 'autre', expiryField: null }
+];
+
 export class VehicleActivationService {
+  /**
+   * Types que l'activation écrira pour ces documents, sans effet : la route les vérifie
+   * avant de créer le véhicule.
+   */
+  static documentTypeCodes(documents: unknown): VehicleDocumentTypeCode[] {
+    // Une liste est lue par DocumentManagementService, pas par l'activation.
+    if (!documents || typeof documents !== 'object' || Array.isArray(documents)) return [];
+    const present = documents as Record<string, unknown>;
+    return ACTIVATION_DOCUMENT_TYPES.filter((d) => present[d.key]).map((d) => d.type);
+  }
+
   /**
    * Active un véhicule depuis un workflow terminé
    */
@@ -110,13 +134,10 @@ export class VehicleActivationService {
   private static async processDocuments(vehicleId: number, documents: any, workflowData: WorkflowData) {
     console.log('📂 Début du traitement des documents pour véhicule', vehicleId);
     
-    // Codes de la graine du référentiel (vérifiés à la compilation) : vehicle_documents.type a une clé étrangère.
-    const documentTypes: { key: string; type: VehicleDocumentTypeCode; expiryField: string | null }[] = [
-      { key: 'carteGrise', type: 'carte_grise', expiryField: 'licensePlateExpiry' },
-      { key: 'assurance', type: 'assurance', expiryField: 'insuranceExpiry' },
-      { key: 'visiteTechnique', type: 'visite_technique', expiryField: 'technicalInspectionDate' },
-      { key: 'facturAchat', type: 'autre', expiryField: null }
-    ];
+    // Codes actifs exigés avant la première écriture, jamais une violation de clé étrangère. La route les a
+    // vérifiés avant de créer le véhicule ; un code désactivé entre-temps lève ici, sans aucun document écrit.
+    const documentTypes = ACTIVATION_DOCUMENT_TYPES.filter((d) => documents[d.key]);
+    await resolveActiveVehicleDocumentTypes(documentTypes.map((d) => d.type));
 
     let documentsProcessed = 0;
 
@@ -136,18 +157,15 @@ export class VehicleActivationService {
             continue;
           }
 
-          const resolvedPath = path.isAbsolute(docPath)
-            ? docPath
-            : path.join(process.cwd(), String(docPath).replace(/^[/\\]+/, ''));
-
-          try {
-            await fs.access(resolvedPath);
-          } catch {
-            console.warn(`⚠️ Document ${docType.type} ignoré: fichier introuvable (${resolvedPath})`);
+          // Le chemin vient du corps de la requête : seul un fichier existant sous uploads/ est rattaché
+          // (un « ../.env » n'est jamais enregistré dans vehicle_documents.filePath).
+          if (!(await this.uploadedFileExists(String(docPath)))) {
+            log.warn({ vehicleId, documentType: docType.type }, 'document ignoré : fichier absent ou hors du dossier des téléversements');
             continue;
           }
 
-          console.log(`📄 Traitement du document ${docType.type}:`, doc);
+          // Type seulement : le document porte des noms et un chemin saisis par l'utilisateur.
+          log.debug({ vehicleId, documentType: docType.type }, "traitement d'un document d'activation");
 
           await db.insert(vehicleDocuments).values({
             vehicleId: vehicleId,
@@ -170,6 +188,19 @@ export class VehicleActivationService {
     }
 
     console.log(`📊 ${documentsProcessed} documents traités au total`);
+  }
+
+  /** Fichier existant sous uploads/ (liens résolus) : tout autre chemin est refusé. */
+  private static async uploadedFileExists(storedPath: string): Promise<boolean> {
+    for (const candidate of uploadedFileCandidates(storedPath)) {
+      try {
+        await fs.access(candidate);
+        return true;
+      } catch {
+        // candidat suivant
+      }
+    }
+    return false;
   }
 
   /**

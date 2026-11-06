@@ -5,6 +5,10 @@ import fs from 'fs/promises';
 import path from 'path';
 import { uploadedFileCandidates } from '../lib/uploaded-file';
 import { resolveActiveVehicleDocumentTypes } from '../lib/vehicle-document-type';
+import { isAppError } from '../lib/app-error';
+import { moduleLogger } from '../lib/logger';
+
+const log = moduleLogger('document-management');
 
 export interface DocumentData {
   name: string;
@@ -27,11 +31,11 @@ export class DocumentManagementService {
     uploadedById?: number
   ): Promise<void> {
     if (!documents || documents.length === 0) {
-      console.log('Aucun document à sauvegarder pour le véhicule:', vehicleId);
+      log.debug({ vehicleId }, 'aucun document à sauvegarder');
       return;
     }
 
-    console.log(`Sauvegarde de ${documents.length} documents pour le véhicule ${vehicleId}`);
+    log.debug({ vehicleId, count: documents.length }, 'sauvegarde des documents du véhicule');
 
     // Alias normalisés et codes actifs exigés pour tout le lot, avant la première écriture :
     // un type hors référentiel donne un 400 lisible, pas une violation de clé étrangère.
@@ -42,7 +46,8 @@ export class DocumentManagementService {
         // Vérifier que le fichier existe
         const fileExists = await this.verifyFileExists(doc.file_path);
         if (!fileExists) {
-          console.warn(`Fichier manquant: ${doc.file_path}`);
+          // Ni nom ni chemin : saisis par l'utilisateur, ils restent hors du journal.
+          log.warn({ vehicleId, index, documentType: types[index] }, 'document ignoré : fichier absent ou hors du dossier des téléversements');
           continue;
         }
 
@@ -60,13 +65,15 @@ export class DocumentManagementService {
           expiryDate: doc.expiry_date || null,
         } as any);
 
-        console.log(`Document sauvegardé: ${doc.name} (${doc.type})`);
+        log.debug({ vehicleId, index, documentType: types[index] }, 'document sauvegardé');
       }
 
-      console.log(`✅ Tous les documents sauvegardés pour le véhicule ${vehicleId}`);
+      log.info({ vehicleId, count: documents.length }, 'documents du véhicule traités');
     } catch (error) {
-      console.error('Erreur lors de la sauvegarde des documents:', error);
-      throw new Error('Impossible de sauvegarder les documents');
+      log.error({ err: error, vehicleId }, 'échec de la sauvegarde des documents');
+      // Une AppError (400 lisible) passe telle quelle ; le reste garde sa cause pour le journal.
+      if (isAppError(error)) throw error;
+      throw new Error('Impossible de sauvegarder les documents', { cause: error });
     }
   }
 
@@ -94,19 +101,29 @@ export class DocumentManagementService {
     vehicleId: number,
     uploadedById?: number
   ): Promise<void> {
-    console.log('Traitement des documents du workflow pour le véhicule:', vehicleId);
-    console.log('Données du workflow reçues:', JSON.stringify(workflowData, null, 2));
+    // Jamais le contenu de workflowData (noms, chemins, données du véhicule) : des compteurs suffisent.
+    log.debug({ vehicleId }, 'traitement des documents du workflow');
+    if (!workflowData || typeof workflowData !== 'object') return;
 
     // Extraire les documents des données du workflow
     const documents = this.extractDocumentsFromWorkflowData(workflowData);
     
     if (documents.length === 0) {
-      console.log('Aucun document trouvé dans les données du workflow');
+      log.debug({ vehicleId }, 'aucun document dans les données du workflow');
       return;
     }
 
     // Sauvegarder les documents
     await this.saveDocumentsToDatabase(vehicleId, documents, uploadedById);
+  }
+
+  /**
+   * Types bruts des documents que processWorkflowDocuments écrira, sans effet : la route les vérifie
+   * avant de créer le véhicule.
+   */
+  static workflowDocumentTypes(workflowData: any): unknown[] {
+    if (!workflowData || typeof workflowData !== 'object') return [];
+    return this.extractDocumentsFromWorkflowData(workflowData).map((doc) => doc?.type);
   }
 
   /**
@@ -147,7 +164,7 @@ export class DocumentManagementService {
       }
     }
 
-    console.log(`Extracted ${documents.length} documents from workflow data`);
+    log.debug({ count: documents.length }, 'documents extraits du workflow');
     return documents;
   }
 
@@ -176,10 +193,10 @@ export class DocumentManagementService {
         .from(vehicleDocuments)
         .where(eq(vehicleDocuments.vehicleId, vehicleId));
       
-      console.log(`Trouvé ${docs.length} documents pour le véhicule ${vehicleId}`);
+      log.debug({ vehicleId, count: docs.length }, 'documents du véhicule lus');
       return docs;
     } catch (error) {
-      console.error('Erreur lors de la récupération des documents:', error);
+      log.error({ err: error, vehicleId }, 'échec de la lecture des documents du véhicule');
       throw error;
     }
   }

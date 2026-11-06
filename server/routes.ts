@@ -1110,10 +1110,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const priceRefusal = vehiclePriceWriteRefusal(req.user?.role, req.body?.vehicleData);
     if (priceRefusal) return next(priceRefusal);
     try {
-      const { vehicleData, workflowData } = req.body;
+      const { vehicleData } = req.body;
       
       // Valider les données du véhicule
       const parsedVehicle = insertVehicleSchema.parse(vehicleData);
+
+      // workflowData vérifié AVANT la création : absent ou mal formé, 400 normalisée (errorHandler), sans véhicule orphelin.
+      const { activationWorkflowDataSchema } = await import('./lib/activation-workflow-data');
+      const workflowCheck = activationWorkflowDataSchema.safeParse(req.body?.workflowData);
+      if (!workflowCheck.success) return next(workflowCheck.error);
+      const workflowData = workflowCheck.data;
       
       // Vérifier si l'immatriculation existe déjà
       const existingVehicle = await storage.getVehicleByRegistration(parsedVehicle.registrationNumber);
@@ -1121,18 +1127,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Numéro d'immatriculation déjà utilisé" });
       }
       
-      // Créer le véhicule
-      const vehicle = await storage.createVehicle(parsedVehicle, req.user?.id);
-      
       // Importer les services nécessaires
       const { VehicleActivationService } = await import('./services/vehicle-activation-service-working');
       const { DocumentManagementService } = await import('./services/document-management-service');
+
+      // Types de document vérifiés AVANT la création : un type inconnu ou inactif répond 400 sans véhicule orphelin.
+      const { resolveActiveVehicleDocumentTypes } = await import('./lib/vehicle-document-type');
+      await resolveActiveVehicleDocumentTypes([
+        ...VehicleActivationService.documentTypeCodes(workflowData?.documents),
+        ...DocumentManagementService.workflowDocumentTypes(workflowData),
+      ]);
+
+      // Créer le véhicule
+      const vehicle = await storage.createVehicle(parsedVehicle, req.user?.id);
       
       // Activer le véhicule avec toutes les données du workflow
+      // Champs non garantis par le schéma (marque, VIN…) : le service les lit sans les exiger.
       await VehicleActivationService.activateVehicleFromWorkflow(vehicle.id, {
         ...workflowData,
         vehicleId: vehicle.id,
-      });
+      } as unknown as Parameters<typeof VehicleActivationService.activateVehicleFromWorkflow>[1]);
 
       // Traiter et sauvegarder les documents du workflow
       const userId = req.user?.id || 1;
@@ -1166,8 +1180,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           errors: error.errors 
         });
       }
-      console.error("Create vehicle from workflow error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
+      // AppError (400 lisible) telle quelle ; le reste devient une 500 normalisée, journalisée par errorHandler.
+      return next(error);
     }
   });
 

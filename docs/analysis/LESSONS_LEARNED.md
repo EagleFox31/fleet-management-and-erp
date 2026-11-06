@@ -3346,6 +3346,34 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/README.md`, section Postgres local : piège « `read ECONNRESET` au bout de 30 s sous rafale ».
 - **Leçon généralisée** : toute attente réseau du produit a un plafond explicite et configurable. Avant d'en poser un sur un driver, vérifier son chemin d'échec contre un pair muet : un délai mal géré peut transformer une lenteur en plantage. Pour un échec intermittent à durée fixe, chercher d'abord quel composant coupe à cette durée, côté proxy et côté base, avant de soupçonner les verrous applicatifs.
 
+## 2026-11-06 — Véhicule orphelin après un refus dans `activate-from-workflow` (#583)
+
+- **Contexte** : `POST /api/vehicles/activate-from-workflow` laissait un véhicule créé alors que la requête échouait. Trois cas l'ont montré :
+  - un type de document inconnu ou désactivé : 500 « Erreur serveur », véhicule créé (mutant : 2 véhicules orphelins constatés en base) ;
+  - un corps sans `workflowData` : TypeError dans `extractDocumentsFromWorkflowData(undefined)`, 500, véhicule créé ;
+  - un `filesize` non numérique : échec de l'insertion du document, 500, véhicule créé.
+
+  Au rejeu, la route répondait ensuite « Numéro d'immatriculation déjà utilisé ».
+- **Cause racine** :
+  - la route crée le véhicule (`storage.createVehicle`) avant de valider le reste de l'entrée (types de document, forme de `workflowData`), sans transaction ;
+  - le catch répondait 500 à toute erreur, y compris à une AppError 400, ce qui masquait la nature du refus.
+- **Classification** : ordre validation / écriture inversé sur une route sans transaction. Erreur métier rendue en 500.
+- **Résolution** :
+  - `workflowData` passe un schéma Zod (`server/lib/activation-workflow-data.ts`) et les types de document passent `resolveActiveVehicleDocumentTypes`, tous deux avant `createVehicle` ;
+  - le catch fait `next(error)`, donc l'AppError et la ZodError donnent une 400 normalisée ;
+  - à la même occasion, un `file_path` hors de `uploads/` n'est plus rattaché, via `uploadedFileCandidates`.
+- **Prévention vérifiée** : `tests/contract/vehicle-activate-from-workflow-document-types.contract.test.ts`. Chaque test exige la 400 **et** l'absence de véhicule à l'immatriculation envoyée :
+  - type inconnu ;
+  - type désactivé ;
+  - `workflowData` absent ;
+  - `filesize` non numérique.
+
+  Les mutants sont détectés :
+  - ancienne route : 500 et 201, avec véhicules orphelins ;
+  - schéma retiré : 500 ;
+  - contrôle des codes d'activation retiré : 201.
+- **Limite connue** : une course reste possible. Un type désactivé entre le contrôle et l'écriture des documents (voie `processWorkflowDocuments`) lève la 400 après la création : le véhicule existe. Seule une transaction couvrant toute la chaîne la fermerait. Les services écrivent aujourd'hui sur la connexion globale.
+- **Leçon généralisée** : sans transaction, valider **toute** l'entrée (forme, références, droits) avant la première écriture. Un test de refus vérifie l'absence d'effet en base, pas seulement le statut HTTP.
 
 ## 2026-11-06 — Timeouts de connexion sous rafale en local : relever le plafond n'y fait rien
 

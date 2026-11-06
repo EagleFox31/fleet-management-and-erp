@@ -5,8 +5,9 @@ import { eq, inArray } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { uploadedFileCandidates } from "../../server/lib/uploaded-file";
+import { UNKNOWN_VEHICLE_DOCUMENT_TYPE_MESSAGE } from "../../server/lib/vehicle-document-type";
 import { WorkflowDocumentService } from "../../server/services/workflow-document-service";
-import { vehicleAcquisitionWorkflows, vehicleDocuments, workflowDocuments } from "../../shared/schema";
+import { vehicleAcquisitionWorkflows, vehicleDocuments, vehicleDocumentTypes, workflowDocuments } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { cleanupTrackedDir, trackDir, type TrackedDir } from "../support/tracked-dirs";
 import { createTestUser, createTestVehicle } from "../support/factories";
@@ -203,6 +204,27 @@ describe("WorkflowDocumentService.transferDocumentsToVehicle", { timeout: 60000 
 
     const [row] = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
     expect(row.type).toBe("autre");
+  });
+
+  it("type du référentiel désactivé : AppError 400, rien copié ni écrit, document non transféré", async () => {
+    const { sessionId, vehicleId, workflowId, document } = await workflowWithDocument("inactif.pdf", "factur_achat");
+    const vehicleDir = join(process.cwd(), "uploads", "documents", `vehicle-${vehicleId}`);
+    const [before] = await db.select({ active: vehicleDocumentTypes.active }).from(vehicleDocumentTypes).where(eq(vehicleDocumentTypes.code, "autre"));
+    expect(before).toBeDefined();
+    await db.update(vehicleDocumentTypes).set({ active: false }).where(eq(vehicleDocumentTypes.code, "autre"));
+    try {
+      await expect(WorkflowDocumentService.transferDocumentsToVehicle(sessionId, vehicleId, workflowId)).rejects.toMatchObject({
+        status: 400,
+        message: UNKNOWN_VEHICLE_DOCUMENT_TYPE_MESSAGE,
+      });
+    } finally {
+      await db.update(vehicleDocumentTypes).set({ active: before.active }).where(eq(vehicleDocumentTypes.code, "autre"));
+    }
+
+    expect(existsSync(vehicleDir) ? readdirSync(vehicleDir) : []).toEqual([]);
+    expect(await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId))).toHaveLength(0);
+    const [source] = await db.select().from(workflowDocuments).where(eq(workflowDocuments.id, document.id));
+    expect(source).toMatchObject({ isTransferred: false, vehicleId: null });
   });
 });
 
