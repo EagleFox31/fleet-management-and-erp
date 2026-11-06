@@ -1,6 +1,12 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { compareToBaseline, countErrorsByFile, lowerBaseline } from "../../../scripts/lib/tests-typecheck-ratchet.mjs";
+import {
+  compareToBaseline,
+  countErrorsByFile,
+  lowerBaseline,
+  raisedEntries,
+  resolveReferenceRef,
+} from "../../../scripts/lib/tests-typecheck-ratchet.mjs";
 
 const OUTPUT = [
   "tests/unit/a.test.ts(3,5): error TS2339: Property 'x' does not exist.",
@@ -40,6 +46,23 @@ describe("cliquet du typecheck des tests", () => {
     const lowered = lowerBaseline({ "tests/a.ts": 1, "tests/new.ts": 5 }, baseline);
     expect(lowered).toEqual({ "tests/a.ts": 1 });
     expect(lowerBaseline({ "tests/a.ts": 1 }, lowered)).toEqual(lowered);
+  });
+
+  it("garde : une base relevée par rapport à la référence est refusée, baisse et égalité passent", () => {
+    const reference = { "tests/a.ts": 2, "tests/b.ts": 1 };
+    expect(raisedEntries(reference, reference)).toEqual([]);
+    expect(raisedEntries({ "tests/a.ts": 1 }, reference)).toEqual([]);
+    expect(raisedEntries({ "tests/a.ts": 3, "tests/b.ts": 1, "tests/new.ts": 2 }, reference)).toEqual([
+      { file: "tests/a.ts", count: 3, allowed: 2 },
+      { file: "tests/new.ts", count: 2, allowed: 0 },
+    ]);
+  });
+
+  it("garde : référence explicite, sinon cible de la PR, sinon branche par défaut du distant", () => {
+    expect(resolveReferenceRef({ TESTS_BASELINE_REF: "origin/x", GITHUB_BASE_REF: "main" }, "origin/main")).toBe("origin/x");
+    expect(resolveReferenceRef({ GITHUB_BASE_REF: "develop" }, "origin/main")).toBe("origin/develop");
+    expect(resolveReferenceRef({ GITHUB_BASE_REF: "" }, "origin/trunk")).toBe("origin/trunk");
+    expect(resolveReferenceRef({}, null)).toBeNull();
   });
 
   it("la base versionnée ne vise que tests/ et e2e/, avec des comptes positifs", () => {

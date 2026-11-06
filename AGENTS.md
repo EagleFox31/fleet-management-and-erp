@@ -319,6 +319,9 @@ Notes :
 - Lancer **`npm run check` sur tout le projet** — ne pas filtrer la sortie sur ses
   seuls fichiers pour conclure « c'est bon ». Le décompte qui vaut : zéro `error TS`
   global.
+- `tests/typecheck-baseline.json` ne fait que baisser : `check:tests` la compare à celle
+  de la branche cible (`origin/<base>`, ou `TESTS_BASELINE_REF`) et refuse toute entrée
+  nouvelle ou plus haute. Corriger l'erreur TypeScript, ne pas la figer.
 - `npx playwright` ne fonctionne pas ici : les shims de `node_modules/.bin` font
   0 octet (dépendances installées sous Linux puis copiées). Utiliser
   `node node_modules/@playwright/test/cli.js test`.
@@ -387,6 +390,7 @@ Notes :
 - Clôture automatique de la commande : `autoCloseDeliveredOrderIfFinanceDone`, `server/services/three-way-matching-service.ts` (l. 122-128). L'`UPDATE` du statut `completed` filtre sur l'identifiant seul, sans condition de statut ni verrou. Entrée gelée (1) de `tests/unit/server/status-update-cas-hygiene.test.ts`. Ne pas en ajouter d'autre.
 - Montants en texte libre dans l'audit d'OT : `/api/work-orders/:id/audit-trail` est exempté de `tests/unit/server/work-order-cost-mask-coverage.test.ts` (l. 27). Le masquage par clé ne couvre pas les libellés. Ne pas étendre cette exemption sans son lot dédié.
 - Tests contrat intermittents `tests/contract/finance-withholdings.contract.test.ts` et `tests/contract/qhse-inspections.contract.test.ts` : non reproduits, instrumentés (corps de réponse). Ne pas relever le timeout ni les marquer `skip` sans diagnostic du corps de réponse.
+- Garde de réservation avant les droits : `server/middleware/booking-guard.ts` (monté dans `server/api/index.ts`) tourne avant `PATCH /api/work-orders/:id`. Un rôle que la liste blanche refuserait (403) peut donc recevoir d'abord un 409 de créneau, qui révèle le numéro de l'OT en conflit. Ne pas ajouter d'autre middleware métier qui précède le contrôle de rôle.
 
 ---
 

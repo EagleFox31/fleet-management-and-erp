@@ -53,6 +53,14 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npm run check
+      # La garde de check:tests compare tests/typecheck-baseline.json à celle de la branche
+      # cible (PR) ou par défaut (push, dispatch) : le checkout superficiel ne l'a pas.
+      - name: Branche de référence de la base typecheck
+        env:
+          BASE_BRANCH: ${{ github.base_ref || github.event.repository.default_branch }}
+        run: |
+          git fetch --no-tags --depth=1 origin "+refs/heads/${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}"
+          echo "TESTS_BASELINE_REF=origin/${BASE_BRANCH}" >> "$GITHUB_ENV"
       - run: npm run check:tests
 
   unit:
