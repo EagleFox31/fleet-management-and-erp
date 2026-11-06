@@ -85,6 +85,11 @@ export class ThreeWayMatchingService {
     // son état relu sous verrou, et l'écriture conditionnée à `delivered`. La seconde est un no-op,
     // sans trace en double ni notes écrasées. `no key update` reste compatible avec le `key share`
     // des contrôles de clé étrangère des factures liées : pas d'attente avec un rapprochement en cours.
+    // Les factures liées sont lues `for share` : une facture qui repasse non soldée dans une transaction
+    // en cours (règlement annulé, litige) est attendue puis relue, jamais lue soldée à tort. Ordre des
+    // verrous : commande puis factures ; aucun chemin ne verrouille une facture puis la commande (pas de
+    // déclencheur sur `purchase_orders`, la clé de commande d'une facture n'y prend que `key share`).
+    // Une facture créée après la clôture reste hors de ce contrôle, comme une facture créée plus tard.
     const closed = await db.transaction(async (tx) => {
       const [order] = await tx
         .select({
@@ -102,7 +107,8 @@ export class ThreeWayMatchingService {
       const linkedInvoices = await tx
         .select({ status: supplierInvoices.status })
         .from(supplierInvoices)
-        .where(eq(supplierInvoices.purchaseOrderId, orderId));
+        .where(eq(supplierInvoices.purchaseOrderId, orderId))
+        .for("share");
 
       if (linkedInvoices.length === 0 || !linkedInvoices.every((row) => row.status === "paid")) return null;
 

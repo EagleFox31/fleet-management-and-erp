@@ -82,17 +82,30 @@ async function orderState(orderId: number) {
   return { status: row.status, notes: row.notes, traces: (row.notes ?? "").match(/\[TRACE_PO\]/g)?.length ?? 0 };
 }
 
-/** Attend que `count` sessions soient bloquées sur un verrou de `purchase_orders` (sans minuterie aveugle). */
-async function waitForOrderLockWaiters(count: number, timeoutMs = 10000) {
+async function pidOf(tx: { execute: typeof db.execute }): Promise<number> {
+  const result = await tx.execute(sql`SELECT pg_backend_pid() AS pid`);
+  return Number((result.rows[0] as { pid: number }).pid);
+}
+
+/**
+ * Attend que `count` sessions attendent, directement ou en file derrière une autre, le verrou tenu
+ * par `holderPid`. Seules les sessions bloquées par ce pid comptent : une autre suite qui attend un
+ * verrou ailleurs dans la base ne fausse pas l'attente.
+ */
+async function waitForWaitersOn(holderPid: number, count: number, timeoutMs = 10000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const result = await db.execute(sql`
-      SELECT count(*)::int AS n FROM pg_stat_activity
-      WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE '%purchase_orders%'`);
+      WITH RECURSIVE chain(pid) AS (
+        SELECT ${holderPid}::int
+        UNION
+        SELECT a.pid FROM pg_stat_activity a JOIN chain c ON c.pid = ANY(pg_blocking_pids(a.pid))
+      )
+      SELECT count(*)::int - 1 AS n FROM chain`);
     if (Number((result.rows[0] as { n: number }).n) >= count) return;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  throw new Error(`Les ${count} clôtures n'ont pas atteint le verrou de la commande.`);
+  throw new Error(`${count} session(s) attendue(s) sur le verrou du pid ${holderPid}, pas atteint.`);
 }
 
 describe("clôture automatique de commande après règlement complet", { timeout: 60000 }, () => {
@@ -118,7 +131,7 @@ describe("clôture automatique de commande après règlement complet", { timeout
       await tx.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.id, orderId)).for("update");
       await tx.update(purchaseOrders).set({ notes: added }).where(eq(purchaseOrders.id, orderId));
       closures = invoices.map((invoice) => autoClose(invoice, actorId));
-      await waitForOrderLockWaiters(2);
+      await waitForWaitersOn(await pidOf(tx), 2);
     });
     await Promise.all(closures);
 
@@ -126,6 +139,22 @@ describe("clôture automatique de commande après règlement complet", { timeout
     expect(after.status).toBe("completed");
     expect(after.traces).toBe(1);
     expect(after.notes?.startsWith(`${added}\n[TRACE_PO] `), after.notes ?? "").toBe(true);
+  });
+
+  it("facture liée repassée non soldée pendant la clôture : la clôture l'attend et ne clôture pas", async () => {
+    const { orderId, invoices } = await orderWithInvoices("delivered", ["paid", "paid"]);
+
+    let closure: Promise<void> = Promise.resolve();
+    await db.transaction(async (tx) => {
+      // Une transaction en cours rend la seconde facture non soldée (règlement annulé) : la clôture
+      // doit attendre son issue au lieu de lire l'état soldé encore visible.
+      await tx.update(supplierInvoices).set({ status: "approved" }).where(eq(supplierInvoices.id, invoices[1].id));
+      closure = autoClose(invoices[0], actorId);
+      await waitForWaitersOn(await pidOf(tx), 1);
+    });
+    await closure;
+
+    expect(await orderState(orderId)).toEqual({ status: "delivered", notes: NOTES, traces: 0 });
   });
 
   it("une facture liée non soldée : la commande reste livrée, notes inchangées", async () => {

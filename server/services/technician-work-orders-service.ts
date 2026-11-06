@@ -4,7 +4,6 @@ import { eq, and, desc, inArray, sum, sql } from 'drizzle-orm';
 import { computeWorkOrderCost } from '@shared/work-order-cost';
 import { moduleLogger } from '../lib/logger';
 import { laborRatesForWorkOrders } from './workshop-labor-rates-service';
-import { workOrderStaffScope } from "../lib/work-order-realtime-scope";
 
 const log = moduleLogger('technician-work-orders');
 
@@ -222,80 +221,6 @@ export class TechnicianWorkOrdersService {
   }
 
   /**
-   * Mettre à jour le statut d'un ordre de travail
-   */
-  async updateWorkOrderStatus(
-    workOrderId: number, 
-    technicianId: number, 
-    newStatus: string, 
-    notes?: string
-  ): Promise<TechnicianWorkOrder | null> {
-    try {
-      console.log(`🔄 [TECH-WO] Mise à jour statut OT ${workOrderId} vers ${newStatus} par technicien ${technicianId}`);
-      
-      // Vérifier que l'ordre appartient au technicien
-      const existingOrder = await db
-        .select()
-        .from(workOrders)
-        .where(and(
-          eq(workOrders.id, workOrderId),
-          eq(workOrders.technicianId, technicianId)
-        ))
-        .limit(1);
-
-      if (!existingOrder.length) {
-        throw new Error('Ordre de travail non trouvé ou non assigné à ce technicien');
-      }
-
-      const updateData: any = {
-        status: newStatus,
-        updatedAt: new Date()
-      };
-
-      if (notes) {
-        updateData.notes = notes;
-      }
-
-      if (newStatus === 'completed') {
-        updateData.completedDate = new Date();
-      }
-
-      const [updatedOrder] = await db
-        .update(workOrders)
-        .set(updateData)
-        .where(eq(workOrders.id, workOrderId))
-        .returning();
-
-      if (newStatus === 'completed' && existingOrder[0].status !== 'completed') {
-        // P3-1 : un OT préventif clôturé fait avancer l'échéance de son plan.
-        const { preventiveMaintenanceService } = await import('./preventive-maintenance-service');
-        await preventiveMaintenanceService.onWorkOrderCompleted(workOrderId);
-      }
-
-      console.log(`✅ [TECH-WO] Statut mis à jour avec succès`);
-      
-      // Diffuser la mise à jour via WebSocket temps réel
-      if ((global as any).broadcastUpdate) {
-        (global as any).broadcastUpdate('work_order_status_changed', {
-          scope: workOrderStaffScope(),
-          workOrderId,
-          technicianId,
-          oldStatus: existingOrder[0].status,
-          newStatus,
-          notes
-        });
-      }
-      
-      // Retourner l'ordre enrichi
-      const enrichedOrders = await this.getTechnicianWorkOrders(technicianId);
-      return enrichedOrders.find(wo => wo.id === workOrderId) || null;
-    } catch (error) {
-      console.error('Erreur lors de la mise à jour du statut:', error);
-      throw error;
-    }
-  }
-
-  /**
    * Récupérer les ordres en attente (pour notifications)
    */
   async getPendingWorkOrdersCount(technicianId: number): Promise<number> {
@@ -315,33 +240,6 @@ export class TechnicianWorkOrdersService {
     }
   }
 
-  /**
-   * Prendre en charge un ordre de travail (passer de pending à in_progress)
-   */
-  async takeWorkOrder(workOrderId: number, technicianId: number): Promise<TechnicianWorkOrder | null> {
-    return this.updateWorkOrderStatus(
-      workOrderId, 
-      technicianId, 
-      'in_progress', 
-      'Ordre de travail pris en charge par le technicien'
-    );
-  }
-
-  /**
-   * Terminer un ordre de travail
-   */
-  async completeWorkOrder(
-    workOrderId: number, 
-    technicianId: number, 
-    completionNotes?: string
-  ): Promise<TechnicianWorkOrder | null> {
-    return this.updateWorkOrderStatus(
-      workOrderId, 
-      technicianId, 
-      'completed', 
-      completionNotes || 'Ordre de travail terminé'
-    );
-  }
 
   // Méthodes utilitaires privées
   private getPriorityLabel(priority: string): string {
