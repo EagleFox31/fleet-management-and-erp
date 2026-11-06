@@ -2518,6 +2518,6 @@ soumission sans doublon.
 - **Comment tester (QA)** :
   - `tests/unit/server/db-pool-options.test.ts` : serveur TCP muet, rejet au plafond sans fuite. Rouge en 0.10.4 (TypeError), vert en 1.2.0.
   - `tests/integration/session-store-neon-pool.test.ts` : aller-retour de session à travers le Pool neon, store de production et création de table.
-  - Campagnes sur Postgres local : unitaires 299/299, intégration 73/73 et 1/1, contrats 254/254, work-order-items 10/10 en boucle (13 à 18 s, aucun 503).
+  - Campagnes sur Postgres local : unitaires 301/301, intégration 73/73 et 1/1, contrats 254/254, work-order-items 10/10 en boucle (13 à 18 s, aucun 503).
 - **RAIDER** : R/A (plafond configurable par variable d'environnement, sans hypothèse d'hébergeur) ; D (comportement de la garde inchangé, contrats verts) ; Failure memory (`LESSONS_LEARNED.md`, `tests/README.md`).
 - **Reste / risques** : le plafond borne aussi l'attente d'une place dans le pool (max 10 par défaut, inchangé) : sous saturation de plus de 10 s, la requête répond par un 5xx générique avec sa référence. Prod sur GO de l'utilisatrice.
