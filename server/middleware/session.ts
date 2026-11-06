@@ -1,5 +1,6 @@
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
+import type { Pool as PgPool } from "pg";
 import { pool } from "../db";
 import { moduleLogger } from "../lib/logger";
 import { sessionCookieFlags } from "../lib/session-cookie";
@@ -34,7 +35,9 @@ export const sessionMiddleware = session({
     maxAge: 30 * 24 * 60 * 60 * 1000, // 30 jours
   },
   store: new PgSession({
-    pool: pool,
+    // Le Pool neon est un pg.Pool à l'exécution (pg embarqué) ; depuis neon 1.1 ses types sont
+    // inlinés et n'ont plus l'identité de ceux de @types/pg qu'attend connect-pg-simple.
+    pool: pool as unknown as PgPool,
     tableName: "session",
     createTableIfMissing: true,
   }),
