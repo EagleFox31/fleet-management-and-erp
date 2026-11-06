@@ -32,6 +32,7 @@ const ALLOWED_ROOT_FILES = [
   "test-status-history.js",
   "test-workflow-reminders.js",
   "tsconfig.json",
+  "tsconfig.tests.json",
   "vite.config.ts",
   "vitest.config.ts",
   "vitest.contract.config.ts",

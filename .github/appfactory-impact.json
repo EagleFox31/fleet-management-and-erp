@@ -33,7 +33,7 @@
       "gates": []
     },
     "shared": {
-      "paths": ["shared/**", "package.json", "package-lock.json", "tsconfig.json"],
+      "paths": ["shared/**", "package.json", "package-lock.json", "tsconfig.json", "tsconfig.tests.json", "tests/typecheck-baseline.json"],
       "gates": ["typecheck", "unit"]
     },
     "server": {

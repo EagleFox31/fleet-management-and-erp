@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["client/src/**/*", "shared/**/*", "server/**/*", "tests/**/*", "e2e/**/*"],
+  "exclude": ["node_modules", "build", "dist", "server/_archive/**/*"],
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/typescript/tsbuildinfo.tests"
+  }
+}
