@@ -385,3 +385,34 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
 - **Pourquoi** : 3,8 s de tests pour une limite de 5 s. Cinq cas relançaient `scanFiles` (analyse TypeScript de chaque fichier serveur), à environ 700 ms par passe.
 - **Comment** : `occurrences()` mémoïse le balayage et rend une copie à chaque appel, pour qu'aucun cas ne modifie le résultat d'un autre. Aucune règle ni limite changée.
 - **Preuve** : deux mesures locales. Tests du fichier : 3,84 s, puis 1,46 s et 1,58 s. Le cas le plus long, qui porte le balayage, passe à 1,3 s ; avant, chacun des cinq cas prenait de 650 à 850 ms. 30 cas verts.
+
+## 2026-11-06T01:41:09+01:00 — Tests contrat signalés instables : finance-withholdings, qhse-inspections
+
+**Quoi.** Deux fichiers ont été signalés rouges, uniquement dans la suite contrat complète :
+- finance-withholdings, cas « admin » et « management : 200 au contrat » ;
+- qhse-inspections, cas « applique les rôles, la cloison chauffeur et la validation de la grille ».
+
+Seul le résumé a été remonté, pas le message d'erreur.
+
+**Constat.** L'échec n'est pas reproduit en local sur Postgres Docker :
+- suite contrat complète : 245 fichiers, 2963 tests verts ;
+- les deux fichiers seuls : 34 tests verts.
+
+**Pistes écartées, preuve dans le code :**
+- *Cache des drapeaux de fonctionnalité* : `getFeatureFlags` relit `FEATURE_FLAGS` à chaque appel.
+- *Plafond d'échecs par IP* : relevé à 100 000 par `setup-contract.ts`. Les deux fichiers qui l'abaissent le restaurent.
+- *Horloge figée, espions, TZ, fetch global* : tous restaurés. Aucun `stubGlobal` ni remplacement de `fetch` dans les tests contrat.
+- *CHECK `category` des critères QHSE selon l'ordre des fichiers* : `initializeDatabase()` tourne une seule fois par processus, dans `setup-contract.ts`, avant le premier fichier. La réconciliation des contraintes (#122) précède donc toujours qhse, quel que soit l'ordre.
+- *Timeout pour qhse* : le describe porte un timeout de 180 s, et le cas dure 3,7 s.
+
+**Piste ouverte.** Les cas « 200 au contrat » de finance-withholdings gardent le timeout par défaut de 5 s.
+
+**Comment.** Les assertions qui échouaient affichent désormais le corps de la réponse :
+- la connexion de qhse et la lecture de la grille cabine ;
+- le statut 200 de finance-withholdings.
+
+Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drapeau), d'un 500 ou d'une grille vide.
+
+**Pourquoi** `testTimeout` n'est pas relevé : rien ne prouve qu'un timeout soit en cause. Le relever masquerait une lenteur réelle sans la nommer.
+
+**Leçon.** Un test signalé instable se remonte avec le texte de l'assertion, pas en résumé. Toute assertion de statut sur un appel HTTP porte le corps de la réponse en message (`expect(r.status, JSON.stringify(r.body))`), sinon l'échec intermittent reste indiagnosticable.
