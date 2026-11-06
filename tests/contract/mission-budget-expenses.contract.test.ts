@@ -15,6 +15,7 @@ import { isoDateInZone } from "../../shared/contracts/kpi-period";
 import { addDaysToIsoDate } from "../../shared/constants/document-renewal-statuses";
 import { fuelPrices, missionBudgetExpenses, missionBudgets, missions, treasuryAccounts, treasuryEntries } from "../../shared/schema";
 import { db } from "../../server/db";
+import { reverseMissionBudgetDisbursements } from "../../server/services/treasury-links";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
@@ -283,11 +284,41 @@ describe("Dépenses justifiées du budget de mission (L1e)", { timeout: 120000 }
     expect((await call("DELETE", missionBudgetExpensePath(budgetId, live.id), "logistics")).status).toBe(409);
   });
 
-  it("mission terminée : saisie et suppression refusées (409)", async () => {
+  const complete = (missionId: number) =>
+    db.update(missions).set({ status: "completed", completedAt: new Date() }).where(eq(missions.id, missionId));
+
+  it("mission terminée, reliquat non rendu (R1) : saisie et suppression ouvertes, plafond du décaissé maintenu", async () => {
+    const { missionId, budgetId } = await disbursedBudget();
+    const before = missionBudgetExpenseSchema.parse((await addExpense(budgetId, expense("fdr", 1_000))).body);
+    await complete(missionId);
+    const after = await addExpense(budgetId, expense("fdr", 2_000));
+    expect(after.status, JSON.stringify(after.body)).toBe(201);
+    expect((await call("DELETE", missionBudgetExpensePath(budgetId, before.id), "logistics")).status).toBe(204);
+    expect((await addExpense(budgetId, expense("fdr", FDR))).status, "au-delà du décaissé").toBe(409);
+    const lines = missionBudgetExpensesResponseSchema.parse((await call("GET", missionBudgetExpensesPath(budgetId), "admin")).body).lines;
+    expect(lines.find((l) => l.line === "fdr")?.justified).toBe(2_000);
+  });
+
+  it("mission terminée, reliquat rendu : saisie et suppression refusées (409)", async () => {
     const { missionId, budgetId } = await disbursedBudget();
     const created = missionBudgetExpenseSchema.parse((await addExpense(budgetId, expense("fdr", 1_000))).body);
-    await db.update(missions).set({ status: "completed", completedAt: new Date() }).where(eq(missions.id, missionId));
-    expect((await addExpense(budgetId, expense("fdr", 1_000))).status).toBe(409);
+    await complete(missionId);
+    // Aucun écran ne rend encore le reliquat d'une mission terminée : contre-passation par le service réel.
+    expect(await db.transaction((tx) => reverseMissionBudgetDisbursements(tx as never, [budgetId], null))).toBeGreaterThan(0);
+    const refused = await addExpense(budgetId, expense("fdr", 1_000));
+    expect(refused.status).toBe(409);
+    expect(refused.body.message).toBe("Le reliquat de ce budget a été rendu au compte source : ses dépenses ne changent plus.");
+    expect((await call("DELETE", missionBudgetExpensePath(budgetId, created.id), "logistics")).status).toBe(409);
+  });
+
+  it("mission annulée, même sans contre-passation : saisie et suppression refusées (409)", async () => {
+    const { missionId, budgetId } = await disbursedBudget();
+    const created = missionBudgetExpenseSchema.parse((await addExpense(budgetId, expense("fdr", 1_000))).body);
+    // Statut posé hors parcours : prouve que le refus tient au statut, pas seulement à la contre-passation.
+    await db.update(missions).set({ status: "cancelled" }).where(eq(missions.id, missionId));
+    const refused = await addExpense(budgetId, expense("fdr", 1_000));
+    expect(refused.status).toBe(409);
+    expect(refused.body.message).toBe("Cette mission est annulée : ses dépenses ne changent plus.");
     expect((await call("DELETE", missionBudgetExpensePath(budgetId, created.id), "logistics")).status).toBe(409);
   });
 
