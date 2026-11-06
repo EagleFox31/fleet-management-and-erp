@@ -35,8 +35,6 @@ const KNOWN_SWALLOWING = [
   "server/storage.ts#deleteVehicle",
   "server/storage.ts#deleteWorkOrder",
   "server/storage.ts#markAlertAsRead",
-  "server/storage.ts#updatePartRequirement",
-  "server/storage.ts#updatePartUsed",
 ];
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
