@@ -537,11 +537,6 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
 - **Prévention** : `tests/unit/support/env-restore.test.ts` échoue si un contrat affecte une variable d'environnement absente de `FILE_SCOPED_ENV`.
 - **Leçon** : en `isolate: false`, l'état du processus (env, singletons) passe d'un fichier à l'autre. Une variable que les tests modifient doit être restaurée par le setup commun, pas laissée à la discipline de chaque fichier.
 
-## 2026-11-06 — Storage : correction de document lisible (FROZEN_OPAQUE)
-
-- **Quoi** : `storage.updateVehicleDocument` n'écrit plus un objet générique `Partial<InsertVehicleDocument>` mais les seuls champs d'une correction (`name`, `description`, `expiryDate`, `updatedBy`), nommés un à un dans le `.set(…)`. Le `catch` qui avalait l'erreur SQL et renvoyait `undefined` (faux 404) est retiré. `server/services/documentStorage.ts`, sans aucun importeur, est supprimé.
-- **Comment** : type `VehicleDocumentCorrection` (Pick des quatre champs) dans l'interface `IStorage`. L'appelant unique (`PATCH /api/documents/:id`) ne change pas. Nouveau contrat : un corps qui forge `vehicleId`, `filePath`, `type`, `uploadedBy` ou `updatedBy` n'écrit que le nom, et l'auteur reste l'utilisateur de la session.
-- **Pourquoi** : écriture illisible statiquement sous `eq(id)` seul, comptée dans `FROZEN_OPAQUE` (storage.ts et documentStorage.ts). `vehicle_documents` n'a pas de colonne `status` : aucune transition n'est en jeu, il suffit de rendre le contenu écrit lisible. La liste `swallowed-write-catch-hygiene` perd trois entrées. `FROZEN_OPAQUE` n'existe pas encore sur `main` (arrive avec #559) : son abaissement se fera en fusionnant `main` après la pile.
 ## 2026-11-06 — Clôture automatique de commande : verrou et CAS, plus de note perdue
 
 - **Contexte** : `autoCloseDeliveredOrderIfFinanceDone` (`three-way-matching-service.ts`) passe la commande de `delivered` à `completed` quand toutes ses factures sont soldées. C'était la dernière écriture de statut de ce fichier sans condition sur l'état lu, gelée dans `status-update-cas-hygiene`.
