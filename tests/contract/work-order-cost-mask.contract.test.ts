@@ -1,7 +1,7 @@
 import { inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
-import { partRequirements, partsUsed, tireRotations, workOrders } from "../../shared/schema";
+import { activityLogs, partRequirements, partsUsed, tireRotations, workOrders } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestPart, createTestVehicle } from "../support/factories";
@@ -147,5 +147,51 @@ describe("sans session", () => {
   it("GET /api/work-orders/:id : 401", async () => {
     const res = await api.call("GET", `/api/work-orders/${workOrderId}`);
     expect(res.status).toBe(401);
+  });
+});
+
+/**
+ * Routes réservées aux rôles coût : le chauffeur est refusé avant toute lecture, le masquage n'a
+ * donc rien à retirer. `covers` les déclare au garde-fou de couverture.
+ */
+const AUDITED_AMOUNT = "6666.66";
+const COST_READER_ONLY = [
+  { name: "journal d'audit de l'OT", covers: "/api/work-orders/:id/audit-trail", path: () => `/api/work-orders/${workOrderId}/audit-trail` },
+];
+
+describe.each(COST_READER_ONLY)("GET $name : réservé aux rôles coût", (route) => {
+  const logIds: number[] = [];
+  beforeAll(async () => {
+    process.env.FEATURE_FLAGS = "work-order-audit-trail=on";
+    const rows = await db
+      .insert(activityLogs)
+      .values({
+        userId: api.userIdOf("manager"),
+        action: "UPDATE",
+        entityType: "work_order",
+        entityId: workOrderId,
+        method: "PATCH",
+        path: `/work-orders/${workOrderId}`,
+        // clé hors de WORK_ORDER_COST_KEYS et montant en texte libre : le masquage ne les retire pas
+        details: { laborRate: AUDITED_AMOUNT, notes: `devis ${AUDITED_AMOUNT} FCFA` },
+      })
+      .returning({ id: activityLogs.id });
+    logIds.push(...rows.map((r) => r.id));
+  });
+  afterAll(async () => {
+    delete process.env.FEATURE_FLAGS;
+    if (logIds.length > 0) await db.delete(activityLogs).where(inArray(activityLogs.id, logIds));
+  });
+
+  it.each(["driver", "client"] as const)("%s : 403, aucun montant", async (actor) => {
+    const res = await api.call("GET", route.path(), { actor });
+    expect(res.status).toBe(403);
+    expect(JSON.stringify(res.body)).not.toContain(AUDITED_AMOUNT);
+  });
+
+  it.each(["manager", "technician"] as const)("%s (rôle coût) : 200 avec le montant audité", async (actor) => {
+    const res = await api.call("GET", route.path(), { actor });
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(res.body)).toContain(AUDITED_AMOUNT);
   });
 });

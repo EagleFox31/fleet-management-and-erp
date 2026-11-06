@@ -11,4 +11,7 @@ const router = Router();
  */
 router.get("/parts/statistics", isStockValuationReader, (_req, _res, next) => next());
 
+// Pièces extraites d'une facture : `unitPrice` et `totalValue` (prix × stock) par pièce. Même périmètre.
+router.get("/invoices/:id/parts", isStockValuationReader, (_req, _res, next) => next());
+
 export default router;

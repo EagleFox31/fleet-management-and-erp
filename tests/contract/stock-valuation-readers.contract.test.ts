@@ -87,6 +87,21 @@ describe.each(VALUATION_ROUTES)("GET %s", { timeout: 120000 }, (path) => {
   });
 });
 
+describe("GET /api/invoices/:id/parts (prix et valeur par pièce)", { timeout: 120000 }, () => {
+  const path = "/api/invoices/999999999/parts";
+
+  it("chauffeur : 403 par la garde, avant toute lecture", async () => {
+    const res = await get(path, "driver");
+    expect(res.status).toBe(403);
+    expect(JSON.parse(await res.text()).message).toBe("Accès non autorisé");
+    expect((await get("/API/Invoices/999999999/Parts/", "driver")).status).toBe(403);
+  });
+
+  it.each(["warehouse", "technician"] as const)("%s : franchit la garde (ni 401 ni 403)", async (role) => {
+    expect([401, 403]).not.toContain((await get(path, role)).status);
+  });
+});
+
 describe("variantes de chemin", { timeout: 120000 }, () => {
   it("casse et barre finale : la garde s'applique toujours au chauffeur", async () => {
     expect((await get("/API/Parts/Statistics/", "driver")).status).toBe(403);

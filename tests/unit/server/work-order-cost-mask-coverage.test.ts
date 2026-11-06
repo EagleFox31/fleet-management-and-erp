@@ -24,7 +24,6 @@ const EXEMPTIONS: Array<{ route: string; raison: string }> = [
   { route: "/api/work-orders/:id/labor-rate", raison: "déjà réservée aux rôles coût (authorize WORK_ORDER_COST_READ_ROLES), le chauffeur est refusé en 403" },
   { route: "/api/work-orders/technician/:id", raison: "isTechnician (admin, workshop_manager, technician) : tous sont des rôles coût, le masquage ne s'y applique jamais" },
   { route: "/api/work-orders/:id/export", raison: "isTechnician ou isStockIssuer, document PDF ou CSV non JSON : hors du masquage par construction" },
-  { route: "/api/work-orders/:id/audit-trail", raison: "journal d'audit (isStaff, derrière le drapeau work-order-audit-trail) : écritures auditées, pas de colonne de coût ; les clés de coût nues seraient masquées par le middleware, à auditer dans un lot séparé" },
 ];
 
 const normalize = (route: string) => route.replace(/:\w+/g, ":id").replace(/\/+$/, "") || "/";
