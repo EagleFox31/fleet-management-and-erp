@@ -141,6 +141,8 @@ describe("POST /api/work-orders/:id/quality-check", () => {
     const history = await db.select().from(statusHistory).where(eq(statusHistory.vehicleId, vehicle.id)).orderBy(desc(statusHistory.id));
     expect(history[0]?.status).toBe("maintenance");
     expect(history[0]?.notes).toContain(`#${wo.id}`);
+    // Le déclencheur et les effets du service immobilisent tous deux le véhicule : une seule trace.
+    expect(history.filter((h) => h.status === "maintenance")).toHaveLength(1);
   });
 
   /**

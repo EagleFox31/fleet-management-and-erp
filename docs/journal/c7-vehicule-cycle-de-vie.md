@@ -725,3 +725,21 @@ WHERE po.status IN ('delivered', 'completed')
 - **Quoi** : `storage.updateVehicleDocument` n'écrit plus un objet générique `Partial<InsertVehicleDocument>` mais les seuls champs d'une correction (`name`, `description`, `expiryDate`, `updatedBy`), nommés un à un dans le `.set(…)`. Le `catch` qui avalait l'erreur SQL et renvoyait `undefined` (faux 404) est retiré. `server/services/documentStorage.ts`, sans aucun importeur, est supprimé.
 - **Comment** : type `VehicleDocumentCorrection` (Pick des quatre champs) dans l'interface `IStorage`. L'appelant unique (`PATCH /api/documents/:id`) ne change pas. Nouveau contrat : un corps qui forge `vehicleId`, `filePath`, `type`, `uploadedBy` ou `updatedBy` n'écrit que le nom, et l'auteur reste l'utilisateur de la session.
 - **Pourquoi** : écriture illisible statiquement sous `eq(id)` seul, comptée dans `FROZEN_OPAQUE` (storage.ts et documentStorage.ts). `vehicle_documents` n'a pas de colonne `status` : aucune transition n'est en jeu, il suffit de rendre le contenu écrit lisible. La liste `swallowed-write-catch-hygiene` perd trois entrées. `FROZEN_OPAQUE` n'existe pas encore sur `main` (arrive avec #559) : son abaissement se fera en fusionnant `main` après la pile.
+
+## 2026-11-06 — Contrôle qualité : refus et validation par la transition d'OT commune
+
+- **Quoi** : le refus du contrôle qualité remet l'OT en cours par `transitionWorkOrderStatus`, et non plus par un `UPDATE … WHERE id` direct. La validation écrit sous la même condition (`completed -> completed`). Le contrôle (`qcStatus`, `qcBy`, `qcAt`, `qcReason`) est écrit dans `onTransition`, donc dans la même transaction que le statut.
+- **Comment** :
+  - `checkWorkOrderTransition(from, to, role, via?)` reçoit une voie `quality_check`. C'est la seule voie qui rouvre un OT terminé, et seulement vers `in_progress` (D-17).
+  - Sans cette voie, la règle reste fermée : la modale d'édition ne change pas.
+  - Les effets sur le parc sont rejoués par le service. Ils sont idempotents avec `trg_work_orders_hold_vehicle`, qui immobilise déjà le véhicule : une seule ligne d'historique.
+- **Pourquoi** : c'était l'une des deux dernières écritures de statut d'OT hors du compare-and-set, gelée dans `status-update-cas-hygiene`. Un OT modifié entre la lecture et l'écriture voyait son statut écrasé, et la validation pouvait s'écrire sur un OT qui n'était plus terminé. La liste gelée perd l'entrée `quality-check.routes.ts`.
+- **Écart validé par 0a** : la validation pose désormais `updatedBy` et `updatedAt` sur l'OT, comme les autres transitions depuis #572.
+- **Preuve** :
+  - deux courses réelles (verrou de ligne, OT rouvert pendant la requête), pour le refus et pour la validation : 409, contrôle non écrit ;
+  - une seule ligne d'historique de maintenance après un refus ;
+  - mutants :
+    - route d'origine : 2 échecs ;
+    - voie qualité ouverte à toute transition : 1 échec ;
+    - garde d'idempotence de `setVehicleToMaintenance` retirée : 1 échec (double trace) ;
+  - suites complètes vertes : tsc 0, 3 127 tests unitaires, 3 128 tests de contrat.
