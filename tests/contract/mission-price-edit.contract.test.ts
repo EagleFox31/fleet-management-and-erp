@@ -1,5 +1,5 @@
 import { createServer, type Server } from "http";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { missionPricePath, missionPriceResponseSchema } from "../../shared/contracts/mission-price";
 import { db } from "../../server/db";
@@ -8,6 +8,7 @@ import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestClient, createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { waitForBlockedBy } from "../support/lock-wait";
 
 /** O3 lot 3b : correction du prix convenu (rôle x statut, facture, motif, historique, événement sans prix). */
 let server: Server;
@@ -205,20 +206,21 @@ describe("prix convenu : correction", { timeout: 120000 }, () => {
     const due = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
     let release!: () => void;
     const held = new Promise<void>((r) => (release = r));
-    let locked!: () => void;
-    const lockTaken = new Promise<void>((r) => (locked = r));
+    let locked!: (pid: number) => void;
+    const lockTaken = new Promise<number>((r) => (locked = r));
     const holder = db.transaction(async (tx) => {
       await tx.select({ id: missions.id }).from(missions).where(eq(missions.id, id)).for("update");
-      locked();
+      const { rows } = await tx.execute(sql`SELECT pg_backend_pid() AS pid`);
+      locked(Number((rows[0] as { pid: number }).pid));
       await held;
     });
-    await lockTaken;
+    const holderPid = await lockTaken;
     let done = false;
     const gen = call("POST", "/api/billing/invoices/generate", "admin", { missionId: id, amount: 100, dueDate: due, includeVAT: false }).then((r) => {
       done = true;
       return r;
     });
-    await new Promise((r) => setTimeout(r, 800));
+    await waitForBlockedBy(holderPid, "génération de facture");
     expect(done, "la génération doit attendre le verrou").toBe(false);
     release();
     await holder;
