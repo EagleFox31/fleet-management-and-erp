@@ -1,5 +1,5 @@
 import { eq, inArray } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
 import { procurementService } from "../../server/services/procurement-service";
 import { parts, partsStockMovements, purchaseOrderLines, purchaseOrders, supplierInvoices } from "../../shared/schema";
@@ -13,6 +13,8 @@ import { pidOf, waitForWaitersOn } from "../support/lock-waiters";
  * - Deux réceptions simultanées : une seule transition, une seule entrée en stock, une seule trace.
  * - Clôture manuelle pendant qu'une facture liée repasse non soldée : la clôture attend, puis refuse.
  * - Témoin : clôture d'une commande livrée dont la facture est soldée.
+ * - Livraison pendant une réception de ligne : le crédit déjà fait est déduit, pas recrédité.
+ * - Panne de l'entrée en stock : rien n'est validé, un nouvel essai refait tout.
  */
 
 const ids = createIdBag();
@@ -38,6 +40,10 @@ afterAll(async () => {
     await db.delete(partsStockMovements).where(inArray(partsStockMovements.partId, ids.partIds));
   }
   await cleanupCreated(ids);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 async function order(status: string, partId?: number) {
@@ -72,6 +78,17 @@ async function linkedInvoice(orderId: number, status: string) {
   // La fabrique ne transmet pas `purchaseOrderId` : rattachement explicite à la commande.
   await db.update(supplierInvoices).set({ purchaseOrderId: orderId }).where(eq(supplierInvoices.id, created.id));
   return created.id;
+}
+
+async function lineOf(orderId: number) {
+  const [line] = await db.select().from(purchaseOrderLines).where(eq(purchaseOrderLines.purchaseOrderId, orderId));
+  return line;
+}
+
+async function stockOf(partId: number) {
+  const [row] = await db.select({ quantity: parts.quantity }).from(parts).where(eq(parts.id, partId));
+  const movements = await db.select().from(partsStockMovements).where(eq(partsStockMovements.partId, partId));
+  return { quantity: row.quantity, movements: movements.length };
 }
 
 async function orderState(orderId: number) {
@@ -131,5 +148,81 @@ describe("transition manuelle de commande : verrou et compare-and-set", { timeou
     // Rejeu : statut déjà atteint, aucune écriture.
     await procurementService.updateOrderStatus(orderId, "completed", actorId);
     expect(await orderState(orderId)).toEqual({ status: "completed", traces: 1 });
+  });
+
+  it("livraison pendant une réception de ligne en cours : le crédit de la ligne est déduit", async () => {
+    const part = await createTestPart({ quantity: 0 });
+    ids.partIds.push(part.id);
+    const orderId = await order("confirmed", part.id);
+    const line = await lineOf(orderId);
+
+    let delivery: Promise<unknown> = Promise.resolve();
+    await db.transaction(async (tx) => {
+      // Réception d'une pièce sur la ligne, non encore validée : quantité reçue et stock à 1.
+      await tx.update(purchaseOrderLines).set({ quantityReceived: 1, deliveryStatus: "partial" }).where(eq(purchaseOrderLines.id, line.id));
+      await tx.update(parts).set({ quantity: 1 }).where(eq(parts.id, part.id));
+      delivery = procurementService.updateOrderStatus(orderId, "delivered", actorId);
+      await waitForWaitersOn(await pidOf(tx), 1);
+    });
+    await delivery;
+
+    // 2 commandées : 1 par la ligne, 1 par la livraison. Sans verrou des lignes, la livraison en créditait 2.
+    expect((await stockOf(part.id)).quantity).toBe(2);
+    expect((await lineOf(orderId)).quantityReceived).toBe(2);
+  });
+
+  it("réception de ligne et livraison simultanées : le stock converge sur la quantité commandée", async () => {
+    const part = await createTestPart({ quantity: 0 });
+    ids.partIds.push(part.id);
+    const orderId = await order("confirmed", part.id);
+    const line = await lineOf(orderId);
+
+    let attempts: Promise<unknown>[] = [];
+    await db.transaction(async (tx) => {
+      // Le verrou de la commande aligne la réception de ligne et la livraison : chacune doit l'attendre.
+      await tx.select({ id: purchaseOrders.id }).from(purchaseOrders).where(eq(purchaseOrders.id, orderId)).for("update");
+      attempts = [
+        procurementService.updateOrderLine(line.id, { quantityReceived: 1, deliveryStatus: "partial" }, actorId, orderId).catch((e) => e),
+        procurementService.updateOrderStatus(orderId, "delivered", actorId),
+      ];
+      await waitForWaitersOn(await pidOf(tx), 2);
+    });
+    await Promise.all(attempts);
+
+    expect(await stockOf(part.id)).toMatchObject({ quantity: 2 });
+    expect((await lineOf(orderId)).quantityReceived).toBe(2);
+    expect((await orderState(orderId)).status).toBe("delivered");
+  });
+
+  it("panne de l'entrée en stock : la commande n'est pas livrée, un nouvel essai crédite le stock", async () => {
+    const part = await createTestPart({ quantity: 0 });
+    ids.partIds.push(part.id);
+    const orderId = await order("confirmed", part.id);
+    vi.spyOn(procurementService as any, "registerPartReception").mockRejectedValueOnce(new Error("panne injectée"));
+
+    await expect(procurementService.updateOrderStatus(orderId, "delivered", actorId)).rejects.toThrow("panne injectée");
+
+    expect(await orderState(orderId)).toEqual({ status: "confirmed", traces: 0 });
+    expect((await lineOf(orderId)).quantityReceived ?? 0).toBe(0);
+    expect(await stockOf(part.id)).toEqual({ quantity: 0, movements: 0 });
+
+    await procurementService.updateOrderStatus(orderId, "delivered", actorId);
+    expect(await orderState(orderId)).toEqual({ status: "delivered", traces: 1 });
+    expect(await stockOf(part.id)).toEqual({ quantity: 2, movements: 1 });
+  });
+
+  it("panne de l'entrée en stock sur une ligne : la quantité reçue n'est pas enregistrée", async () => {
+    const part = await createTestPart({ quantity: 0 });
+    ids.partIds.push(part.id);
+    const orderId = await order("confirmed", part.id);
+    const line = await lineOf(orderId);
+    vi.spyOn(procurementService as any, "registerPartReception").mockRejectedValueOnce(new Error("panne injectée"));
+
+    await expect(procurementService.updateOrderLine(line.id, { quantityReceived: 1 }, actorId, orderId)).rejects.toThrow("panne injectée");
+    expect((await lineOf(orderId)).quantityReceived ?? 0).toBe(0);
+
+    await procurementService.updateOrderLine(line.id, { quantityReceived: 1 }, actorId, orderId);
+    expect((await lineOf(orderId)).quantityReceived).toBe(1);
+    expect(await stockOf(part.id)).toEqual({ quantity: 1, movements: 1 });
   });
 });

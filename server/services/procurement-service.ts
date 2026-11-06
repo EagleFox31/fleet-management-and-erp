@@ -1,4 +1,4 @@
-import { db } from "../db";
+import { db, type DbExecutor } from "../db";
 import { 
   purchaseOrders, 
   purchaseOrderLines,
@@ -206,8 +206,8 @@ export class ProcurementService {
    * Quand une commande est réceptionnée globalement, aligner les lignes de commande.
    * Cela évite les incohérences "commande livrée" mais lignes "pending".
    */
-  private async markOrderLinesAsDelivered(orderId: number): Promise<void> {
-    await db
+  private async markOrderLinesAsDelivered(executor: DbExecutor, orderId: number): Promise<void> {
+    await executor
       .update(purchaseOrderLines)
       .set({
         deliveryStatus: sql`CASE
@@ -227,8 +227,10 @@ export class ProcurementService {
 
   /**
    * Crédite le stock d'une pièce lors de la réception fournisseur et trace le mouvement.
+   * Appelée dans la transaction qui écrit la réception : stock et réception sont validés ensemble.
    */
   private async registerPartReception(
+    executor: DbExecutor,
     partId: number,
     quantity: number,
     reason: string,
@@ -238,7 +240,7 @@ export class ProcurementService {
     if (quantity <= 0) return;
 
     // Incrément atomique : deux réceptions simultanées ne s'écrasent pas.
-    const [credited] = await db
+    const [credited] = await executor
       .update(parts)
       .set({ quantity: sql`coalesce(${parts.quantity}, 0) + ${quantity}` })
       .where(eq(parts.id, partId))
@@ -249,7 +251,7 @@ export class ProcurementService {
     const newStock = credited.quantity || 0;
     const previousStock = newStock - quantity;
 
-    await db.insert(partsStockMovements).values({
+    await executor.insert(partsStockMovements).values({
       partId,
       movementType: "in",
       quantity,
@@ -847,7 +849,7 @@ export class ProcurementService {
       });
 
     if (shouldNormalizeDeliveredLines) {
-      await this.markOrderLinesAsDelivered(id);
+      await this.markOrderLinesAsDelivered(db, id);
       lines = await fetchLinesWithDetails();
     }
 
@@ -966,7 +968,7 @@ export class ProcurementService {
       }
 
       if (currentOrder.status === status) {
-        return { order: currentOrder, transitioned: false, deliveryStockDeltas: [] };
+        return { order: currentOrder, transitioned: false };
       }
 
       if (!canTransitionPurchaseOrder(currentOrder.status, status)) {
@@ -1016,6 +1018,9 @@ export class ProcurementService {
             })
             .from(purchaseOrderLines)
             .where(eq(purchaseOrderLines.purchaseOrderId, orderId))
+            // Ordre des verrous : commande, puis lignes (comme `updateOrderLine`). Une réception de
+            // ligne en cours est attendue : son crédit est déduit, pas recrédité.
+            .for("update")
         : [];
 
       const traceLine = [
@@ -1056,88 +1061,90 @@ export class ProcurementService {
       if (!written) {
         throw new AppError(409, "La commande vient d'être modifiée. Rechargez-la puis réessayez.");
       }
-      return { order: written, transitioned: true, deliveryStockDeltas };
+
+      // Effets de la réception, dans la transaction : si l'un échoue, la commande n'est pas livrée et
+      // un nouvel essai refait tout. Réception complète : aligner automatiquement toutes les lignes
+      // pour éviter "commande livrée" avec lignes restées en attente fournisseur.
+      if (status === "delivered") {
+        await this.markOrderLinesAsDelivered(tx, orderId);
+
+        for (const line of deliveryStockDeltas) {
+          if (!line.partId) continue;
+
+          const alreadyReceived = line.quantityReceived || 0;
+          const ordered = line.quantityOrdered || 0;
+          const quantityToReceive = Math.max(0, ordered - alreadyReceived);
+          if (quantityToReceive <= 0) continue;
+
+          await this.registerPartReception(
+            tx,
+            line.partId,
+            quantityToReceive,
+            `Réception commande #${orderId}`,
+            `Entrée stock depuis commande fournisseur, ligne #${line.lineId}`,
+            userId
+          );
+        }
+      }
+
+      // Synchroniser le statut des demandes de pièces liées à la commande
+      if (status === 'partial' || status === 'delivered') {
+        const requirementIdRows = await tx
+          .select({
+            requirementId: purchaseOrderLines.partRequirementId,
+          })
+          .from(purchaseOrderLines)
+          .where(
+            and(
+              eq(purchaseOrderLines.purchaseOrderId, orderId),
+              sql`${purchaseOrderLines.partRequirementId} IS NOT NULL`
+            )
+          );
+
+        const requirementIds = requirementIdRows
+          .map((row) => row.requirementId)
+          .filter((id): id is number => typeof id === 'number');
+
+        if (requirementIds.length > 0) {
+          if (status === 'partial') {
+            await tx
+              .update(partRequirements)
+              .set({
+                status: 'partially_received',
+                receivedBy: userId ?? null,
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  inArray(partRequirements.id, requirementIds),
+                  inArray(partRequirements.status, ['ordered'])
+                )
+              );
+          } else {
+            await tx
+              .update(partRequirements)
+              .set({
+                status: 'received',
+                receivedBy: userId ?? null,
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  inArray(partRequirements.id, requirementIds),
+                  inArray(partRequirements.status, ['ordered', 'partially_received'])
+                )
+              );
+          }
+        }
+      }
+
+      return { order: written, transitioned: true };
     });
 
     if (!outcome.transitioned) {
       return outcome.order;
     }
     const updated = outcome.order;
-    const deliveryStockDeltas = outcome.deliveryStockDeltas;
-
-    // Réception complète: aligner automatiquement toutes les lignes
-    // pour éviter "commande livrée" avec lignes restées en attente fournisseur.
-    if (status === "delivered") {
-      await this.markOrderLinesAsDelivered(orderId);
-
-      for (const line of deliveryStockDeltas) {
-        if (!line.partId) continue;
-
-        const alreadyReceived = line.quantityReceived || 0;
-        const ordered = line.quantityOrdered || 0;
-        const quantityToReceive = Math.max(0, ordered - alreadyReceived);
-        if (quantityToReceive <= 0) continue;
-
-        await this.registerPartReception(
-          line.partId,
-          quantityToReceive,
-          `Réception commande #${orderId}`,
-          `Entrée stock depuis commande fournisseur, ligne #${line.lineId}`,
-          userId
-        );
-      }
-    }
-
-    // Synchroniser le statut des demandes de pièces liées à la commande
-    if (status === 'partial' || status === 'delivered') {
-      const requirementIdRows = await db
-        .select({
-          requirementId: purchaseOrderLines.partRequirementId,
-        })
-        .from(purchaseOrderLines)
-        .where(
-          and(
-            eq(purchaseOrderLines.purchaseOrderId, orderId),
-            sql`${purchaseOrderLines.partRequirementId} IS NOT NULL`
-          )
-        );
-
-      const requirementIds = requirementIdRows
-        .map((row) => row.requirementId)
-        .filter((id): id is number => typeof id === 'number');
-
-      if (requirementIds.length > 0) {
-        if (status === 'partial') {
-          await db
-            .update(partRequirements)
-            .set({
-              status: 'partially_received',
-              receivedBy: userId ?? null,
-              updatedAt: new Date(),
-            })
-            .where(
-              and(
-                inArray(partRequirements.id, requirementIds),
-                inArray(partRequirements.status, ['ordered'])
-              )
-            );
-        } else {
-          await db
-            .update(partRequirements)
-            .set({
-              status: 'received',
-              receivedBy: userId ?? null,
-              updatedAt: new Date(),
-            })
-            .where(
-              and(
-                inArray(partRequirements.id, requirementIds),
-                inArray(partRequirements.status, ['ordered', 'partially_received'])
-              )
-            );
-        }
-      }
-    }
 
     // Étape métier: réception => facture fournisseur auto si absente + relais finance.
     let financeRelay: { created: boolean; invoiceId?: number; invoiceNumber?: string } | undefined;
@@ -1175,70 +1182,91 @@ export class ProcurementService {
     userId?: number,
     orderId?: number
   ): Promise<PurchaseOrderLine> {
-    const [currentLine] = await db
-      .select()
+    const [located] = await db
+      .select({ purchaseOrderId: purchaseOrderLines.purchaseOrderId })
       .from(purchaseOrderLines)
       .where(eq(purchaseOrderLines.id, lineId))
       .limit(1);
 
     // Une ligne d'une autre commande que celle de l'URL est introuvable ici.
-    if (!currentLine || (orderId !== undefined && currentLine.purchaseOrderId !== orderId)) {
+    if (!located || (orderId !== undefined && located.purchaseOrderId !== orderId)) {
       throw new AppError(404, "Ligne de commande introuvable.");
     }
 
-    const previousReceived = currentLine.quantityReceived || 0;
-    const nextReceived = data.quantityReceived ?? previousReceived;
-    if (nextReceived > currentLine.quantityOrdered) {
-      throw new AppError(400, `Quantité reçue supérieure au commandé (${currentLine.quantityOrdered}).`);
-    }
-    if (nextReceived < previousReceived) {
-      // Le stock déjà crédité ne serait pas repris : une correction passe par
-      // un ajustement de stock tracé.
-      throw new AppError(409, "Une quantité déjà reçue ne se retire pas ici : passez par un ajustement de stock.");
-    }
-    const nextAccepted = data.quantityAccepted ?? currentLine.quantityAccepted ?? 0;
-    const nextRejected = data.quantityRejected ?? currentLine.quantityRejected ?? 0;
-    if (nextAccepted + nextRejected > nextReceived) {
-      throw new AppError(400, "Pièces acceptées et refusées dépassent la quantité reçue.");
-    }
+    // Ordre des verrous : commande, puis ligne (comme la livraison globale). La ligne est relue sous
+    // verrou ; le stock est crédité dans la même transaction que la quantité reçue.
+    const { updated, previousReceived } = await db.transaction(async (tx) => {
+      await tx
+        .select({ id: purchaseOrders.id })
+        .from(purchaseOrders)
+        .where(eq(purchaseOrders.id, located.purchaseOrderId))
+        .for("no key update");
+      const [currentLine] = await tx
+        .select()
+        .from(purchaseOrderLines)
+        .where(eq(purchaseOrderLines.id, lineId))
+        .for("update");
+      if (!currentLine) {
+        throw new AppError(404, "Ligne de commande introuvable.");
+      }
 
-    // Écriture conditionnelle : si une autre réception a modifié la ligne
-    // entre-temps, rien n'est écrit et le stock n'est pas crédité deux fois.
-    const [updated] = await db
-      .update(purchaseOrderLines)
-      .set({
-        ...data,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(purchaseOrderLines.id, lineId),
-          currentLine.quantityReceived === null
-            ? sql`${purchaseOrderLines.quantityReceived} is null`
-            : eq(purchaseOrderLines.quantityReceived, currentLine.quantityReceived),
-        ),
-      )
-      .returning();
+      const previousReceived = currentLine.quantityReceived || 0;
+      const nextReceived = data.quantityReceived ?? previousReceived;
+      if (nextReceived > currentLine.quantityOrdered) {
+        throw new AppError(400, `Quantité reçue supérieure au commandé (${currentLine.quantityOrdered}).`);
+      }
+      if (nextReceived < previousReceived) {
+        // Le stock déjà crédité ne serait pas repris : une correction passe par
+        // un ajustement de stock tracé.
+        throw new AppError(409, "Une quantité déjà reçue ne se retire pas ici : passez par un ajustement de stock.");
+      }
+      const nextAccepted = data.quantityAccepted ?? currentLine.quantityAccepted ?? 0;
+      const nextRejected = data.quantityRejected ?? currentLine.quantityRejected ?? 0;
+      if (nextAccepted + nextRejected > nextReceived) {
+        throw new AppError(400, "Pièces acceptées et refusées dépassent la quantité reçue.");
+      }
 
-    if (!updated) {
-      throw new AppError(409, "Cette ligne vient d'être modifiée par quelqu'un d'autre. Rechargez la commande.");
-    }
+      // Écriture conditionnelle : si une autre réception a modifié la ligne
+      // entre-temps, rien n'est écrit et le stock n'est pas crédité deux fois.
+      const [updated] = await tx
+        .update(purchaseOrderLines)
+        .set({
+          ...data,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(purchaseOrderLines.id, lineId),
+            currentLine.quantityReceived === null
+              ? sql`${purchaseOrderLines.quantityReceived} is null`
+              : eq(purchaseOrderLines.quantityReceived, currentLine.quantityReceived),
+          ),
+        )
+        .returning();
+
+      if (!updated) {
+        throw new AppError(409, "Cette ligne vient d'être modifiée par quelqu'un d'autre. Rechargez la commande.");
+      }
+
+      const newReceived = updated.quantityReceived || 0;
+      const receivedDelta = Math.max(0, newReceived - previousReceived);
+      if (receivedDelta > 0 && updated.partId) {
+        await this.registerPartReception(
+          tx,
+          updated.partId,
+          receivedDelta,
+          `Réception commande #${updated.purchaseOrderId}`,
+          `Entrée stock depuis mise à jour ligne #${lineId}`,
+          userId
+        );
+      }
+      return { updated, previousReceived };
+    });
 
     log.info({ lineId }, "ligne de commande mise à jour");
 
-    const newReceived = updated.quantityReceived || 0;
-    const receivedDelta = Math.max(0, newReceived - previousReceived);
-
-    // Si la réception augmente, créditer le stock et tracer le mouvement.
+    const receivedDelta = Math.max(0, (updated.quantityReceived || 0) - previousReceived);
     if (receivedDelta > 0 && updated.partId) {
-      await this.registerPartReception(
-        updated.partId,
-        receivedDelta,
-        `Réception commande #${updated.purchaseOrderId}`,
-        `Entrée stock depuis mise à jour ligne #${lineId}`,
-        userId
-      );
-
       // Notifier les personnes concernées sur la quantité réellement ajoutée.
       await this.notifyPartReceived(lineId, updated.partId, receivedDelta);
     }

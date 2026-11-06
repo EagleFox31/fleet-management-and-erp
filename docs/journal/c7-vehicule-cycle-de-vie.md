@@ -537,3 +537,22 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
 - **Garde-fou** : `status-update-cas-hygiene` résout désormais `.set(variable)` et `.set({ ...variable })` vers le littéral local. Il a révélé deux écritures de statut cachées (`technician-work-orders-service`, `work-order-items-service`), gelées dans `FROZEN`. Les contenus illisibles (paramètre, `req.body`, appel) sont gelés dans `FROZEN_OPAQUE` : 15 écritures, dont 6 dans `storage.ts`. Les deux listes sont à cliquet.
 - **Preuve** : `tests/integration/purchase-order-status-cas.test.ts` (3 tests). Deux réceptions alignées derrière un verrou donnent une trace, un mouvement et un stock de 2. Une clôture pendant qu'une facture repasse non soldée attend, puis répond 409. Témoin et rejeu : une seule trace. Avec l'ancien service, les deux cas concurrents échouent. tsc 0 ; unitaires 3 093 ; contrats achats et factures 27 fichiers, 338 tests.
 - **Pourquoi** : même motif que la clôture automatique (#557, #558). Un statut qui déclenche du stock ne s'écrit qu'une fois.
+
+## 2026-11-06 03:40 — Réception de commande fournisseur : lignes verrouillées, stock dans la transaction
+
+- **Quoi** :
+  - (a) La livraison globale lisait les lignes sans verrou. Si une réception de ligne était en cours, la livraison calculait son crédit sur l'ancienne quantité reçue : pour 2 pièces commandées, le stock montait à 3.
+  - (b) Le marquage des lignes, l'entrée en stock et la mise à jour des demandes de pièce s'exécutaient après le commit du statut. Une panne à ce moment laissait la commande « livrée » sans entrée en stock. Le rejeu tombait alors sur le no-op du statut déjà atteint, et la lecture de la commande « réparait » les lignes sans créditer le stock.
+- **Comment** :
+  - `updateOrderStatus` : lignes lues `FOR UPDATE` sous le verrou de la commande ; le marquage des lignes, `registerPartReception` et la mise à jour des demandes s'exécutent dans la transaction. Relais finance et notifications restent après le commit.
+  - `updateOrderLine` : verrou de la commande, puis de la ligne relue ; le crédit de stock s'exécute dans la transaction. Le CAS sur la quantité reçue reste en filet.
+  - `registerPartReception` et `markOrderLinesAsDelivered` reçoivent l'exécuteur (`DbExecutor`).
+- **Preuve** : 4 nouveaux tests dans `purchase-order-status-cas.test.ts` :
+  - livraison pendant une réception de ligne non validée : stock à 2 ;
+  - ligne et livraison alignées derrière le verrou de la commande : stock à 2 ;
+  - panne injectée sur la livraison : la commande reste « confirmée », sans mouvement, et un nouvel essai crédite 2 ;
+  - panne injectée sur une ligne : la quantité reçue n'est pas enregistrée.
+
+  Avec la version précédente, ces 4 cas échouent ; le deuxième n'échoue que par l'absence d'attente du verrou. tsc 0 ; unitaires 3 093 ; intégration achats et stock 10 fichiers, 54 tests ; contrats 36 fichiers, 445 tests.
+- **Pourquoi** : un effet de stock fait partie de la transition. Validé à part, il peut manquer ou être compté deux fois.
+- **Hors lot, constaté** : les écarts de stock possibles et la lecture de commande qui écrit sont détaillés dans la PR #560.
