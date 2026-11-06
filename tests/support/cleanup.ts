@@ -285,6 +285,7 @@ async function deleteOrphanTestRows(): Promise<void> {
     inArray(missionBudgets.updatedBy, testUsers),
     inArray(missionBudgets.approvedBy, testUsers),
     inArray(missionBudgets.disbursedBy, testUsers),
+    inArray(missionBudgets.settledBy, testUsers),
   );
   // Dépenses justifiées (L1e) : FK vers le budget et vers leurs auteurs, supprimées avant le budget.
   await db.delete(missionBudgetExpenses).where(

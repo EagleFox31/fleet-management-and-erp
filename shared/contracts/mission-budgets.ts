@@ -21,6 +21,8 @@ export const MISSION_BUDGETS_DAILY_NEED_PATH = "/api/mission-budgets/daily-need"
 export const missionBudgetPath = (id: number) => `${MISSION_BUDGETS_PATH}/${id}`;
 export const missionBudgetApprovePath = (id: number) => `${MISSION_BUDGETS_PATH}/${id}/approve`;
 export const missionBudgetDisbursePath = (id: number) => `${MISSION_BUDGETS_PATH}/${id}/disburse`;
+/** Solde d'une mission terminée (Q18) : reliquat rendu au compte source, dépenses figées. */
+export const missionBudgetSettlePath = (id: number) => `${MISSION_BUDGETS_PATH}/${id}/settle`;
 export const MISSION_DESTINATIONS_PATH = "/api/mission-budgets/destinations";
 export const missionBudgetExpensesPath = (id: number) => `${MISSION_BUDGETS_PATH}/${id}/expenses`;
 export const missionBudgetExpensePath = (id: number, expenseId: number) => `${missionBudgetExpensesPath(id)}/${expenseId}`;
@@ -36,6 +38,12 @@ export const MISSION_BUDGET_STATUS_LABELS: Record<MissionBudgetStatus, string> =
 
 /** Mission close : plus de budget à saisir pour elle (409). */
 export const MISSION_STATUSES_WITHOUT_BUDGET = ["completed", "cancelled"] as const;
+
+/**
+ * Mission dont les dépenses justifiées ne changent plus (409). Terminée, elle les garde ouvertes tant
+ * que le reliquat n'est pas rendu (R1) ; annulée, son reliquat est contre-passé : jamais.
+ */
+export const MISSION_STATUSES_WITHOUT_EXPENSES = ["cancelled"] as const;
 
 /** Plafond d'un montant saisi : numeric(15,2) en base. */
 export const MISSION_BUDGET_MAX_AMOUNT = 1_000_000_000;
@@ -122,6 +130,8 @@ export const missionBudgetSchema = z.object({
   approvedAt: isoDateTimeSchema.nullable(),
   disbursedBy: bodyIdSchema.nullable(),
   disbursedAt: isoDateTimeSchema.nullable(),
+  settledBy: bodyIdSchema.nullable(),
+  settledAt: isoDateTimeSchema.nullable(),
   createdBy: bodyIdSchema.nullable(),
   updatedBy: bodyIdSchema.nullable(),
   createdAt: isoDateTimeSchema,
