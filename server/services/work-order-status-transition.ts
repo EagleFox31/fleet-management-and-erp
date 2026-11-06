@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { workOrders, type WorkOrder } from "@shared/schema";
+import { workOrders, type InsertWorkOrder, type WorkOrder } from "@shared/schema";
 import { checkWorkOrderTransition, type WorkOrderStatus } from "@shared/constants/work-order-transitions";
 import { db, type DbTransaction } from "../db";
 import { AppError } from "../lib/app-error";
@@ -8,6 +8,9 @@ import { applyWorkOrderStatusEffects } from "./work-order-status-effects";
 
 export const WORK_ORDER_STATUS_CHANGED_ERROR =
   "Le statut de cet ordre de travail vient de changer. Rechargez-le avant de réessayer.";
+
+export const WORK_ORDER_ASSIGNMENT_CHANGED_ERROR =
+  "Cet ordre de travail vient d'être réassigné. Rechargez vos ordres de travail avant de réessayer.";
 
 export type WorkOrderStatusTransition = {
   workOrderId: number;
@@ -22,10 +25,17 @@ export type WorkOrderStatusTransition = {
    */
   onStale?: "throw" | "skip";
   /**
-   * Champs écrits dans la même instruction que le statut, donc sous le même compare-and-set :
-   * rien n'est écrit si la ligne n'a plus le statut lu.
+   * Rôle de l'auteur, passé à `checkWorkOrderTransition` : un technicien ne peut ni annuler ni
+   * remettre en attente. Absent pour une transition de suite décidée par le serveur.
    */
-  fields?: { diagnosis?: string; startDate?: Date; endDate?: Date };
+  role?: string;
+  /**
+   * Champs écrits dans la même instruction que le statut, donc sous le même compare-and-set :
+   * rien n'est écrit si la ligne n'a plus le statut lu. Le statut n'en fait jamais partie, ni
+   * dans le type ni à l'exécution. Le service n'élargit pas ce que l'appelant écrit : il pose
+   * `updatedAt`, et `updatedBy` seulement s'il est passé à part.
+   */
+  fields?: Partial<Omit<InsertWorkOrder, "status">>;
   /**
    * Condition ajoutée au compare-and-set : l'OT doit être encore assigné à ce technicien.
    * Un OT réassigné entre la lecture et l'écriture est traité comme un statut périmé.
@@ -39,11 +49,15 @@ export type WorkOrderStatusTransition = {
 };
 
 /**
- * Seule écriture du statut d'un OT hors modification générique.
+ * Écriture du statut d'un OT par les routes (modification générique, technicien) ;
+ * `storage.updateWorkOrder` refuse le statut. Restent des écritures directes, gelées dans
+ * `status-update-cas-hygiene.test.ts` : passage en attente de pièces
+ * (`work-order-part-request.ts`) et refus qualité (`quality-check.routes.ts`).
  *
- * 1. La règle `checkWorkOrderTransition` est appliquée ici, pas laissée à l'appelant : une
- *    transition interdite (OT terminé, annulé, saut non prévu) répond 409 lisible. Le contrôle
- *    propre au rôle (`canTechnicianTransition`) reste chez l'appelant technicien.
+ * 1. La règle `checkWorkOrderTransition` est appliquée ici, avec le rôle de l'auteur : une
+ *    transition interdite (OT terminé, annulé, saut non prévu, annulation par un technicien)
+ *    répond lisiblement. Le contrôle propre à la route technicien (`canTechnicianTransition`)
+ *    reste chez elle.
  * 2. Compare-and-set : `WHERE id AND status = from`. Une transition concurrente gagne, l'autre
  *    reçoit 409 (ou `null` en `skip`) au lieu d'écraser le statut.
  * 3. Les effets sur le parc (`applyWorkOrderStatusEffects`) suivent l'écriture, comme avant.
@@ -51,9 +65,12 @@ export type WorkOrderStatusTransition = {
  * Les trames temps réel et les invalidations restent chez l'appelant (AGENTS.md §2).
  */
 export async function transitionWorkOrderStatus(transition: WorkOrderStatusTransition): Promise<WorkOrder | null> {
-  const { workOrderId, from, to, updatedBy, onStale = "throw", fields, technicianId, onTransition } = transition;
-  const check = checkWorkOrderTransition(from, to, undefined);
+  const { workOrderId, from, to, updatedBy, onStale = "throw", fields, technicianId, onTransition, role } = transition;
+  const check = checkWorkOrderTransition(from, to, role);
   if (!check.allowed) throw new AppError(check.status, check.message);
+
+  // Le type exclut déjà `status` : on le retire aussi à l'exécution, pour un appelant non typé.
+  const { status: _ignoredStatus, ...columns } = (fields ?? {}) as Partial<InsertWorkOrder>;
 
   const conditions = [eq(workOrders.id, workOrderId), eq(workOrders.status, from as WorkOrderStatus)];
   if (technicianId !== undefined) conditions.push(eq(workOrders.technicianId, technicianId));
@@ -62,11 +79,9 @@ export async function transitionWorkOrderStatus(transition: WorkOrderStatusTrans
     const [row] = await tx
       .update(workOrders)
       .set({
+        ...columns,
         status: to,
-        diagnosis: fields?.diagnosis,
-        startDate: fields?.startDate,
-        endDate: fields?.endDate,
-        updatedBy: updatedBy ?? undefined,
+        ...(updatedBy != null ? { updatedBy } : {}),
         updatedAt: new Date(),
       })
       .where(and(...conditions))
@@ -76,6 +91,15 @@ export async function transitionWorkOrderStatus(transition: WorkOrderStatusTrans
   });
   if (!written) {
     if (onStale === "skip") return null;
+    if (technicianId !== undefined) {
+      const [current] = await db
+        .select({ status: workOrders.status, technicianId: workOrders.technicianId })
+        .from(workOrders)
+        .where(eq(workOrders.id, workOrderId));
+      if (current && current.status === from && current.technicianId !== technicianId) {
+        throw new AppError(409, WORK_ORDER_ASSIGNMENT_CHANGED_ERROR);
+      }
+    }
     throw new AppError(409, WORK_ORDER_STATUS_CHANGED_ERROR);
   }
 

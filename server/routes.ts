@@ -38,7 +38,8 @@ import {
   vehicleTankCapacitySchema, VEHICLE_TANK_CAPACITY_MESSAGE
 } from "@shared/schema";
 import { PART_UNITS } from "@shared/constants/parts";
-import { checkWorkOrderTransition } from "@shared/constants/work-order-transitions";
+import { checkWorkOrderTransition, type WorkOrderStatus } from "@shared/constants/work-order-transitions";
+import { transitionWorkOrderStatus } from "./services/work-order-status-transition";
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, sql, ilike, inArray, isNull, getTableColumns } from "drizzle-orm";
 import crypto from "crypto";
@@ -1816,7 +1817,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         updatedData.endDate = new Date();
       }
       
-      const updatedWorkOrder = await storage.updateWorkOrder(id, updatedData);
+      // Le statut passe par le compare-and-set du service, avec les autres champs : une transition
+      // concurrente répond 409 au lieu d'être écrasée. Les autres champs, seuls, restent directs.
+      const { status: requestedStatus, ...otherFields } = updatedData;
+      const updatedWorkOrder =
+        typeof requestedStatus === "string"
+          ? await transitionWorkOrderStatus({
+              workOrderId: id,
+              from: workOrder.status,
+              to: requestedStatus as WorkOrderStatus,
+              role: req.user?.role,
+              fields: otherFields,
+            })
+          : await storage.updateWorkOrder(id, otherFields);
 
       // Affectation à un technicien: le prévenir nommément. Sans ça, le chef
       // d'atelier lisait « OT mis à jour » et le technicien ne voyait rien —
@@ -1915,8 +1928,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       return res.status(200).json(updatedWorkOrder);
     } catch (error) {
-      console.error("Update work order error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
+      // Gestionnaire central : 409 du compare-and-set rendu tel quel, 5xx générique avec
+      // référence, erreur journalisée avec la requête (ex-`console.error` local).
+      return next(error);
     }
   });
 

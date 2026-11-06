@@ -4,6 +4,7 @@ import { db } from "../../server/db";
 import { storage } from "../../server/storage";
 import { statusHistory, vehicles, workOrders } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
+import { moveWorkOrderTo } from "../support/work-order-status";
 import { createTestVehicle } from "../support/factories";
 
 /**
@@ -48,7 +49,7 @@ describe("VEH4 : statut véhicule et ordres de travail", { timeout: 120000 }, ()
     expect(await statusOf(vehicleId)).toBe("maintenance");
     expect(await historyOf(vehicleId)).toEqual(["maintenance"]);
 
-    await storage.updateWorkOrder(woId, { status: "completed" });
+    await moveWorkOrderTo(woId, "completed");
     expect(await statusOf(vehicleId)).toBe("operational");
     expect(await historyOf(vehicleId)).toEqual(["maintenance", "operational"]);
   });
@@ -56,7 +57,7 @@ describe("VEH4 : statut véhicule et ordres de travail", { timeout: 120000 }, ()
   it("passer un OT en cours garde le véhicule en maintenance sans nouvelle ligne d'historique", async () => {
     const vehicleId = await newVehicle();
     const woId = await openWorkOrder(vehicleId);
-    await storage.updateWorkOrder(woId, { status: "in_progress" });
+    await moveWorkOrderTo(woId, "in_progress");
     expect(await statusOf(vehicleId)).toBe("maintenance");
     expect(await historyOf(vehicleId)).toEqual(["maintenance"]);
   });
@@ -65,9 +66,9 @@ describe("VEH4 : statut véhicule et ordres de travail", { timeout: 120000 }, ()
     const vehicleId = await newVehicle();
     const first = await openWorkOrder(vehicleId);
     const second = await openWorkOrder(vehicleId);
-    await storage.updateWorkOrder(first, { status: "completed" });
+    await moveWorkOrderTo(first, "completed");
     expect(await statusOf(vehicleId)).toBe("maintenance");
-    await storage.updateWorkOrder(second, { status: "completed" });
+    await moveWorkOrderTo(second, "completed");
     expect(await statusOf(vehicleId)).toBe("operational");
     expect(await historyOf(vehicleId)).toEqual(["maintenance", "operational"]);
   });
@@ -75,16 +76,16 @@ describe("VEH4 : statut véhicule et ordres de travail", { timeout: 120000 }, ()
   it("clôturer deux fois le même OT n'ajoute pas de ligne d'historique", async () => {
     const vehicleId = await newVehicle();
     const woId = await openWorkOrder(vehicleId);
-    await storage.updateWorkOrder(woId, { status: "completed" });
-    await storage.updateWorkOrder(woId, { status: "completed" });
+    await moveWorkOrderTo(woId, "completed");
+    await moveWorkOrderTo(woId, "completed");
     expect(await historyOf(vehicleId)).toEqual(["maintenance", "operational"]);
   });
 
   it("rouvrir un OT clôturé immobilise de nouveau le véhicule", async () => {
     const vehicleId = await newVehicle();
     const woId = await openWorkOrder(vehicleId);
-    await storage.updateWorkOrder(woId, { status: "completed" });
-    await storage.updateWorkOrder(woId, { status: "in_progress" });
+    await moveWorkOrderTo(woId, "completed");
+    await moveWorkOrderTo(woId, "in_progress");
     expect(await statusOf(vehicleId)).toBe("maintenance");
     expect(await historyOf(vehicleId)).toEqual(["maintenance", "operational", "maintenance"]);
   });
@@ -106,7 +107,7 @@ describe("VEH4 : statut véhicule et ordres de travail", { timeout: 120000 }, ()
     });
 
     it("annuler le dernier OT ouvert remet le véhicule en service", async () => {
-      await storage.updateWorkOrder(woId, { status: "cancelled" });
+      await moveWorkOrderTo(woId, "cancelled");
       expect(await statusOf(vehicleId)).toBe("operational");
       expect(await historyOf(vehicleId)).toEqual(["maintenance", "operational"]);
     });
@@ -116,7 +117,7 @@ describe("VEH4 : statut véhicule et ordres de travail", { timeout: 120000 }, ()
     const vehicleId = await newVehicle();
     const first = await openWorkOrder(vehicleId);
     await openWorkOrder(vehicleId, "in_progress");
-    await storage.updateWorkOrder(first, { status: "cancelled" });
+    await moveWorkOrderTo(first, "cancelled");
     expect(await statusOf(vehicleId)).toBe("maintenance");
     expect(await historyOf(vehicleId)).toEqual(["maintenance"]);
   });
@@ -133,7 +134,7 @@ describe("VEH4 : statut véhicule et ordres de travail", { timeout: 120000 }, ()
     const vehicleId = await newVehicle();
     const woId = await openWorkOrder(vehicleId);
     await db.update(vehicles).set({ status: "out_of_service" }).where(eq(vehicles.id, vehicleId));
-    await storage.updateWorkOrder(woId, { status: "cancelled" });
+    await moveWorkOrderTo(woId, "cancelled");
     expect(await statusOf(vehicleId)).toBe("out_of_service");
     expect(await historyOf(vehicleId)).toEqual(["maintenance"]);
   });
@@ -142,7 +143,7 @@ describe("VEH4 : statut véhicule et ordres de travail", { timeout: 120000 }, ()
     const vehicleId = await newVehicle();
     const woId = await openWorkOrder(vehicleId);
     await db.update(vehicles).set({ status: "out_of_service" }).where(eq(vehicles.id, vehicleId));
-    await storage.updateWorkOrder(woId, { status: "completed" });
+    await moveWorkOrderTo(woId, "completed");
     expect(await statusOf(vehicleId)).toBe("out_of_service");
     expect(await historyOf(vehicleId)).toEqual(["maintenance"]);
   });

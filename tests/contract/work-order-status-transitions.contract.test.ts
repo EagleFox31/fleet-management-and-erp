@@ -1,10 +1,11 @@
 import { createServer, type Server } from "http";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { db } from "../../server/db";
+import { db, pool } from "../../server/db";
 import { alerts, workOrders } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
+import { waitForBlockedWriter } from "../support/row-lock";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
 
 /**
@@ -162,6 +163,38 @@ describe("PATCH /api/work-orders/:id : transitions de statut", { timeout: 120000
     const back = await call("PATCH", `/api/work-orders/${wo.id}`, { cookie: tech.cookie, body: { status: "in_progress" } });
     expect(back.status).toBe(409);
     expect((await statusOf(wo.id)).status).toBe("completed");
+  });
+
+  // La route lit l'OT, vérifie la transition, puis écrit : un OT annulé entre les deux ne doit pas
+  // être écrasé. Déterministe : une connexion tient le verrou de ligne, la requête s'y bloque après
+  // sa lecture, l'OT est annulé, puis le verrou est libéré.
+  it("OT annulé pendant la modification : 409 lisible, ni statut ni autres champs écrits", async () => {
+    const chef = await session("workshop_manager");
+    const wo = await workOrderIn("in_progress");
+    const client = await pool.connect();
+    let res: Awaited<ReturnType<typeof call>>;
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT id FROM work_orders WHERE id = $1 FOR UPDATE", [wo.id]);
+      const holderPid = (await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid as number;
+      const pending = call("PATCH", `/api/work-orders/${wo.id}`, {
+        cookie: chef.cookie,
+        body: { status: "completed", title: "TEST écrit trop tard" },
+      });
+      await waitForBlockedWriter(holderPid, "l'OT");
+      await client.query("UPDATE work_orders SET status = 'cancelled' WHERE id = $1", [wo.id]);
+      await client.query("COMMIT");
+      res = await pending;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body.message).toContain("vient de changer");
+    expect(await statusOf(wo.id)).toEqual({ status: "cancelled", title: "TEST transitions OT" });
   });
 
   it("statut inconnu : 400 lisible", async () => {

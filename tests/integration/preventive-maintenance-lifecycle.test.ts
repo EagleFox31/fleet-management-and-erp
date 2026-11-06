@@ -6,6 +6,7 @@ import { storage } from "../../server/storage";
 import { alertService } from "../../server/services/alert-service";
 import { preventiveMaintenanceService } from "../../server/services/preventive-maintenance-service";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
+import { moveWorkOrderTo } from "../support/work-order-status";
 import { createTestUser, createTestVehicle } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
 
@@ -175,9 +176,9 @@ describe("P3 cloture de l'OT preventif et retour en exploitation", { timeout: 12
   it("l'OT genere n'immobilise pas, sa prise en charge oui, le cloturer remet operationnel", async () => {
     const { v, wo } = await vehicleInMaintenance("close-one");
     expect(await vehicleStatus(v.id)).toBe("operational");
-    await storage.updateWorkOrder(wo.id, { status: "in_progress" });
+    await moveWorkOrderTo(wo.id, "in_progress");
     expect(await vehicleStatus(v.id)).toBe("maintenance");
-    await storage.updateWorkOrder(wo.id, { status: "completed" });
+    await moveWorkOrderTo(wo.id, "completed");
     expect(await vehicleStatus(v.id)).toBe("operational");
   });
 
@@ -187,11 +188,11 @@ describe("P3 cloture de l'OT preventif et retour en exploitation", { timeout: 12
     const second = await preventiveMaintenanceService.generateWorkOrderFromSchedule(plan);
     expect(second.id).not.toBe(wo.id);
 
-    await storage.updateWorkOrder(wo.id, { status: "in_progress" });
-    await storage.updateWorkOrder(second.id, { status: "in_progress" });
-    await storage.updateWorkOrder(wo.id, { status: "completed" });
+    await moveWorkOrderTo(wo.id, "in_progress");
+    await moveWorkOrderTo(second.id, "in_progress");
+    await moveWorkOrderTo(wo.id, "completed");
     expect(await vehicleStatus(v.id)).toBe("maintenance");
-    await storage.updateWorkOrder(second.id, { status: "completed" });
+    await moveWorkOrderTo(second.id, "completed");
     expect(await vehicleStatus(v.id)).toBe("operational");
   });
 
@@ -262,8 +263,8 @@ describe("P3 recalcul de la prochaine echeance", { timeout: 120000 }, () => {
       const v = await newVehicle(label);
       const plan = await newSchedule(v.id, over);
       const wo = await preventiveMaintenanceService.generateWorkOrderFromSchedule(plan);
-      await storage.updateWorkOrder(wo.id, { status: "in_progress" });
-      await storage.updateWorkOrder(wo.id, { status: "completed" });
+      await moveWorkOrderTo(wo.id, "in_progress");
+      await moveWorkOrderTo(wo.id, "completed");
       return { plan, wo };
     }
 
@@ -283,8 +284,8 @@ describe("P3 recalcul de la prochaine echeance", { timeout: 120000 }, () => {
 
     it("double cloture (refus qualite puis reprise) : l'echeance n'avance qu'une fois", async () => {
       const { plan, wo } = await closedPlan("p3-1-twice", { frequency: "monthly", frequencyValue: 1, scheduledDate: "2026-01-15" });
-      await storage.updateWorkOrder(wo.id, { status: "in_progress" });
-      await storage.updateWorkOrder(wo.id, { status: "completed" });
+      await moveWorkOrderTo(wo.id, "in_progress");
+      await moveWorkOrderTo(wo.id, "completed");
       expect((await scheduleRow(plan.id)).scheduledDate).toBe("2026-02-15");
       expect(await preventiveMaintenanceService.advanceScheduleAfterCompletion(wo.id)).toBeNull();
     });
