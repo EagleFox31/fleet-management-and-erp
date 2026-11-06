@@ -541,19 +541,22 @@ router.patch("/:id/validate", checkAuth, async (req: Request, res: Response, nex
       return;
     }
 
-    const updated = await threeWayMatchingService.validateInvoice(
+    const { invoice: updated, replayed } = await threeWayMatchingService.validateInvoice(
       invoiceId,
       req.user.id,
       notes
     );
 
-    broadcastSupplierInvoiceUpdate("supplier_invoice_updated", {
-      invoiceId: updated.id,
-      purchaseOrderId: updated.purchaseOrderId ?? null,
-      invoice: updated,
-      action: "validated",
-      triggeredBy: req.user.id,
-    });
+    // Rejeu sans écriture : rien n'a changé, rien à diffuser.
+    if (!replayed) {
+      broadcastSupplierInvoiceUpdate("supplier_invoice_updated", {
+        invoiceId: updated.id,
+        purchaseOrderId: updated.purchaseOrderId ?? null,
+        invoice: updated,
+        action: "validated",
+        triggeredBy: req.user.id,
+      });
+    }
 
     res.json({
       invoice: updated,
@@ -576,18 +579,21 @@ router.patch("/:id/approve", checkApprovalPermission, async (req: Request, res: 
 
     const invoiceId = parseRouteId(req.params.id, "Identifiant de facture invalide.");
 
-    const updated = await threeWayMatchingService.approveInvoice(
+    const { invoice: updated, replayed } = await threeWayMatchingService.approveInvoice(
       invoiceId,
       req.user.id
     );
 
-    broadcastSupplierInvoiceUpdate("supplier_invoice_updated", {
-      invoiceId: updated.id,
-      purchaseOrderId: updated.purchaseOrderId ?? null,
-      invoice: updated,
-      action: "approved",
-      triggeredBy: req.user.id,
-    });
+    // Rejeu sans écriture : rien n'a changé, rien à diffuser.
+    if (!replayed) {
+      broadcastSupplierInvoiceUpdate("supplier_invoice_updated", {
+        invoiceId: updated.id,
+        purchaseOrderId: updated.purchaseOrderId ?? null,
+        invoice: updated,
+        action: "approved",
+        triggeredBy: req.user.id,
+      });
+    }
 
     res.json({
       invoice: updated,

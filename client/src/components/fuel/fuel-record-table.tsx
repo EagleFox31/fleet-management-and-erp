@@ -30,9 +30,11 @@ interface FuelRecordWithConsumption extends FuelRecord {
 interface FuelRecordTableProps {
   onRowClick?: (record: FuelRecordWithConsumption) => void;
   vehicleId?: number;
+  /** Véhicule retiré : historique consultable, pas de nouveau plein. */
+  readOnly?: boolean;
 }
 
-export function FuelRecordTable({ onRowClick, vehicleId }: FuelRecordTableProps) {
+export function FuelRecordTable({ onRowClick, vehicleId, readOnly = false }: FuelRecordTableProps) {
   const [, setLocation] = useLocation();
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
@@ -198,10 +200,12 @@ export function FuelRecordTable({ onRowClick, vehicleId }: FuelRecordTableProps)
     <div className="space-y-4">
       <div className="flex justify-between items-center">
         <h2 className="text-xl font-semibold">Historique des pleins</h2>
-        <Button onClick={handleAddRecord}>
-          <i className="fas fa-plus mr-2"></i>
-          Ajouter un plein
-        </Button>
+        {!readOnly && (
+          <Button onClick={handleAddRecord}>
+            <i className="fas fa-plus mr-2"></i>
+            Ajouter un plein
+          </Button>
+        )}
       </div>
       
       {isLoading ? (

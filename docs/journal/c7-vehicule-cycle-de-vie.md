@@ -296,3 +296,138 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - `check-alerts` et les deux statistiques étaient déjà filtrés, mais aucun test ne le figeait : ils sont ajoutés au contrat ;
   - la note B7 dit maintenant qu'il faudra aussi cloisonner `GET /requests` et `/centers` avant d'ouvrir le rôle au client.
   - Hors périmètre, dette existante : dans `GET /api/vehicle-tires` (`routes.ts`), le service avale ses erreurs. Pas joignable sans session, puisque `isAnyUser` passe avant.
+
+## 2026-11-05T22:46:00+01:00 — Écritures rattachées à un véhicule retiré : refus 409 (L3)
+
+- **Quoi** : sur un véhicule retiré, le personnel reçoit un 409 (`VEHICLE_RETIRED_EDIT_MESSAGE`) pour toute écriture rattachée : OT, plans d'entretien, pleins et bons carburant, kilométrage, documents, renouvellements, pneus, pièces, demandes de pièce, QHSE.
+  - Décision 0a, option A, révisable et ajoutée aux questions client : pour une saisie tardive, on restaure le véhicule, on saisit, puis on le retire à nouveau.
+  - Le démontage de pneu reste ouvert, par décision.
+  - Un client ou un anonyme n'est pas concerné : la route répond elle-même 403 ou 401, comme avant.
+- **Comment** :
+  - Table déclarative `RETIRED_VEHICLE_WRITE_ROUTES` (`server/lib/retired-vehicle-write-routes.ts`, 44 entrées). Pour chaque route, elle dit où lire le véhicule : corps, paramètre, ou recherche par OT, plein, pneu, document, renouvellement, pièce ou demande.
+  - Garde `retiredVehicleWriteGuard` (`server/middleware/retired-vehicle-write-guard.ts`). C'est un `Router` Express qui déclare chaque entrée avec sa méthode et son chemin. Elle est montée dans `server/api/index.ts` avant `registerRoutes`, donc elle couvre aussi `routes.ts` sans y ajouter de ligne.
+  - Corps multipart (`quick-renew`) : la garde ne voit pas le véhicule, alors la poignée appelle `assertVehicleWritable` après le parsing.
+  - `asVehicleRef` lit l'id au moins aussi largement que la route (`z.coerce.number`, `Number()`) et le borne à `MAX_DB_INTEGER_ID`.
+- **Pourquoi** : L1 et L2 cachent le véhicule retiré aux lecteurs. Rien n'empêchait encore d'y rattacher de nouvelles écritures, qui faussaient l'historique et les agrégats d'un véhicule sorti du parc.
+- **Preuve automatisée** :
+  - `tests/contract/vehicle-retired-writes.contract.test.ts` (30 tests) :
+    - 22 écritures refusées en 409, dont `quick-renew` en multipart ;
+    - les rôles chef d'atelier et technicien ;
+    - les contournements : casse du chemin, `%xx`, `" N"`, `[N]`, `"N.0"`, `+N` urlencodé ;
+    - aucune ligne créée ou modifiée ;
+    - contrôles : véhicule actif non bloqué, client 403, anonyme 401, id hors bornes jamais en 500, démontage de pneu ouvert.
+  - `tests/unit/server/retired-vehicle-writes-hygiene.test.ts` :
+    - balaie toutes les routes d'écriture de `routes.ts` et des routeurs de `server/api/`, poignées nommées comprises (`scanWriteRoutes`, `tests/support/route-guard-scan.ts`) ;
+    - toute route qui nomme un véhicule doit être dans la table, appeler `assertVehicleWritable`, ou figurer dans la liste gelée `NOT_GUARDED` (8 entrées motivées). Cette liste est un cliquet : elle ne peut que rétrécir ;
+    - la taille de la table est figée (`TABLE_FLOOR`) : retirer une entrée exige une revue.
+  - `prefix-middleware-guardrail` : la garde est inscrite avec sa raison.
+  - Mutants : les 14 sont détectés.
+
+    | Mutant | Rouges |
+    |---|---|
+    | Client non exempté | 1 |
+    | Recherche par OT vide | 6 |
+    | Corps ignoré | 11 |
+    | Paramètre ignoré | 17 |
+    | Refus jamais levé | 25 |
+    | `quick-renew` sans contrôle | 1 |
+    | `asVehicleRef` strict (ancien) | 1 |
+    | Borne entière retirée (contrat) | 1 |
+    | Borne entière retirée (unitaire) | 1 |
+    | Bon carburant hors table | 1 |
+    | Plein supprimé lu | 1 |
+    | Id zéro accepté | 1 |
+    | `assertVehicleWritable` ignoré par l'hygiène | 1 |
+    | Route retirée de la table | 1 |
+
+    Les deux derniers mutants survivaient tant que le plancher valait 43, en `>=`, alors que la table comptait 44 entrées. Le plancher est maintenant égal à la taille de la table. Contrôle fait : hygiène verte sans mutant, rouge avec.
+- **Audit sécurité** : premier verdict « OK sous réserve », réserves levées.
+  - Bloquants, corrigés :
+    - la garde utilisait une regex sensible à la casse, et ne décodait pas `%xx`, alors qu'Express fait les deux. Elle utilise maintenant le même moteur de correspondance que le routeur ;
+    - les ids que Zod ou `Number()` convertissent (`" 7"`, `[7]`, `"7.0"`, `"+7"`, urlencodé) passaient la garde et atteignaient la route.
+  - Mineurs, corrigés :
+    - borne entière : un id au-delà de l'entier Postgres faisait un 500 en 22003, cas `qhse-inspections` ;
+    - `POST /api/fuel-vouchers/:id/validate` n'était pas gardée ;
+    - le balayage d'hygiène ne voyait pas les poignées nommées ;
+    - champs du corps de `PATCH /api/part-requirements/:id`.
+  - Acceptés :
+    - un membre du personnel sans droit sur la route reçoit 409 au lieu de 403. Il n'apprend que l'état retiré, déjà visible pour le personnel ;
+    - une session d'utilisateur désactivé reçoit 409 : négligeable ;
+    - le rejeu idempotent d'un 409 n'a pas d'effet.
+- **Leçon (near miss)** : une garde montée en amont doit utiliser le même moteur de correspondance que le routeur, et lire les ids au moins aussi largement que la route. Sinon, chaque écart d'analyse devient un contournement. Cette leçon est figée par les cas de contournement du contrat et par le test d'accord `asVehicleRef` / `z.coerce`.
+- **CI rouge au premier passage** : `api-auth-guard` recense les routes de la pile Express et descend dans tout routeur imbriqué. Les 44 couches de la garde y apparaissaient comme des routes `/api` sans session. Ce sont des couches de passage, qui ne répondent pas. Le `Router` est désormais enveloppé dans une fonction : correspondance inchangée, recensement juste. Cause : la sélection locale des contrats « voisins » partait des domaines touchés et a manqué les contrats transversaux. Prévention : pour un middleware monté en préfixe, lancer toute la suite de contrats, pas une sélection.
+- **Limites connues** :
+  - une route qui n'atteint le véhicule que par `workOrderId`, ou qui passe le corps entier à Zod sans nommer le véhicule, échappe au marqueur d'hygiène. Le plancher de la table compense en partie ;
+  - les sous-routeurs montés dans un routeur ne sont pas balayés.
+
+## 2026-11-05T23:48:10+01:00 — L3 : le refus « véhicule retiré » n'est plus mis en cache par l'idempotence (réserve de relecture)
+
+- **Quoi** :
+  - le 409 de la garde L3 porte le code `VEHICLE_RETIRED` (`shared/errors.ts`) ;
+  - la garde d'idempotence libère la clé sur ce code (`PRE_WRITE_REFUSAL_CODES`, `isPreWriteRefusal`) au lieu de mémoriser la réponse.
+- **Pourquoi** :
+  - `isReplayableStatus` mettait en cache tout statut de 200 à 499, sauf 401, 403, 408 et 429 ;
+  - `PUT /vehicles/:id/mileage` est à la fois idempotent et dans la table L3 ;
+  - après restauration du véhicule, le rejeu avec la même clé renvoyait donc le 409 gardé en cache, et la saisie ne passait jamais.
+- **Comment** :
+  - `errorHandler` fait maintenant suivre le `code` d'une `AppError`. Avant, il le perdait : la sortie recalculait `CONFLICT` à partir du statut. Les deux `AppError` qui passaient déjà un code (`RATE_LIMITED` en 429, `CONFLICT` en 409) avaient le code par défaut de leur statut, donc l'existant ne change pas ;
+  - la garde de sortie accepte le code, qui figure dans `STATUS_MESSAGES` ;
+  - côté client, `VEHICLE_RETIRED` est traité comme un conflit.
+- **Preuve** :
+  - un contrat dans `vehicle-retired-writes` : retirer le véhicule, saisir le kilométrage avec une clé (409 `VEHICLE_RETIRED`), restaurer, rejouer la même clé. On obtient 200 sans en-tête de rejeu, le kilométrage est écrit, et un troisième envoi est bien rejoué ;
+  - des tests unitaires dans `idempotency-guard.test` : un 409 `CONFLICT` reste rejouable, un corps nul n'est pas un refus.
+- **Ordre des refus** : pour le personnel, le 409 de la garde passe avant le 403 de la route. Il n'y a pas de fuite : le personnel voit tous les véhicules (§11). Un anonyme ou un client ne passe pas par la garde (`!user || role === "client"`) : il reçoit le 401 ou le 403 de la route, sans rien apprendre de l'état du véhicule.
+- **À surveiller** : `prefix-middleware-guardrail` met 3,9 s pour une limite de 5 s. Il risque de devenir instable sous charge.
+
+## 2026-11-06T00:55:58+01:00 — L4 : écran admin « Véhicules retirés » et fiche en consultation seule
+
+- **Quoi** :
+  - écran `/admin/retired-vehicles` (admin seul, menu Administration) : liste `GET /api/vehicles/archived` en `PremiumDataTable`, date de retrait, bouton Restaurer avec confirmation ;
+  - la ligne ouvre la fiche véhicule, qui passe en consultation seule quand `deletedAt` est posé : bandeau « Véhicule retiré de la flotte le … », badge Retiré, formulaire désactivé, aucun bouton d'écriture (plein, document, renouvellement, échéance, OT, montage pneu, suppression), bouton Restaurer pour l'admin.
+- **Pourquoi** : l'API de retrait et de restauration existait sans écran ; un véhicule retiré n'était récupérable que par appel direct.
+- **Comment** :
+  - `useRestoreVehicle` (`client/src/hooks/useVehicles.ts`) applique les 3 couches : retrait de la ligne du cache local, trame `vehicle_restored` émise par le serveur, `invalidateVehicleLifecycleQueries` (catalogue, fiche, satellites : statistiques flotte, KPI, tableau de bord) ;
+  - envoi par `useSingleFlightMutate`, messages par `userMessageOf` ;
+  - `/api/vehicles/archived` ajouté aux `invalidates` de `vehicle_deleted` et `vehicle_restored` : un autre admin voit la liste bouger. La clé est écrite en littéral dans l'écran, forme que relève `realtime-invalidation-keys.test.ts`.
+- **Preuve** :
+  - contrat `vehicle-lifecycle` : la liste suit retrait puis restauration, technicien 403 ;
+  - e2e `29-retired-vehicles` (admin seul, le temps réel inter-profils est couvert par le contrat de la trame) : retirer, retrouver dans la liste, fiche en lecture seule, restaurer, ligne retirée, base à `deleted_at NULL`, fiche redevenue modifiable ;
+  - `screen-route-roles` : route et menu réservés à l'admin.
+- **Limites** : les onglets internes (OT, historique de statut) n'ont pas été audités bouton par bouton. Une écriture oubliée y reçoit le 409 `VEHICLE_RETIRED` de la garde L3, avec un message lisible.
+## 2026-11-06T01:16:55+01:00 — prefix-middleware-guardrail sous la limite (suite du « À surveiller » de L3)
+
+- **Quoi** : le recensement des montages de `server/` est fait une fois par fichier de test au lieu de cinq.
+- **Pourquoi** : 3,8 s de tests pour une limite de 5 s. Cinq cas relançaient `scanFiles` (analyse TypeScript de chaque fichier serveur), à environ 700 ms par passe.
+- **Comment** : `occurrences()` mémoïse le balayage et rend une copie à chaque appel, pour qu'aucun cas ne modifie le résultat d'un autre. Aucune règle ni limite changée.
+- **Preuve** : deux mesures locales. Tests du fichier : 3,84 s, puis 1,46 s et 1,58 s. Le cas le plus long, qui porte le balayage, passe à 1,3 s ; avant, chacun des cinq cas prenait de 650 à 850 ms. 30 cas verts.
+
+## 2026-11-06T01:41:09+01:00 — Tests contrat signalés instables : finance-withholdings, qhse-inspections
+
+**Quoi.** Deux fichiers ont été signalés rouges, uniquement dans la suite contrat complète :
+- finance-withholdings, cas « admin » et « management : 200 au contrat » ;
+- qhse-inspections, cas « applique les rôles, la cloison chauffeur et la validation de la grille ».
+
+Seul le résumé a été remonté, pas le message d'erreur.
+
+**Constat.** L'échec n'est pas reproduit en local sur Postgres Docker :
+- suite contrat complète : 245 fichiers, 2963 tests verts ;
+- les deux fichiers seuls : 34 tests verts.
+
+**Pistes écartées, preuve dans le code :**
+- *Cache des drapeaux de fonctionnalité* : `getFeatureFlags` relit `FEATURE_FLAGS` à chaque appel.
+- *Plafond d'échecs par IP* : relevé à 100 000 par `setup-contract.ts`. Les deux fichiers qui l'abaissent le restaurent.
+- *Horloge figée, espions, TZ, fetch global* : tous restaurés. Aucun `stubGlobal` ni remplacement de `fetch` dans les tests contrat.
+- *CHECK `category` des critères QHSE selon l'ordre des fichiers* : `initializeDatabase()` tourne une seule fois par processus, dans `setup-contract.ts`, avant le premier fichier. La réconciliation des contraintes (#122) précède donc toujours qhse, quel que soit l'ordre.
+- *Timeout pour qhse* : le describe porte un timeout de 180 s, et le cas dure 3,7 s.
+
+**Piste ouverte.** Les cas « 200 au contrat » de finance-withholdings gardent le timeout par défaut de 5 s.
+
+**Comment.** Les assertions qui échouaient affichent désormais le corps de la réponse :
+- la connexion de qhse et la lecture de la grille cabine ;
+- le statut 200 de finance-withholdings.
+
+Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drapeau), d'un 500 ou d'une grille vide.
+
+**Pourquoi** `testTimeout` n'est pas relevé : rien ne prouve qu'un timeout soit en cause. Le relever masquerait une lenteur réelle sans la nommer.
+
+**Leçon.** Un test signalé instable se remonte avec le texte de l'assertion, pas en résumé. Toute assertion de statut sur un appel HTTP porte le corps de la réponse en message (`expect(r.status, JSON.stringify(r.body))`), sinon l'échec intermittent reste indiagnosticable.

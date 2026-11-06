@@ -1,3 +1,4 @@
+import { STATUS_MESSAGES } from "@shared/errors";
 import { AppError } from "./app-error";
 
 /**
@@ -9,7 +10,7 @@ import { AppError } from "./app-error";
  * Le filtre vit ici, pas dans `storage.getVehicle` : la cloison des OT d'un client
  * (work-order-scope.ts) et les contrôles de doublon d'immatriculation doivent voir les véhicules retirés.
  */
-export const VEHICLE_RETIRED_EDIT_MESSAGE = "Véhicule retiré : le restaurer avant de le modifier.";
+export const VEHICLE_RETIRED_EDIT_MESSAGE = STATUS_MESSAGES.VEHICLE_RETIRED;
 
 type MaybeRetired = { deletedAt?: Date | string | null } | null | undefined;
 
@@ -20,9 +21,13 @@ export function vehicleReadableBy<T extends MaybeRetired>(role: string | null | 
   return role === "client" && isRetiredVehicle(vehicle) ? undefined : vehicle;
 }
 
-/** Refus (409) de modifier un véhicule retiré, null sinon : la route le passe à `next`. */
+/**
+ * Refus (409, code `VEHICLE_RETIRED`) de modifier un véhicule retiré, null sinon : la route le passe à
+ * `next`. Le code permet à la garde d'idempotence de libérer la clé : après restauration, la même clé
+ * doit pouvoir écrire, et non rejouer ce refus.
+ */
 export function vehicleEditRefusal(vehicle: MaybeRetired): AppError | null {
-  return isRetiredVehicle(vehicle) ? new AppError(409, VEHICLE_RETIRED_EDIT_MESSAGE) : null;
+  return isRetiredVehicle(vehicle) ? new AppError(409, VEHICLE_RETIRED_EDIT_MESSAGE, { code: "VEHICLE_RETIRED" }) : null;
 }
 
 /**
