@@ -33,6 +33,7 @@ import {
   Archive, RotateCcw,
 } from "lucide-react";
 import { useRestoreVehicle } from "@/hooks/useVehicles";
+import { AlertModal } from "@/components/design-system/alert-modal";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { MaintenanceScheduleForm } from "@/components/maintenance/maintenance-schedule-form";
 import { DeadlineTile, PremiumTabsNav } from "@/components/design-system";
@@ -70,6 +71,7 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isRestoreDialogOpen, setIsRestoreDialogOpen] = useState(false);
   const [isAddScheduleDialogOpen, setIsAddScheduleDialogOpen] = useState(false);
   const [isAddWorkOrderDialogOpen, setIsAddWorkOrderDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<VehicleDetailTab>("details");
@@ -296,11 +298,24 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
             </div>
           </div>
           {user?.role === "admin" && (
-            <Button size="sm" className="gap-1.5" onClick={() => submitRestore({ id: vehicleId })} disabled={restoreVehicle.isPending}>
+            <Button size="sm" className="gap-1.5" onClick={() => setIsRestoreDialogOpen(true)} disabled={restoreVehicle.isPending}>
               <RotateCcw className="h-3.5 w-3.5" />
               {restoreVehicle.isPending ? "Restauration..." : "Restaurer"}
             </Button>
           )}
+          <AlertModal
+            open={isRestoreDialogOpen}
+            onOpenChange={setIsRestoreDialogOpen}
+            variant="confirm"
+            title="Restaurer ce véhicule ?"
+            description={`${vehicle.registrationNumber} revient dans la flotte. Les plans de maintenance désactivés par le retrait sont réactivés s'ils n'ont pas été modifiés depuis.`}
+            confirmLabel="Restaurer"
+            cancelLabel="Annuler"
+            onConfirm={() => {
+              setIsRestoreDialogOpen(false);
+              submitRestore({ id: vehicle.id });
+            }}
+          />
         </div>
       )}
 
@@ -763,10 +778,12 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
                         </div>
                       </div>
                       <div className="flex justify-end gap-2 mt-3">
-                        <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs"
-                          onClick={() => setLocation(`/maintenance/${schedule.id}?vehicleId=${vehicleId}`)}>
-                          <Edit className="h-3 w-3" /> Modifier
-                        </Button>
+                        {!isRetired && (
+                          <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs"
+                            onClick={() => setLocation(`/maintenance/${schedule.id}?vehicleId=${vehicleId}`)}>
+                            <Edit className="h-3 w-3" /> Modifier
+                          </Button>
+                        )}
                         {canCreateWorkOrder && (
                           <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs"
                             onClick={() => setLocation(`/maintenance/work-orders/new?vehicleId=${vehicleId}&scheduleId=${schedule.id}`)}>
