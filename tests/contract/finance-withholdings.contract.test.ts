@@ -101,7 +101,7 @@ describe("droits", () => {
 
   it.each(["admin", "management", "secretary", "logistics"] as const)("%s : 200 au contrat", async (actor) => {
     const r = await session.call("GET", path(MAY), { actor });
-    expect(r.status).toBe(200);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
     financeWithholdingsResponseSchema.parse(r.body);
   });
 

@@ -191,9 +191,15 @@ describe("launch-readiness, montants du budget de mission réservés à ses lect
   });
   describe("drapeau coupé", () => {
     withFlags("finance=off");
-    it("technicien : ancien budget visible comme avant", async () => {
-      const [fuel] = await budgetChecks(await missionWithBudget("approved"), "technician");
-      expect(fuel.detail).toBe("111000 FCFA renseigné.");
+    it("technicien : verdict conservé, ancien budget masqué (Q19)", async () => {
+      const missionId = await missionWithBudget("approved");
+      const [fuel, fdr, extras] = await budgetChecks(missionId, "technician");
+      expect([fuel, fdr, extras].map((c: any) => [c.passed, c.detail])).toEqual([
+        [true, "Budget renseigné."],
+        [true, "Budget renseigné."],
+        [true, "Budget renseigné."],
+      ]);
+      expect((await budgetChecks(missionId))[0].detail, "logistique : montant visible").toBe("111000 FCFA renseigné.");
     });
   });
 });

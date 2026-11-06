@@ -100,7 +100,7 @@ describe("exports : matrice de roles (EXPORT_ROLE_MATRIX)", { timeout: 60000 }, 
 });
 
 const STAFF_MOUNTS = [
-  "/api/warehouse/inventory-value",
+  "/api/warehouse/parts/999999999/real-stock",
   "/api/fuel-card/balance",
   "/api/drivers",
   "/api/missions",

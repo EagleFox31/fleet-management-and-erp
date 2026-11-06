@@ -179,7 +179,7 @@ describe("GET /api/statistics/fleet : décompte limité aux véhicules du client
   });
 });
 
-const COST_ONLY_PATHS = new Set(["/api/parts-used", "/api/statistics/fleet-kpi"]);
+const COST_ONLY_PATHS = new Set(["/api/parts-used", "/api/statistics/fleet-kpi", "/api/parts/statistics"]);
 
 const STAFF_ONLY: Array<[string, string]> = [
   ["/api/parts-used", "/api/parts-used"],
@@ -202,7 +202,8 @@ describe.each(STAFF_ONLY)("GET %s : donnée interne réservée au personnel", (_
     }
   });
 
-  // Route qui porte un coût : le chauffeur n'est pas dans WORK_ORDER_COST_READ_ROLES.
+  // Route qui porte un coût ou la valeur du stock : le chauffeur n'est ni dans WORK_ORDER_COST_READ_ROLES
+  // ni dans STOCK_VALUATION_READ_ROLES.
   const driverStatus = COST_ONLY_PATHS.has(path) ? 403 : 200;
 
   it("le personnel lit (atelier ; chauffeur selon la route)", async () => {
