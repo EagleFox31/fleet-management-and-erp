@@ -585,3 +585,24 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
 - **Pourquoi** : la réception directe créditait le stock, puis la livraison de la commande le créditait une seconde fois par la ligne. Cela faisait 2 pièces reçues pour 4 entrées en stock.
 - **Preuve** : contrat `tests/contract/part-requirement-order-reception.contract.test.ts`, 5 tests. Sur l'ancien code, le parcours « réception directe puis livraison » finit à 9 pièces et 2 mouvements ; avec la règle, il finit à 7 et 1. tsc 0 ; unitaires 3 102 ; intégration 10 fichiers, 57 tests ; contrats 38 fichiers, 456 tests.
 - **Leçon** : quand un même événement physique (l'arrivée de la pièce) peut être saisi par deux écrans, l'un des deux doit le refuser. Sinon, chacun applique son propre effet.
+
+## 2026-11-06 04:08 — Commandes anciennes livrées avec des lignes restées ouvertes : comptage en lecture
+
+- **Quoi** : il n'y a pas de migration (DÉCISION 0a). On ne crédite pas le stock en silence. Ce qui est livré :
+  - une requête de comptage, en lecture seule ;
+  - un libellé honnête pour ces lignes dans le détail de commande.
+- **Pourquoi** : avant #561, la lecture d'une commande livrée alignait ses lignes ouvertes sans entrée en stock. Depuis #561, la lecture n'écrit plus et la réception globale n'aligne que ce qu'elle crédite. Une ligne `pending` ou `partial` sur une commande `delivered` ou `completed` ne peut donc venir que d'une commande ancienne. Son écart n'est jamais entré en stock.
+- **Écran** : `client/src/pages/procurement/orders/[id].tsx` affichait « Reçue au magasin » et « Statut ligne aligné automatiquement ». Les deux étaient faux. Le libellé devient « Ligne restée ouverte », avec ce texte d'aide : à la réception globale, seules les lignes encore ouvertes sont alignées et entrées en stock ; cette ligne n'est pas entrée en stock.
+- **Comptage** : la requête ci-dessous ne fait que lire. Elle a été validée sur le Postgres local de test (0 ligne). Elle n'a pas été jouée contre la production : c'est à 0a, ou à l'utilisatrice, de la lancer, puis de décider s'il faut un écran de régularisation.
+
+```sql
+SELECT count(DISTINCT po.id)                                    AS commandes,
+       count(*)                                                 AS lignes_ouvertes,
+       count(*) FILTER (WHERE l.part_id IS NOT NULL)            AS lignes_avec_piece,
+       coalesce(sum(greatest(l.quantity_ordered - coalesce(l.quantity_received, 0), 0))
+                FILTER (WHERE l.part_id IS NOT NULL), 0)        AS pieces_non_entrees
+FROM purchase_orders po
+JOIN purchase_order_lines l ON l.purchase_order_id = po.id
+WHERE po.status IN ('delivered', 'completed')
+  AND coalesce(l.delivery_status, 'pending') IN ('pending', 'partial');
+```
