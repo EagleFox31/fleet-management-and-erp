@@ -749,3 +749,12 @@ WHERE po.status IN ('delivered', 'completed')
 - **Comment** : types réels plutôt que des contournements (aucun `any`, `@ts-ignore` ni `@ts-expect-error` ajouté). `describeIssue` ne fait que des comparaisons strictes sur ces trois champs, donc son comportement ne change pas. Il accepte désormais un `ZodIssue` réel, dont `validation` peut être un objet (`{ includes }`).
 - **Pourquoi** : consigne de 0a, une PR par lot, et la base ne fait que baisser. Une erreur figée masque une dérive de type réelle ; ici, `ZodIssueLike` mentait sur la forme d'un `ZodIssue`.
 - **Preuve** : `tsc` 0 ; `check:tests` à 53 figées, sans aucune erreur nouvelle ; unitaires 298 fichiers (3 126 tests verts).
+
+## 2026-11-06 — Lignes d'OT : le technicien affecté suit la règle de l'OT
+
+- **Quoi** : `POST /api/work-orders/:id/items` et `PATCH /api/work-order-items/:id` n'affectent plus une ligne de travail qu'à un technicien ou à un chef d'atelier actif. Un chauffeur, un compte supprimé ou un id inexistant reçoivent un 400, avec `fieldErrors` sur `technicianId`. La désaffectation (`null`) reste possible.
+- **Comment** : `refusTechnicien`, qui ne vérifiait que l'existence de l'utilisateur, est remplacé par `assertWorkOrderAssignee`, la garde de l'OT et des rotations de pneus. L'`AppError` levée passe par le `next(error)` déjà présent dans les routes. Une ligne existante n'est pas revérifiée tant que sa modification ne touche pas `technicianId`.
+- **Pourquoi** : backlog de 0a (`work-order-items-service.ts:271`). Le sélecteur de l'écran est `/api/users/technicians`, avec les mêmes critères que la garde : l'API acceptait ce que l'écran ne propose pas.
+- **Preuve** :
+  - contrat `work-order-items` : nouveau cas couvrant le chauffeur, le compte supprimé, le chef d'atelier accepté, le PATCH refusé (sans écriture) et la désaffectation ;
+  - mutant (service d'origine) : le cas échoue (201 au lieu de 400).
