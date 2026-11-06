@@ -46,6 +46,7 @@ import {
   REPORT_TAB_DEFS,
   type ReportTabId,
   reportTabForLocation,
+  reportsPageSubtitle,
   visibleReportTabs,
 } from "@/lib/management-report-tabs";
 import type {
@@ -140,7 +141,7 @@ export default function ManagementReportsPage() {
       <HeaderCard
         moduleLabel="Direction · Reporting Exécutif"
         title="Rapports Direction &amp; Board Packs"
-        subtitle="Génération, prévisualisation interactive et distribution automatisée des synthèses stratégiques"
+        subtitle={reportsPageSubtitle(flags)}
         icon={<FileText className="h-5 w-5" />}
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
