@@ -169,11 +169,11 @@ export const REALTIME_EVENTS = {
   // maintenance et renouvellements désactivés ou réactivés. Tout le personnel lit les véhicules.
   vehicle_deleted: {
     scope: { type: "roles", roles: STAFF_ROLES },
-    invalidates: ["/api/vehicles", "/api/document-renewals/requests"],
+    invalidates: ["/api/vehicles", "/api/vehicles/archived", "/api/document-renewals/requests"],
   } as EventDefinition<{ id: number; vehicleId: number }>,
   vehicle_restored: {
     scope: { type: "roles", roles: STAFF_ROLES },
-    invalidates: ["/api/vehicles", "/api/document-renewals/requests"],
+    invalidates: ["/api/vehicles", "/api/vehicles/archived", "/api/document-renewals/requests"],
   } as EventDefinition<{ id: number; vehicleId: number }>,
   // Import Excel appliqué : véhicules, ordres de travail et KPI changent. Sans toast.
   import_batch_applied: {

@@ -294,6 +294,19 @@ describe("POST /api/vehicles/:id/restore : restauration symétrique et idempoten
     }
   });
 
+  it("GET /api/vehicles/archived (écran Véhicules retirés) suit le retrait puis la restauration", async () => {
+    const v = await vehicle();
+    await addDocument(v.id);
+    const listed = async () =>
+      ((await asAdmin("GET", "/api/vehicles/archived")).body as Array<{ id: number }>).find((row) => row.id === v.id);
+    expect(await listed()).toBeUndefined();
+    expect((await asAdmin("DELETE", `/api/vehicles/${v.id}`)).status).toBe(200);
+    expect(await listed()).toMatchObject({ id: v.id, registration_number: v.registrationNumber, archived_at: expect.any(String) });
+    expect((await actors.call("GET", "/api/vehicles/archived", { actor: "technician" })).status).toBe(403);
+    expect((await asAdmin("POST", `/api/vehicles/${v.id}/restore`)).status).toBe(200);
+    expect(await listed()).toBeUndefined();
+  });
+
   it("refuse un rôle non admin (403) et répond 404 à un véhicule inconnu", async () => {
     const v = await vehicle();
     await addDocument(v.id);

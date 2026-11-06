@@ -21,6 +21,8 @@ const EXPECTED: Record<string, readonly string[]> = {
   "/technicians": ["admin", "workshop_manager"],
   "/missions": roles.MISSION_MANAGER_ROLES,
   "/inventory/tires": ["admin", "workshop_manager", "warehouse", "secretary", "logistics", "technician"],
+  // GET /api/vehicles/archived et POST /api/vehicles/:id/restore : isAdmin.
+  "/admin/retired-vehicles": ["admin"],
 };
 
 function routeRoles(path: string): string[] {

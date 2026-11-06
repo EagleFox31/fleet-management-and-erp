@@ -378,3 +378,19 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - des tests unitaires dans `idempotency-guard.test` : un 409 `CONFLICT` reste rejouable, un corps nul n'est pas un refus.
 - **Ordre des refus** : pour le personnel, le 409 de la garde passe avant le 403 de la route. Il n'y a pas de fuite : le personnel voit tous les véhicules (§11). Un anonyme ou un client ne passe pas par la garde (`!user || role === "client"`) : il reçoit le 401 ou le 403 de la route, sans rien apprendre de l'état du véhicule.
 - **À surveiller** : `prefix-middleware-guardrail` met 3,9 s pour une limite de 5 s. Il risque de devenir instable sous charge.
+
+## 2026-11-06T00:55:58+01:00 — L4 : écran admin « Véhicules retirés » et fiche en consultation seule
+
+- **Quoi** :
+  - écran `/admin/retired-vehicles` (admin seul, menu Administration) : liste `GET /api/vehicles/archived` en `PremiumDataTable`, date de retrait, bouton Restaurer avec confirmation ;
+  - la ligne ouvre la fiche véhicule, qui passe en consultation seule quand `deletedAt` est posé : bandeau « Véhicule retiré de la flotte le … », badge Retiré, formulaire désactivé, aucun bouton d'écriture (plein, document, renouvellement, échéance, OT, montage pneu, suppression), bouton Restaurer pour l'admin.
+- **Pourquoi** : l'API de retrait et de restauration existait sans écran ; un véhicule retiré n'était récupérable que par appel direct.
+- **Comment** :
+  - `useRestoreVehicle` (`client/src/hooks/useVehicles.ts`) applique les 3 couches : retrait de la ligne du cache local, trame `vehicle_restored` émise par le serveur, `invalidateVehicleLifecycleQueries` (catalogue, fiche, satellites : statistiques flotte, KPI, tableau de bord) ;
+  - envoi par `useSingleFlightMutate`, messages par `userMessageOf` ;
+  - `/api/vehicles/archived` ajouté aux `invalidates` de `vehicle_deleted` et `vehicle_restored` : un autre admin voit la liste bouger. La clé est écrite en littéral dans l'écran, forme que relève `realtime-invalidation-keys.test.ts`.
+- **Preuve** :
+  - contrat `vehicle-lifecycle` : la liste suit retrait puis restauration, technicien 403 ;
+  - e2e `29-retired-vehicles` (admin seul, le temps réel inter-profils est couvert par le contrat de la trame) : retirer, retrouver dans la liste, fiche en lecture seule, restaurer, ligne retirée, base à `deleted_at NULL`, fiche redevenue modifiable ;
+  - `screen-route-roles` : route et menu réservés à l'admin.
+- **Limites** : les onglets internes (OT, historique de statut) n'ont pas été audités bouton par bouton. Une écriture oubliée y reçoit le 409 `VEHICLE_RETIRED` de la garde L3, avec un message lisible.
