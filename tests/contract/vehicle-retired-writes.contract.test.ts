@@ -238,7 +238,7 @@ describe("véhicule retiré et idempotence : le refus n'est pas mis en cache", {
     const vehicle = await createTestVehicle({ mileage: 100 });
     ids.vehicleIds.push(vehicle.id);
     await db.update(vehicles).set({ deletedAt: new Date() }).where(eq(vehicles.id, vehicle.id));
-    const key = `l3-${uniqueTestToken()}`;
+    const key = `l3-${uniqueTestToken("idem")}`;
     const send = () =>
       actors.call("PUT", `/api/vehicles/${vehicle.id}/mileage`, { actor: "admin", body: { kilometers: 1200 }, headers: { [IDEMPOTENCY_HEADER]: key } });
 

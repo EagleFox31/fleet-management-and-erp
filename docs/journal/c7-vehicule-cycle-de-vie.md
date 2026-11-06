@@ -758,3 +758,14 @@ WHERE po.status IN ('delivered', 'completed')
 - **Preuve** :
   - contrat `work-order-items` : nouveau cas couvrant le chauffeur, le compte supprimé, le chef d'atelier accepté, le PATCH refusé (sans écriture) et la désaffectation ;
   - mutant (service d'origine) : le cas échoue (201 au lieu de 400).
+## 2026-11-06 — Typecheck des tests : lot 2, `tests/contract` (53 → 12)
+
+- **Quoi** : les 41 erreurs figées de `tests/contract` (15 fichiers) sont corrigées, et la base ne contient plus aucune entrée `tests/contract`. Aucun changement produit.
+- **Comment** :
+  - types réels : `errorFields(body)` partagé dans `tests/support/api-error.ts`, `as const`, types d'insertion Drizzle, `PoolClient` importé, `CreateQhseInspectionRequest["items"]` ;
+  - aucun `any`, suppression, `as unknown as` ni `!`.
+- **Pourquoi** : consigne de 0a, une PR par lot. Le typecheck a révélé deux assertions mortes :
+  - `vehicle-documents-client-scope` comparait `updatedAt`, une colonne absente de `vehicles` (`undefined === undefined`). Le test compare maintenant `maintenancePosition`, la colonne écrite par la route ;
+  - `supplier-settlement-proof-lifecycle` créait une facture `pending`, un statut hors du cycle de vie. Elle est maintenant `received`, le statut initial réel.
+- **Écart signalé** : `vehicle_documents.type` déclare un enum TypeScript, alors que la colonne est en texte libre et accepte des alias. Le test passe par `sql`, et l'écart est remonté à 0a.
+- **Preuve** : `tsc` 0 ; `check:tests` à 12 figées ; 15 fichiers de contrat (343 tests) verts sur Postgres local.

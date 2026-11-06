@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { db, pool } from "../../server/db";
 import { initializeDatabase, QHSE_INSPECTIONS_SQL, reportCdcConstraintGaps } from "../../server/init-database";
 import { drivers, qhseInspectionCriteria, qhseInspections } from "../../shared/schema";
+import type { CreateQhseInspectionRequest } from "../../shared/contracts/qhse-inspections";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { expectStatus } from "../support/expect-status";
@@ -101,7 +102,7 @@ describe("contrôles inopinés QHSE", { timeout: 180000 }, () => {
     const cabinId = cabin.body[0].id as number;
     const stopId = stop.body[0].id as number;
 
-    const payload = (driverId: number, items = [{ criterionId: cabinId, conform: false, observation: "Ceinture non portée" }]) => ({
+    const payload = (driverId: number, items: CreateQhseInspectionRequest["items"] = [{ criterionId: cabinId, conform: false, observation: "Ceinture non portée" }]) => ({
       kind: "cabin",
       location: "Aire de Douala",
       vehicleId: vehicle.id,

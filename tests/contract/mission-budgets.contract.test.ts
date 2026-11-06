@@ -697,7 +697,7 @@ describe("Décaissement au journal de trésorerie (L1c)", { timeout: 120000 }, (
     await db.update(missions).set({ status: "delivered" }).where(eq(missions.id, missionId));
     return { missionId, approved };
   }
-  const reversalsOf = async (budgetId: number) => (await entriesOf(budgetId)).filter((e) => e.requestKey.endsWith(":reverse"));
+  const reversalsOf = async (budgetId: number) => (await entriesOf(budgetId)).filter((e) => e.requestKey !== null && e.requestKey.endsWith(":reverse"));
   const statusOf = async (missionId: number) =>
     (await db.select({ status: missions.status }).from(missions).where(eq(missions.id, missionId)))[0].status;
 
@@ -769,7 +769,7 @@ describe("Décaissement au journal de trésorerie (L1c)", { timeout: 120000 }, (
     for (const status of ["planned", "in_progress", "delivered", "completed"]) {
       await db.transaction((tx) => onMissionStatusChange(tx, missionId, status, userIds.get("admin")!));
     }
-    expect((await entriesOf(approved.id)).filter((e) => e.requestKey.endsWith(":reverse"))).toHaveLength(0);
+    expect((await entriesOf(approved.id)).filter((e) => e.requestKey !== null && e.requestKey.endsWith(":reverse"))).toHaveLength(0);
   });
 
   it("drapeau finance coupé : un compte demandé est refusé (409), sans compte rien n'est écrit", async () => {

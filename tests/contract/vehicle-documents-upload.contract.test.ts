@@ -2,7 +2,7 @@ import { createServer, type Server } from "http";
 import fs from "fs";
 import path from "path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { activityLogs, vehicleDocuments, vehicleDocumentTypes, vehicles } from "../../shared/schema";
 import { db } from "../../server/db";
 import * as mirrorLib from "../../server/lib/vehicle-document-mirror";
@@ -134,7 +134,9 @@ describe("POST /api/vehicles/:vehicleId/documents", { timeout: 120000 }, () => {
     for (const [type, column] of cases) {
       const [doc] = await db
         .insert(vehicleDocuments)
-        .values({ vehicleId, name: `TEST alias ${type}`, type, filename: "x.pdf", filesize: 1, fileType: "application/pdf", filePath: "uploads/x.pdf" })
+        // Les alias (insurance, license...) sont hors de l'enum TypeScript de la colonne, qui reste du
+        // texte libre en base : la valeur passe en paramètre SQL brut.
+        .values({ vehicleId, name: `TEST alias ${type}`, type: sql`${type}`, filename: "x.pdf", filesize: 1, fileType: "application/pdf", filePath: "uploads/x.pdf" })
         .returning();
       await db.update(vehicles).set({ [column]: "2040-01-01" }).where(eq(vehicles.id, vehicleId));
       const patch = await fetch(`${baseUrl}/api/documents/${doc.id}`, {
@@ -302,7 +304,7 @@ describe("POST /api/vehicles/:vehicleId/documents", { timeout: 120000 }, () => {
   it("P3-2 R2 : supprimer un document qui ne fixait pas le miroir n'y touche pas (saisie directe plus lointaine)", async () => {
     await db.delete(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
     await db.update(vehicles).set({ insuranceExpiry: "2060-06-30" }).where(eq(vehicles.id, vehicleId));
-    const base = { vehicleId, type: "assurance", filename: "x.pdf", filesize: 1, fileType: "application/pdf", filePath: "uploads/x.pdf" };
+    const base = { vehicleId, type: "assurance" as const, filename: "x.pdf", filesize: 1, fileType: "application/pdf", filePath: "uploads/x.pdf" };
     const [older] = await db.insert(vehicleDocuments).values({ ...base, name: "TEST assurance 2045", expiryDate: "2045-01-01" }).returning();
     await db.insert(vehicleDocuments).values({ ...base, name: "TEST assurance 2046", expiryDate: "2046-01-01" });
     const res = await fetch(`${baseUrl}/api/documents/${older.id}`, { method: "DELETE", headers: { Cookie: cookies.get("workshop_manager")! } });

@@ -123,7 +123,7 @@ describe("Import Excel de factures fournisseur : contrat", { timeout: 120000 }, 
     expect(Number(stored.totalTTC)).toBe(5962.5);
   });
 
-  it.each([
+  it.each<{ label: string; overrides: Row }>([
     { label: "date impossible", overrides: { "Date Facture": "31/02/2026" } },
     { label: "date illisible", overrides: { "Date Échéance": "abc/de/fghi" } },
     { label: "HT négatif", overrides: { "Montant HT": "-100" } },

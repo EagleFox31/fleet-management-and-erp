@@ -26,7 +26,7 @@ let orphan = 0;
 async function invoice(
   supplierId: number,
   invoiceDate: string,
-  over: Partial<typeof supplierInvoices.$inferInsert> = {},
+  over: Partial<Omit<typeof supplierInvoices.$inferInsert, "supplierId">> = {},
 ) {
   const row = await createTestSupplierInvoice({ supplierId, invoiceDate, ...over });
   return row.id;
