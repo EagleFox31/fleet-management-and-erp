@@ -2,7 +2,7 @@ import { createServer, type Server } from "http";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "../../server/db";
-import { alerts, workOrders } from "../../shared/schema";
+import { alerts, users, workOrders } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { waitForBlockedWriter } from "../support/row-lock";
@@ -300,5 +300,124 @@ describe("PATCH /api/work-orders/:id : colonnes par rôle", { timeout: 120000 },
     expect(after.status).toBe("in_progress");
     expect(after.endDate).toBeNull();
     expect(after.technicianId).toBe(other.id);
+  });
+
+  it("technicien : dates seules sur son OT écrites, updatedBy = lui", async () => {
+    const tech = await session("technician");
+    const wo = await workOrderIn("in_progress", tech.id);
+    const endDate = "2033-02-03T10:00:00.000Z";
+    const res = await call("PATCH", `/api/work-orders/${wo.id}`, { cookie: tech.cookie, body: { endDate } });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const after = await rowOf(wo.id);
+    expect(after.endDate?.toISOString()).toBe(endDate);
+    expect(after.updatedBy).toBe(tech.id);
+    expect(after.status).toBe("in_progress");
+  });
+
+  // Sans statut, les dates s'écrivaient sans condition d'affectation : l'ancien technicien
+  // modifiait un OT réassigné pendant sa requête.
+  it("technicien : dates seules sur un OT réassigné pendant la requête, 409, rien n'est écrit", async () => {
+    const tech = await session("technician");
+    const other = await createTestUser({ role: "technician" });
+    ids.userIds.push(other.id);
+    const wo = await workOrderIn("in_progress", tech.id);
+    const client = await pool.connect();
+    let res: Awaited<ReturnType<typeof call>>;
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT id FROM work_orders WHERE id = $1 FOR UPDATE", [wo.id]);
+      const holderPid = (await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid as number;
+      const pending = call("PATCH", `/api/work-orders/${wo.id}`, {
+        cookie: tech.cookie,
+        body: { endDate: "2033-03-04T10:00:00.000Z" },
+      });
+      await waitForBlockedWriter(holderPid, "l'OT");
+      await client.query("UPDATE work_orders SET technician_id = $2 WHERE id = $1", [wo.id, other.id]);
+      await client.query("COMMIT");
+      res = await pending;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body.message).toMatch(/réassigné/);
+    const after = await rowOf(wo.id);
+    expect(after.endDate).toBeNull();
+    expect(after.updatedBy).toBe(creatorId);
+    expect(after.technicianId).toBe(other.id);
+  });
+});
+
+/**
+ * Cible d'affectation (`shared/constants/roles.ts`, `WORK_ORDER_ASSIGNEE_ROLES`) : un OT
+ * s'affecte à l'atelier (technicien, chef d'atelier), comme le propose le sélecteur
+ * `GET /api/users/technicians`. Toute autre cible répond 400, à la création comme au PATCH.
+ */
+describe("Affectation d'OT : cible limitée à l'atelier", () => {
+  const OUTSIDE_ROLES: TestUserRole[] = ["driver", "client", "warehouse", "secretary", "admin"];
+
+  it("PATCH : cible hors atelier, supprimée ou inexistante refusée (400, champ technicianId), rien n'est écrit", async () => {
+    const chef = await session("workshop_manager");
+    const targets: Array<[string, number]> = [["inexistant", 2_000_000_000], ["hors plage integer", 99_999_999_999]];
+    for (const role of OUTSIDE_ROLES) {
+      const user = await createTestUser({ role });
+      ids.userIds.push(user.id);
+      targets.push([role, user.id]);
+    }
+    const removed = await createTestUser({ role: "technician" });
+    ids.userIds.push(removed.id);
+    await db.update(users).set({ deletedAt: new Date() }).where(eq(users.id, removed.id));
+    targets.push(["technicien supprimé", removed.id]);
+    const wo = await workOrderIn("pending");
+    const before = protectedColumns(await rowOf(wo.id));
+    for (const [label, technicianId] of targets) {
+      const res = await call("PATCH", `/api/work-orders/${wo.id}`, {
+        cookie: chef.cookie,
+        body: { title: "TEST affectation refusée", technicianId },
+      });
+      expect(res.status, `${label} : ${JSON.stringify(res.body)}`).toBe(400);
+      expect(res.body.errors?.map((e: { field: string }) => e.field), label).toEqual(["technicianId"]);
+      expect(protectedColumns(await rowOf(wo.id)), label).toEqual(before);
+    }
+  });
+
+  it("PATCH : technicien et chef d'atelier acceptés, désaffectation acceptée", async () => {
+    const admin = await session("admin");
+    const chef = await createTestUser({ role: "workshop_manager" });
+    ids.userIds.push(chef.id);
+    const wo = await workOrderIn("pending");
+    for (const technicianId of [chef.id, (await session("technician")).id, null]) {
+      const res = await call("PATCH", `/api/work-orders/${wo.id}`, { cookie: admin.cookie, body: { technicianId } });
+      expect(res.status, `${technicianId} : ${JSON.stringify(res.body)}`).toBe(200);
+      expect((await rowOf(wo.id)).technicianId).toBe(technicianId);
+    }
+  });
+
+  it("création : cible hors atelier refusée (400), aucun OT créé ; technicien accepté (201)", async () => {
+    const chef = await session("workshop_manager");
+    await workOrderIn("pending");
+    const driver = await createTestUser({ role: "driver" });
+    ids.userIds.push(driver.id);
+    const title = `TEST création affectation ${Date.now()}`;
+
+    const refused = await call("POST", "/api/work-orders", {
+      cookie: chef.cookie,
+      body: { vehicleId: otherVehicleId, title, priority: "medium", technicianId: driver.id },
+    });
+    expect(refused.status, JSON.stringify(refused.body)).toBe(400);
+    expect(refused.body.errors?.map((e: { field: string }) => e.field)).toEqual(["technicianId"]);
+    expect(await db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.title, title))).toEqual([]);
+
+    const tech = await session("technician");
+    const created = await call("POST", "/api/work-orders", {
+      cookie: chef.cookie,
+      body: { vehicleId: otherVehicleId, title, priority: "medium", technicianId: tech.id },
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    workOrderIds.push(created.body.id);
+    expect((await rowOf(created.body.id)).technicianId).toBe(tech.id);
   });
 });

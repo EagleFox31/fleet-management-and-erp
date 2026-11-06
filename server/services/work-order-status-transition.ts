@@ -116,3 +116,28 @@ export async function transitionWorkOrderStatus(transition: WorkOrderStatusTrans
   // Retour enrichi (technicianName, createdByName…), comme `storage.updateWorkOrder`.
   return (await storage.getWorkOrder(workOrderId)) ?? null;
 }
+
+/**
+ * Champs d'un OT écrits par le technicien assigné, hors statut (dates) : même condition
+ * d'affectation que `transitionWorkOrderStatus`. `WHERE id AND technician_id` : un OT réassigné
+ * entre la lecture et l'écriture répond 409 au lieu d'être modifié par l'ancien technicien.
+ */
+export async function updateAssignedWorkOrderFields(update: {
+  workOrderId: number;
+  technicianId: number;
+  fields: Partial<Omit<InsertWorkOrder, "status">>;
+}): Promise<WorkOrder | null> {
+  const { workOrderId, technicianId, fields } = update;
+  const { status: _ignoredStatus, ...columns } = fields as Partial<InsertWorkOrder>;
+  const [row] = await db
+    .update(workOrders)
+    .set({ ...columns, updatedAt: new Date() })
+    .where(and(eq(workOrders.id, workOrderId), eq(workOrders.technicianId, technicianId)))
+    .returning({ id: workOrders.id });
+  if (!row) {
+    const [current] = await db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.id, workOrderId));
+    if (!current) throw new AppError(404, "Ordre de travail non trouvé");
+    throw new AppError(409, WORK_ORDER_ASSIGNMENT_CHANGED_ERROR);
+  }
+  return (await storage.getWorkOrder(workOrderId)) ?? null;
+}

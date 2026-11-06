@@ -39,7 +39,8 @@ import {
 } from "@shared/schema";
 import { PART_UNITS } from "@shared/constants/parts";
 import { checkWorkOrderTransition, type WorkOrderStatus } from "@shared/constants/work-order-transitions";
-import { transitionWorkOrderStatus } from "./services/work-order-status-transition";
+import { transitionWorkOrderStatus, updateAssignedWorkOrderFields } from "./services/work-order-status-transition";
+import { assertWorkOrderAssignee } from "./services/work-order-assignee";
 import { db } from "./db";
 import { eq, and, gte, lte, desc, asc, sql, ilike, inArray, isNull, getTableColumns } from "drizzle-orm";
 import crypto from "crypto";
@@ -57,7 +58,7 @@ import { vehiclePatchRefusal, vehiclePriceWriteRefusal, withoutEmptyPurchasePric
 import { canAccessOwned, ownerScopeOf, OUT_OF_SCOPE_MESSAGE } from "./lib/client-scope";
 import { isRetiredVehicle, vehicleEditRefusal, vehicleReadableBy } from "./lib/vehicle-retired";
 import { redactVehiclePrice } from "./lib/vehicle-price-scope";
-import { PROCUREMENT_ROLES, type AppRole } from "@shared/constants/roles";
+import { PROCUREMENT_ROLES, canReceiveWorkOrder, type AppRole } from "@shared/constants/roles";
 import { prepareColumnUpdate } from "./lib/column-validation";
 import { validateWorkOrderPatch } from "./lib/work-order-patch-policy";
 import { moduleLogger } from "./lib/logger";
@@ -468,7 +469,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const allUsers = await storage.getAllUsers();
       const technicians = allUsers
-        .filter(user => user.role === 'technician' || user.role === 'workshop_manager')
+        .filter(user => canReceiveWorkOrder(user.role))
         .map(user => ({
           id: user.id,
           name: user.name || user.username,
@@ -1682,11 +1683,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.post("/api/work-orders", isWorkshopManager, async (req, res) => {
+  app.post("/api/work-orders", isWorkshopManager, async (req, res, next) => {
     try {
       log.debug({ requestId: req.requestId, body: req.body }, "Données reçues pour création OT");
-      
+
       const parsedWorkOrder = insertWorkOrderSchema.parse(req.body);
+      await assertWorkOrderAssignee(parsedWorkOrder.technicianId);
       const actorUserId = typeof req.session?.userId === "number" ? req.session.userId : null;
 
       // Règle métier: à la création, une OT démarre toujours "en attente"
@@ -1761,15 +1763,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(201).json(workOrder);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        console.error("Erreurs de validation Zod:", JSON.stringify(error.errors, null, 2));
+        log.warn({ err: error, requestId: req.requestId }, "création d'OT : données invalides");
         return res.status(400).json({ 
           message: "Données d'ordre de travail invalides",
-          errors: error.errors 
+          errors: error.errors
         });
       }
-      
-      console.error("Create work order error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
+      // AppError (cible d'affectation) et erreur inattendue : gestionnaire central
+      // (journal avec requestId, 5xx en message générique + référence).
+      return next(error);
     }
   });
 
@@ -1789,6 +1791,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Liste blanche par rôle, technicien limité à ses OT, `updatedBy` posé sur l'auteur.
       const updatedData = validateWorkOrderPatch({ user: req.user, workOrder, body: req.body });
+      if ("technicianId" in updatedData) await assertWorkOrderAssignee(updatedData.technicianId);
 
       // Transitions de statut (shared/constants/work-order-transitions.ts) :
       // vérifiées avant toute écriture.
@@ -1817,7 +1820,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Le statut passe par le compare-and-set du service, avec les autres champs : une transition
-      // concurrente répond 409 au lieu d'être écrasée. Les autres champs, seuls, restent directs.
+      // concurrente répond 409 au lieu d'être écrasée. Les autres champs, seuls, restent directs,
+      // sauf pour le technicien : l'affectation est revérifiée à l'écriture (409 si réassigné).
       const { status: requestedStatus, ...otherFields } = updatedData;
       const updatedWorkOrder =
         typeof requestedStatus === "string"
@@ -1830,7 +1834,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
               // Technicien : l'OT doit lui être encore assigné au moment de l'écriture.
               technicianId: req.user?.role === "technician" ? req.user.id : undefined,
             })
-          : await storage.updateWorkOrder(id, otherFields);
+          : req.user?.role === "technician"
+            ? await updateAssignedWorkOrderFields({ workOrderId: id, technicianId: req.user.id, fields: otherFields })
+            : await storage.updateWorkOrder(id, otherFields);
 
       // Affectation à un technicien: le prévenir nommément. Sans ça, le chef
       // d'atelier lisait « OT mis à jour » et le technicien ne voyait rien —
