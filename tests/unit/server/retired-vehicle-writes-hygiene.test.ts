@@ -37,14 +37,20 @@ const NOT_GUARDED: Record<string, string> = {
   "PATCH /api/fuel-card/anomalies/:p": "traitement d'une anomalie (clé d'anomalie), aucune saisie sur le véhicule",
   "DELETE /api/work-orders/bulk-pending-unassigned": "purge administrative en masse, pas une saisie sur un véhicule",
   "POST /api/vehicles/activate-from-workflow": "crée le véhicule, ne vise pas un véhicule existant",
+  // Décision 0a (L3b) : livraison d'une commande, les demandes de l'OT d'un véhicule retiré passent à reçue.
+  "PATCH /api/purchase-orders/:p/status": "réception physique permise, la marchandise entre en stock",
 };
 
 // Égal à la taille de la table : en ajouter une entrée oblige à relever ce nombre, sinon le cliquet
 // se périmerait et laisserait retirer une entrée sans revue.
 const TABLE_FLOOR = 45;
-const VEHICLE_MARKER = /\b(vehicleId|vehicle_id|vehicleTireId|fuelRecordId|workOrderId|work_order_id)\b/;
+const VEHICLE_MARKER = /\b(vehicleId|vehicle_id|vehicleTireId|fuelRecordId|workOrderId|work_order_id|partRequirementId|part_requirement_id)\b/;
 // Objet d'OT désigné par le chemin : le véhicule s'atteint par l'OT, même si la poignée ne nomme ni l'un ni l'autre.
 const WORK_ORDER_PATH = /\/(work-orders|work-order-items|parts-used|part-requirements)\/:p(\/|$)/;
+// Méthodes de service qui font avancer des demandes de pièce d'OT sans que la poignée les nomme.
+const WORK_ORDER_SERVICE_CALL = /\.\s*updateOrderStatus\s*\(/;
+const reachesVehicle = (r: { signature: string; handler: string }) =>
+  VEHICLE_MARKER.test(r.handler) || WORK_ORDER_PATH.test(r.signature) || WORK_ORDER_SERVICE_CALL.test(r.handler);
 const serverDir = fileURLToPath(new URL("../../../server", import.meta.url));
 const signatureOf = (route: string) => {
   const [method, path] = route.split(" ");
@@ -58,7 +64,7 @@ describe("écritures sur véhicule retiré : couverture de la garde", () => {
   const uncovered = [
     ...new Set(
       routes
-        .filter((r) => (VEHICLE_MARKER.test(r.handler) || WORK_ORDER_PATH.test(r.signature)) && !table.has(r.signature) && !r.handler.includes("assertVehicleWritable("))
+        .filter((r) => reachesVehicle(r) && !table.has(r.signature) && !r.handler.includes("assertVehicleWritable("))
         .map((r) => r.signature),
     ),
   ].sort();
@@ -91,8 +97,15 @@ describe("écritures sur véhicule retiré : couverture de la garde", () => {
   });
 
   it("L3b : la détection voit les écritures atteintes par un OT", () => {
-    const flagged = (signature: string) => routes.some((r) => r.signature === signature && (VEHICLE_MARKER.test(r.handler) || WORK_ORDER_PATH.test(r.signature)));
-    for (const route of ["POST /api/work-orders/:p/parts", "PATCH /api/work-order-items/:p", "DELETE /api/parts-used/:p", "PATCH /api/part-requirements/:p", "POST /api/warehouse/stock-movement"]) {
+    const flagged = (signature: string) => routes.some((r) => r.signature === signature && reachesVehicle(r));
+    for (const route of [
+      "POST /api/work-orders/:p/parts",
+      "PATCH /api/work-order-items/:p",
+      "DELETE /api/parts-used/:p",
+      "PATCH /api/part-requirements/:p",
+      "POST /api/warehouse/stock-movement",
+      "PATCH /api/purchase-orders/:p/status",
+    ]) {
       expect(flagged(route), route).toBe(true);
     }
   });

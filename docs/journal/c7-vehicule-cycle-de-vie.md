@@ -414,3 +414,7 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - mutant n° 1, l'entrée `stock-movement` retirée de la table : le garde-fou échoue (route non couverte, plancher) et le contrat aussi (deux 409 attendus) ;
   - mutant n° 2, un fichier `server/api` qui monte un sous-routeur et déclare une écriture non montée : les deux nouveaux tests échouent.
 - **Leçon** : un garde-fou par balayage doit tester son propre périmètre, c'est-à-dire ce qu'il ne lit pas, et pas seulement les routes qu'il lit. Sinon un montage hors du chemin balayé le rend aveugle sans qu'aucun test ne passe au rouge.
+- **Réserve sécurité, décision 0a (2026-11-06)** :
+  - `PATCH /api/purchase-orders/:id/status` (livraison) fait passer à reçue les demandes rattachées à l'OT d'un véhicule retiré et crédite le stock. 0a la laisse passer : la marchandise arrive de toute façon, et la refuser fausserait le stock. Elle est dans `NOT_GUARDED` avec cette raison.
+  - Le garde-fou voit désormais cette route. Il cherche `partRequirementId` dans la poignée et les appels `.updateOrderStatus(` (`WORK_ORDER_SERVICE_CALL`), parce que la poignée délègue au service sans nommer la demande.
+  - La vérification d'abord, l'écriture ensuite, hors transaction (TOCTOU) : c'est le modèle L3, et 0a l'accepte, puisqu'un retrait exige des OT clos.
