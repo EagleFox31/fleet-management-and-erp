@@ -132,4 +132,12 @@ describe("/api/operations : montants du budget réservés à leurs lecteurs (Q19
     const dest = await call("GET", "/api/operations/stats/by-destination", { actor: "logistics" });
     expect(Number((statRow(dest.body, "destination", destination) as any).totalRevenue)).toBe(ESTIMATED_FUEL_COST);
   });
+
+  it("sans cookie : 401, aucun montant ni chiffre d'affaires", async () => {
+    for (const path of ["/api/operations/missions", "/api/operations/stats/by-client"]) {
+      const res = await call("GET", path);
+      expect(res.status, path).toBe(401);
+      for (const sentinel of [ESTIMATED_FUEL_COST, LEGACY.roadExpensesBudget]) expect(JSON.stringify(res.body), path).not.toContain(String(sentinel));
+    }
+  });
 });

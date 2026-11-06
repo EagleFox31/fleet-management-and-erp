@@ -827,3 +827,11 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Pourquoi** : constat sécurité sur #534 (B1) : `/api/operations/*` contournait Q19, et pour un client ou une destination à mission unique, le « chiffre d'affaires » valait le montant exact.
 - **Comment tester (QA)** : `tests/contract/operations-budget-scope.contract.test.ts` (client et destination uniques, sentinelles dans `JSON.stringify(body)`, technicien et chauffeur, logistique lectrice) ; unitaires `mission-select-hygiene` et `mission-budget-scope`. Mutants 2/2 tués (route non masquée, revenus non masqués).
 - **Reste / risques** : le calcul « revenu = `estimatedFuelCost` » reste faux sur le fond (c'est un budget, pas un prix) : à reprendre côté métier.
+
+## 2026-11-06 00:47 — Q19 : réserves sécurité sur la garde des lignes entières de missions
+- **Statut** : fait
+- **Quoi** : la garde `mission-select-hygiene` voit aussi les écritures `insert` / `update` de `missions` suivies d'un `.returning()` sans argument (6 occurrences, toutes justifiées et gelées). Ses clés nomment le bloc englobant au lieu du rang dans le fichier. Contrat `operations-budget-scope` : sans cookie, 401 et aucun montant.
+- **Comment** : `enclosingBlock` retient la déclaration la plus proche en amont (route `router.<verbe>("chemin"`, méthode de classe, fonction ou constante de premier niveau) ; deux occurrences du même bloc prennent un rang local. `returnsWholeRow` lit l'instruction jusqu'au `;` suivant.
+- **Pourquoi** : relecture sécurité de #534 : une ligne renvoyée par `returning()` porte `estimatedFuelCost` et `workflowData` comme une lecture entière ; une clé `fichier#n` laissait passer l'échange d'une lecture justifiée contre une nouvelle.
+- **Comment tester (QA)** : `npx vitest run tests/unit/server/mission-select-hygiene.test.ts` (6/6, dont détecteur sur cas synthétiques : écriture, projection, bloc, échange) ; `npm run test:contract -- tests/contract/operations-budget-scope.contract.test.ts` (7/7). Mutant : `.returning()` ajouté à `PUT /:id/agreed-price` fait échouer la garde.
+- **Reste / risques** : détection textuelle ; un `returning()` construit dynamiquement ou une instruction contenant un `;` dans une chaîne lui échapperait.
