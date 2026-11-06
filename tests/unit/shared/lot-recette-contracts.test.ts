@@ -70,9 +70,10 @@ describe("matrice des exports", () => {
 });
 
 describe("référentiel des types de document", () => {
-  it("contient 9 types valides aux codes uniques", () => {
-    expect(VEHICLE_DOCUMENT_TYPE_SEED).toHaveLength(9);
-    expect(new Set(VEHICLE_DOCUMENT_TYPE_SEED.map((t) => t.code)).size).toBe(9);
+  // 11 et non 9 : taxe et autre sont semés au démarrage depuis le lot recette ; la graine du contrat les omettait.
+  it("contient les 11 types semés au démarrage, valides, aux codes uniques", () => {
+    expect(VEHICLE_DOCUMENT_TYPE_SEED).toHaveLength(11);
+    expect(new Set(VEHICLE_DOCUMENT_TYPE_SEED.map((t) => t.code)).size).toBe(11);
     for (const type of VEHICLE_DOCUMENT_TYPE_SEED) expect(vehicleDocumentTypeSchema.parse(type)).toEqual(type);
   });
 });

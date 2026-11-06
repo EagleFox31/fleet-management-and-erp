@@ -1,13 +1,16 @@
 /**
  * Référentiel des types de document véhicule (P-05).
  *
- * `vehicle_documents.type` reste du texte libre : le service valide contre ce
- * référentiel, sans contrainte SQL, pour ne pas casser l'historique. Un type
- * ne se supprime pas, il se désactive (`active = false`).
+ * `vehicle_documents.type` référence `vehicle_document_types(code)` (clé
+ * étrangère posée NOT VALID : l'historique hors référentiel reste lisible).
+ * Les écrivains normalisent le type (`normalizeVehicleDocumentType`) puis le
+ * vérifient contre ce référentiel. Un type ne se supprime pas, il se désactive
+ * (`active = false`) ; son code est immuable.
  * `validityMonths = null` : pas de durée fixe, l'alerte suit la date
  * d'expiration saisie.
  */
 import { z } from "zod";
+import { VEHICLE_DOCUMENT_TYPE_SEED as SEED } from "../constants/vehicle-document-types";
 
 export const VEHICLE_DOCUMENT_TYPES_PATH = "/api/vehicle-document-types";
 export const vehicleDocumentTypePath = (code: string) => `${VEHICLE_DOCUMENT_TYPES_PATH}/${encodeURIComponent(code)}`;
@@ -47,15 +50,5 @@ export type VehicleDocumentType = z.infer<typeof vehicleDocumentTypeSchema>;
 export type CreateVehicleDocumentTypeRequest = z.input<typeof createVehicleDocumentTypeRequestSchema>;
 export type UpdateVehicleDocumentTypeRequest = z.infer<typeof updateVehicleDocumentTypeRequestSchema>;
 
-/** Les 9 types inscrits au démarrage (`ON CONFLICT DO NOTHING`). */
-export const VEHICLE_DOCUMENT_TYPE_SEED: readonly VehicleDocumentType[] = [
-  { code: "carte_grise", label: "Carte grise", validityMonths: 120 },
-  { code: "carte_bleue", label: "Carte bleue", validityMonths: 12 },
-  { code: "visite_technique", label: "Visite technique", validityMonths: 6 },
-  { code: "acf", label: "ACF", validityMonths: null },
-  { code: "tae", label: "TAE", validityMonths: 6 },
-  { code: "vignette", label: "Vignette", validityMonths: 12 },
-  { code: "jaugeage", label: "Jaugeage", validityMonths: 24 },
-  { code: "assurance", label: "Assurance", validityMonths: 12 },
-  { code: "agrement_pd", label: "Agrément PD", validityMonths: null },
-].map((type, index) => ({ ...type, alertDays: DEFAULT_DOCUMENT_ALERT_DAYS, active: true, sortOrder: (index + 1) * 10 }));
+/** Graine semée au démarrage : source unique dans shared/constants/vehicle-document-types.ts. */
+export const VEHICLE_DOCUMENT_TYPE_SEED: readonly VehicleDocumentType[] = SEED;

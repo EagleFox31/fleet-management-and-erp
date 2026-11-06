@@ -5,21 +5,25 @@ import { randomBytes } from "crypto";
 import path from "path";
 import fs from "fs";
 import { AppError } from "../lib/app-error";
+import { normalizeVehicleDocumentType, type VehicleDocumentTypeCode } from "../../shared/constants/vehicle-document-types";
 import { moduleLogger } from "../lib/logger";
 import { isInsideDirectory, isSafePathSegment, realPathStaysInside, uploadedFileCandidates } from "../lib/uploaded-file";
 
 const log = moduleLogger("workflow-documents");
 
 type WorkflowDocumentType = (typeof workflowDocuments.documentType.enumValues)[number];
-type VehicleDocumentType = (typeof vehicleDocuments.type.enumValues)[number];
 
 export function isWorkflowDocumentType(value: unknown): value is WorkflowDocumentType {
   return (workflowDocuments.documentType.enumValues as readonly unknown[]).includes(value);
 }
 
-/** Type côté véhicule : la facture d'achat n'y a pas de catégorie propre. */
-function toVehicleDocumentType(type: WorkflowDocumentType): VehicleDocumentType {
-  return type === "factur_achat" ? "autre" : type;
+/**
+ * Type côté véhicule : la facture d'achat n'y a pas de catégorie propre. Passe par la normalisation
+ * partagée comme tout écrivain de vehicle_documents ; les codes produits sont ceux de la graine.
+ */
+function toVehicleDocumentType(type: WorkflowDocumentType): VehicleDocumentTypeCode {
+  const code = type === "factur_achat" ? "autre" : type;
+  return normalizeVehicleDocumentType(code) as typeof code;
 }
 
 /** Fichier existant sous `uploads/` pour un chemin stocké, sinon `undefined`. */

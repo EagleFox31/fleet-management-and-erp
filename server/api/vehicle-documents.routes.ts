@@ -1,10 +1,8 @@
 import { Router } from "express";
 import multer from "multer";
-import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { VEHICLE_DOCUMENT_EVENT_ROLES } from "@shared/constants/roles";
-import { vehicleDocuments, vehicleDocumentTypes } from "@shared/schema";
-import { db } from "../db";
+import { vehicleDocuments } from "@shared/schema";
 import { AppError } from "../lib/app-error";
 import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
@@ -12,6 +10,7 @@ import { isWorkshopManager } from "../middleware/auth";
 import { deleteFile, isVehicleIdSegment, uploadVehicleDocument } from "../middleware/upload";
 import { storage } from "../storage";
 import { prepareColumnUpdate } from "../lib/column-validation";
+import { resolveActiveVehicleDocumentType } from "../lib/vehicle-document-type";
 import { recomputeVehicleDocumentMirror, syncVehicleDocumentMirror, syncVehicleDocumentMirrorFromDocuments } from "../lib/vehicle-document-mirror";
 
 const log = moduleLogger("vehicle-documents");
@@ -99,17 +98,13 @@ router.post("/vehicles/:vehicleId/documents", isWorkshopManager, (req, res, next
           throw new AppError(400, "La date d'échéance est invalide (format attendu : AAAA-MM-JJ).");
         }
 
-        const [known] = await db
-          .select({ code: vehicleDocumentTypes.code })
-          .from(vehicleDocumentTypes)
-          .where(and(eq(vehicleDocumentTypes.code, String(type)), eq(vehicleDocumentTypes.active, true)))
-          .limit(1);
-        if (!known) throw new AppError(400, "Type de document inconnu ou inactif.");
+        // Alias historiques (insurance, registration...) ramenés au code du référentiel, puis code actif exigé.
+        const code = await resolveActiveVehicleDocumentType(type);
 
         const document = await storage.createVehicleDocument({
           vehicleId,
           name,
-          type,
+          type: code,
           description: description || null,
           expiryDate: expiryDate || null,
           filename: file.originalname,

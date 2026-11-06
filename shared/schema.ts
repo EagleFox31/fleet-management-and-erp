@@ -1,4 +1,4 @@
-import { pgTable, text, serial, date, integer, bigint, timestamp, boolean, foreignKey, real, jsonb, numeric, primaryKey, index, uniqueIndex, check, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, date, integer, bigint, timestamp, boolean, foreignKey, real, jsonb, numeric, primaryKey, index, uniqueIndex, check, unique, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -199,7 +199,10 @@ export const vehicleDocuments = pgTable("vehicle_documents", {
   id: serial("id").primaryKey(),
   vehicleId: integer("vehicle_id").notNull().references(() => vehicles.id, { onDelete: 'cascade' }),
   name: text("name").notNull(), // Nom du document
-  type: text("type", { enum: ["carte_grise", "assurance", "visite_technique", "taxe", "autre"] }).notNull(), // Type de document
+  // Code du référentiel dynamique vehicle_document_types (créé à chaud par l'admin) : pas d'enum TypeScript.
+  // FK posée NOT VALID par server/init-database.ts (VEHICLE_DOCUMENTS_TYPE_FK_SQL) : l'historique hors
+  // référentiel reste lisible, toute nouvelle ligne doit citer un code existant.
+  type: text("type").notNull().references((): AnyPgColumn => vehicleDocumentTypes.code),
   description: text("description"), // Description ou notes sur le document
   filename: text("filename").notNull(), // Nom du fichier
   filesize: integer("filesize").notNull(), // Taille du fichier en octets
@@ -1989,8 +1992,8 @@ export type InsertPurchaseOrderLine = z.infer<typeof insertPurchaseOrderLineSche
 // Chaque table est aussi créée de façon idempotente dans server/init-database.ts et dans
 // server/db/migrations/20261031_lot_recette.sql (AGENTS.md §5). Contrats : shared/contracts/*.
 
-// Référentiel des types de document véhicule (P-05). `vehicle_documents.type` reste du texte
-// libre : aucune clé étrangère, le service valide contre ce référentiel.
+// Référentiel des types de document véhicule (P-05). `vehicle_documents.type` le référence par une
+// clé étrangère (NOT VALID). Code immuable ; un type se désactive, il ne se supprime pas.
 export const vehicleDocumentTypes = pgTable("vehicle_document_types", {
   code: text("code").primaryKey(),
   label: text("label").notNull(),

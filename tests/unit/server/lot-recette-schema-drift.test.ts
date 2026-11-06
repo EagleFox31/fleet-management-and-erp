@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { VEHICLE_DOCUMENT_TYPE_SEED, vehicleDocumentTypeSeedSql } from "../../../shared/constants/vehicle-document-types";
 
 const norm = (s: string) => s.replace(/\r\n/g, "\n").trim();
 
@@ -16,7 +17,10 @@ function fromInitDatabase(): string[] {
   const start = src.indexOf("LOT_RECETTE_SCHEMA_STATEMENTS: readonly string[] = [");
   const end = src.indexOf("\n];", start);
   const block = src.slice(start, end);
-  return [...block.matchAll(/`([\s\S]*?)`,/g)].map((m) => m[1].replace(/\\/g, "\\").replace(/\`/g, "`").trim());
+  // Une entrée est un gabarit littéral, ou la graine des types de document rendue depuis la constante partagée.
+  return [...block.matchAll(/`([\s\S]*?)`,|^\s*(VEHICLE_DOCUMENT_TYPE_SEED_SQL),$/gm)].map((m) =>
+    m[2] ? vehicleDocumentTypeSeedSql() : m[1].replace(/\\/g, "\\").replace(/\`/g, "`").trim(),
+  );
 }
 
 describe("schéma du lot recette : migration et init-database.ts identiques (AGENTS.md §5)", () => {
@@ -33,9 +37,11 @@ describe("schéma du lot recette : migration et init-database.ts identiques (AGE
     expect(all).not.toMatch(/ALTER\s+TYPE/i);
   });
 
-  it("sème les 9 types de document et le prix 828", () => {
+  it("sème les 11 types de la constante partagée, valeurs inchangées, et le prix 828", () => {
     const all = fromMigration().join("\n");
-    for (const code of ["carte_grise", "carte_bleue", "visite_technique", "acf", "tae", "vignette", "jaugeage", "assurance", "agrement_pd"]) {
+    expect(VEHICLE_DOCUMENT_TYPE_SEED).toHaveLength(11);
+    expect(fromMigration()).toContain(vehicleDocumentTypeSeedSql());
+    for (const code of ["carte_grise", "carte_bleue", "visite_technique", "acf", "tae", "vignette", "jaugeage", "assurance", "agrement_pd", "taxe", "autre"]) {
       expect(all).toContain(`'${code}'`);
     }
     expect(all).toContain("DATE '2000-01-01', 828");

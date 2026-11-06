@@ -1,6 +1,7 @@
 import { db } from '../db';
 import { vehicles, vehicleDocuments, workOrders, statusHistory, activityLogs } from '@shared/schema';
 import { eq } from 'drizzle-orm';
+import type { VehicleDocumentTypeCode } from '@shared/constants/vehicle-document-types';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -109,7 +110,8 @@ export class VehicleActivationService {
   private static async processDocuments(vehicleId: number, documents: any, workflowData: WorkflowData) {
     console.log('📂 Début du traitement des documents pour véhicule', vehicleId);
     
-    const documentTypes = [
+    // Codes de la graine du référentiel (vérifiés à la compilation) : vehicle_documents.type a une clé étrangère.
+    const documentTypes: { key: string; type: VehicleDocumentTypeCode; expiryField: string | null }[] = [
       { key: 'carteGrise', type: 'carte_grise', expiryField: 'licensePlateExpiry' },
       { key: 'assurance', type: 'assurance', expiryField: 'insuranceExpiry' },
       { key: 'visiteTechnique', type: 'visite_technique', expiryField: 'technicalInspectionDate' },
@@ -150,7 +152,7 @@ export class VehicleActivationService {
           await db.insert(vehicleDocuments).values({
             vehicleId: vehicleId,
             name: doc.name || `${docType.type}_${vehicleId}`,
-            type: docType.type as any,
+            type: docType.type,
             description: `Document ${docType.type} du véhicule`,
             filename: docFilename,
             filesize: doc.size || doc.filesize || 0,
