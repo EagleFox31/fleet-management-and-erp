@@ -2,7 +2,7 @@ import { createServer, type Server } from "http";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "../../server/db";
-import { alerts, workOrders } from "../../shared/schema";
+import { alerts, users, workOrders } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { waitForBlockedWriter } from "../support/row-lock";
@@ -359,14 +359,18 @@ describe("PATCH /api/work-orders/:id : colonnes par rôle", { timeout: 120000 },
 describe("Affectation d'OT : cible limitée à l'atelier", () => {
   const OUTSIDE_ROLES: TestUserRole[] = ["driver", "client", "warehouse", "secretary", "admin"];
 
-  it("PATCH : cible hors atelier ou inexistante refusée (400, champ technicianId), rien n'est écrit", async () => {
+  it("PATCH : cible hors atelier, supprimée ou inexistante refusée (400, champ technicianId), rien n'est écrit", async () => {
     const chef = await session("workshop_manager");
-    const targets: Array<[string, number]> = [["inexistant", 2_000_000_000]];
+    const targets: Array<[string, number]> = [["inexistant", 2_000_000_000], ["hors plage integer", 99_999_999_999]];
     for (const role of OUTSIDE_ROLES) {
       const user = await createTestUser({ role });
       ids.userIds.push(user.id);
       targets.push([role, user.id]);
     }
+    const removed = await createTestUser({ role: "technician" });
+    ids.userIds.push(removed.id);
+    await db.update(users).set({ deletedAt: new Date() }).where(eq(users.id, removed.id));
+    targets.push(["technicien supprimé", removed.id]);
     const wo = await workOrderIn("pending");
     const before = protectedColumns(await rowOf(wo.id));
     for (const [label, technicianId] of targets) {

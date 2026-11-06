@@ -1763,16 +1763,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(201).json(workOrder);
     } catch (error) {
       if (error instanceof z.ZodError) {
-        console.error("Erreurs de validation Zod:", JSON.stringify(error.errors, null, 2));
+        log.warn({ err: error, requestId: req.requestId }, "création d'OT : données invalides");
         return res.status(400).json({ 
           message: "Données d'ordre de travail invalides",
           errors: error.errors
         });
       }
-      if (isAppError(error)) return next(error);
-
-      console.error("Create work order error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
+      // AppError (cible d'affectation) et erreur inattendue : gestionnaire central
+      // (journal avec requestId, 5xx en message générique + référence).
+      return next(error);
     }
   });
 
