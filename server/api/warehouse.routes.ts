@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
-import { authenticate, isPartsCatalogManager } from "../middleware/auth";
-import { PART_CATALOG_EVENT_ROLES } from "@shared/constants/roles";
+import { authenticate, isPartsCatalogManager, isStockValuationReader } from "../middleware/auth";
+import { STOCK_VALUATION_READ_ROLES } from "@shared/constants/roles";
 import { stockAlertsService } from "../services/stock-alerts-service";
 import { AppError } from "../lib/app-error";
 import { parseRouteId } from "../lib/route-id";
@@ -30,7 +30,7 @@ const broadcastWarehouseUpdate = (
     entityId: options?.partId ?? null,
     payload,
     // Stock et prix : le personnel qui lit le stock, ni chauffeur ni client (AGENTS.md §11).
-    scope: { type: "roles", roles: [...PART_CATALOG_EVENT_ROLES] },
+    scope: { type: "roles", roles: [...STOCK_VALUATION_READ_ROLES] },
     actor: {
       userId: options?.actorUserId ?? null,
       role: options?.actorRole ?? null,
@@ -47,7 +47,7 @@ const broadcastWarehouseUpdate = (
 // Note: Authentication is applied individually on each route
 
 // Valeur totale de l'inventaire
-router.get("/inventory-value", authenticate, async (req: Request, res: Response) => {
+router.get("/inventory-value", authenticate, isStockValuationReader, async (req: Request, res: Response) => {
   try {
     const inventoryValue = await stockAlertsService.getInventoryValue();
     return res.status(200).json(inventoryValue);
@@ -58,7 +58,7 @@ router.get("/inventory-value", authenticate, async (req: Request, res: Response)
 });
 
 // Alertes de réapprovisionnement actives (38 alertes)
-router.get("/reorder-alerts", authenticate, async (req: Request, res: Response) => {
+router.get("/reorder-alerts", authenticate, isStockValuationReader, async (req: Request, res: Response) => {
   try {
     const alerts = await stockAlertsService.getReorderAlerts();
     return res.status(200).json(alerts);
@@ -139,7 +139,7 @@ router.post("/stock-movement", authenticate, isPartsCatalogManager, async (req: 
 });
 
 // Pièces les plus utilisées (top N)
-router.get("/most-used-parts", authenticate, async (req: Request, res: Response) => {
+router.get("/most-used-parts", authenticate, isStockValuationReader, async (req: Request, res: Response) => {
   try {
     const limit = parseInt(req.query.limit as string) || 10;
 
@@ -153,7 +153,7 @@ router.get("/most-used-parts", authenticate, async (req: Request, res: Response)
 });
 
 // Statistiques globales du magasin
-router.get("/statistics", authenticate, async (req: Request, res: Response) => {
+router.get("/statistics", authenticate, isStockValuationReader, async (req: Request, res: Response) => {
   try {
     const statistics = await stockAlertsService.getWarehouseStatistics();
 
@@ -165,7 +165,7 @@ router.get("/statistics", authenticate, async (req: Request, res: Response) => {
 });
 
 // Pièces par fournisseur avec valeur totale
-router.get("/parts-by-supplier", authenticate, async (req: Request, res: Response) => {
+router.get("/parts-by-supplier", authenticate, isStockValuationReader, async (req: Request, res: Response) => {
   try {
     const partsBySupplier = await stockAlertsService.getPartsBySupplier();
 
@@ -177,7 +177,7 @@ router.get("/parts-by-supplier", authenticate, async (req: Request, res: Respons
 });
 
 // Pièces les plus consommées pour graphique
-router.get("/top-consumed-parts", authenticate, async (req: Request, res: Response) => {
+router.get("/top-consumed-parts", authenticate, isStockValuationReader, async (req: Request, res: Response) => {
   try {
     log.debug({ userId: req.session?.userId, requestId: req.requestId }, "GET /top-consumed-parts");
     const limit = parseInt(req.query.limit as string) || 10;
@@ -192,7 +192,7 @@ router.get("/top-consumed-parts", authenticate, async (req: Request, res: Respon
 });
 
 // Historique de la valeur du stock
-router.get("/stock-value-history", authenticate, async (req: Request, res: Response) => {
+router.get("/stock-value-history", authenticate, isStockValuationReader, async (req: Request, res: Response) => {
   try {
     log.debug({ userId: req.session?.userId, requestId: req.requestId }, "GET /stock-value-history");
     const days = parseInt(req.query.days as string) || 30;

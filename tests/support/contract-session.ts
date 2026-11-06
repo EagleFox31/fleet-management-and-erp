@@ -29,7 +29,7 @@ export async function startContractSession<A extends string>(actors: Record<A, T
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username: user.username, password: TEST_USER_PASSWORD }),
     });
-    expect(res.status).toBe(200);
+    expect(res.status, `login ${actor} (${role}) : ${await res.clone().text()}`).toBe(200);
     cookies.set(actor, res.headers.get("set-cookie")!.split(";")[0]);
   }
 
