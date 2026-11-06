@@ -7,6 +7,7 @@ import {
   MISSION_BUDGET_DATE_WINDOW_DAYS,
   MISSION_BUDGET_STATUSES,
   MISSION_STATUSES_WITHOUT_BUDGET,
+  MISSION_STATUSES_WITHOUT_EXPENSES,
   MISSION_BUDGET_EXPENSE_LINES,
   type CreateMissionBudgetExpenseRequest,
   type CreateMissionBudgetRequest,
@@ -105,20 +106,24 @@ async function amountColumns(input: { budgetDate: string; fuelLiters: number; fd
 type Executor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 const CLOSED_MISSION = "Cette mission est terminée ou annulée : son budget ne peut plus être saisi, corrigé, approuvé ni décaissé.";
+const CANCELLED_MISSION_EXPENSES = "Cette mission est annulée : ses dépenses ne changent plus.";
 
 /**
- * Mission ouverte, verrouillée en partage jusqu'à la fin de la transaction : une annulation ou une
- * clôture concurrente attend l'écriture du budget, ou la précède et la fait refuser (409).
+ * Mission verrouillée en partage jusqu'à la fin de la transaction : une annulation ou une clôture
+ * concurrente attend l'écriture, ou la précède et la fait refuser (409) si le nouveau statut est fermé.
  */
-async function lockOpenMission(tx: Executor, missionId: number) {
+async function lockMission(tx: Executor, missionId: number, closedStatuses: readonly string[], closedMessage: string) {
   const [mission] = await tx
     .select({ status: missions.status })
     .from(missions)
     .where(eq(missions.id, missionId))
     .for("share");
   if (!mission) throw new AppError(404, "Mission introuvable.");
-  if ((MISSION_STATUSES_WITHOUT_BUDGET as readonly string[]).includes(mission.status)) throw new AppError(409, CLOSED_MISSION);
+  if (closedStatuses.includes(mission.status)) throw new AppError(409, closedMessage);
 }
+
+/** Budget (saisie, correction, approbation, décaissement) : mission ni terminée ni annulée. */
+const lockOpenMission = (tx: Executor, missionId: number) => lockMission(tx, missionId, MISSION_STATUSES_WITHOUT_BUDGET, CLOSED_MISSION);
 
 /**
  * Portée explicite : sans elle, `broadcastUpdate` ne diffuse rien (fermé par défaut). De L1 à L1e,
@@ -351,7 +356,8 @@ function toMissionBudgetExpense(row: MissionBudgetExpenseRow): MissionBudgetExpe
 
 /**
  * Budget dont on saisit ou retire une dépense (L1e), même ordre de verrous que les transitions :
- * mission FOR SHARE (lockOpenMission, 409 si terminée ou annulée), puis budget FOR UPDATE, tenu
+ * mission FOR SHARE (409 si annulée ; terminée, ouverte tant que le reliquat n'est pas rendu, R1),
+ * puis budget FOR UPDATE, tenu
  * pendant le contrôle de somme : deux saisies simultanées ne dépassent pas le décaissé.
  * Une annulation concurrente tient la ligne mission : elle attend la saisie, et sa contre-passation
  * compte la dépense ; ou elle passe avant, et la saisie est refusée.
@@ -359,7 +365,7 @@ function toMissionBudgetExpense(row: MissionBudgetExpenseRow): MissionBudgetExpe
 async function lockBudgetForExpenses(tx: Executor, budgetId: number): Promise<MissionBudgetRow> {
   const [target] = await tx.select({ missionId: missionBudgets.missionId }).from(missionBudgets).where(eq(missionBudgets.id, budgetId));
   if (!target) throw new AppError(404, "Budget de mission introuvable.");
-  await lockOpenMission(tx, target.missionId);
+  await lockMission(tx, target.missionId, MISSION_STATUSES_WITHOUT_EXPENSES, CANCELLED_MISSION_EXPENSES);
   const [row] = await tx.select().from(missionBudgets).where(eq(missionBudgets.id, budgetId)).for("update");
   if (row.status !== "disbursed") throw new AppError(409, "Ce budget n'est pas décaissé : aucune dépense à justifier.");
   if (await isMissionBudgetReversed(tx as never, budgetId)) {
@@ -425,7 +431,7 @@ export async function createMissionBudgetExpense(
 
 /**
  * Suppression douce d'une dépense (L1e) : deleted_at et deleted_by, jamais d'effacement. Rejouable :
- * une dépense déjà supprimée ne change plus. Mêmes refus que la saisie (mission close, reliquat rendu).
+ * une dépense déjà supprimée ne change plus. Mêmes refus que la saisie (mission annulée, reliquat rendu).
  */
 export async function deleteMissionBudgetExpense(budgetId: number, expenseId: number, userId: number): Promise<void> {
   const { budget, changed } = await db.transaction(async (tx) => {

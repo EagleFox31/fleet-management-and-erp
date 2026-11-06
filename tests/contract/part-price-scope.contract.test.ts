@@ -128,7 +128,12 @@ describe("prix des pièces", { timeout: 120000 }, () => {
     expect(trailing.status).toBe(200);
     expect(trailing.body.reference).toBe(reference);
     expect(hasPrice(trailing.body)).toBe(false);
-    for (const path of [`/api/PARTS/${partId}`, `/api/Parts/${partId}/variants`, `/api/PART-REQUIREMENTS/by-part/${partId}`]) {
+    // Casse : le routeur des demandes est insensible à la casse, le chemin doit être servi et masqué.
+    const upper = await session.call("GET", `/api/PART-REQUIREMENTS/by-part/${partId}`, { actor: "driver" });
+    expect(upper.status).toBe(200);
+    expect(upper.body.map((r: { id: number }) => r.id)).toContain(requirementId);
+    expect(hasPrice(upper.body)).toBe(false);
+    for (const path of [`/api/PARTS/${partId}`, `/api/Parts/${partId}/variants`]) {
       const res = await session.call("GET", path, { actor: "driver" });
       if (res.status === 200) expect(hasPrice(res.body), path).toBe(false);
     }

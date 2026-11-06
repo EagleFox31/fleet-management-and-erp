@@ -10,15 +10,10 @@ import { findFixedWaitsBeforeLockAssertion } from "../support/fixed-wait-scan";
  * requête bloquée (`pg_stat_activity` avec `wait_event_type = 'Lock'`, ou `pg_blocking_pids`),
  * comme `supplier-settlement-disputed`, `mission-planning-stale-read` ou `part-requirements-idempotence`.
  *
- * Cliquet : les occurrences existantes sont gelées. Une nouvelle fait échouer le test ; une
- * occurrence corrigée aussi, pour qu'on retire son entrée.
+ * Cliquet à zéro : les quatre occurrences d'origine passent par `waitForBlockedBy`
+ * (`tests/support/lock-wait.ts`). Toute nouvelle occurrence fait échouer le test.
  */
-const FROZEN: Record<string, string> = {
-  "tests/contract/last-active-admin-guard.contract.test.ts#1": "suppression du dernier admin : 800 ms avant d'affirmer que la requête attend le verrou consultatif",
-  "tests/contract/mission-price-edit.contract.test.ts#1": "génération d'échéances : 800 ms avant d'affirmer qu'elle attend le verrou de la mission",
-  "tests/integration/login-lockout-db-store.test.ts#1": "reset et release : 300 ms avant d'affirmer qu'ils attendent le verrou de clé",
-  "tests/integration/login-lockout-db-store.test.ts#2": "seconde série du même fichier : 300 ms avant d'affirmer l'attente du verrou de clé",
-};
+const FROZEN: Record<string, string> = {};
 
 const root = fileURLToPath(new URL("../..", import.meta.url));
 const SCANNED = ["tests/contract", "tests/integration", "e2e"];
