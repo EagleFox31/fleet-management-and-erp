@@ -21,10 +21,12 @@ let baseUrl = "";
 const stale = { vehicleId: 0, oldDoc: 0 };
 const ids = createIdBag();
 const cookies = new Map<string, string>();
+const userIdOf = new Map<string, number>();
 
 async function login(role: TestUserRole) {
   const user = await createTestUser({ role });
   ids.userIds.push(user.id);
+  userIdOf.set(role, user.id);
   const res = await fetch(`${baseUrl}/api/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -149,5 +151,30 @@ describe("PATCH /api/documents/:id et miroir des échéances", { timeout: 120000
   it("corriger un document qui n'est pas le plus récent ne fait pas reculer le miroir", async () => {
     expect((await patch(stale.oldDoc, { expiryDate: "2031-01-01" }, "workshop_manager")).status).toBe(200);
     expect((await mirrorOf(stale.vehicleId)).insurance).toBe("2036-01-01");
+  });
+
+  // Le stockage n'écrit que les champs d'une correction : le reste du corps est ignoré.
+  it("champs hors correction ignorés : véhicule, fichier, type et auteurs non forgeables", async () => {
+    const vehicleId = await newVehicle();
+    const otherVehicleId = await newVehicle();
+    const docId = await addDoc(vehicleId, "autre", null);
+    const forged = {
+      name: "Document renommé",
+      vehicleId: otherVehicleId,
+      filePath: "../secret.txt",
+      type: "assurance",
+      uploadedBy: userIdOf.get("technician"),
+      updatedBy: userIdOf.get("technician"),
+    };
+    expect((await patch(docId, forged, "workshop_manager")).status).toBe(200);
+    const [row] = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.id, docId));
+    expect(row).toMatchObject({
+      name: "Document renommé",
+      vehicleId,
+      filePath: "uploads/x.pdf",
+      type: "autre",
+      uploadedBy: null,
+      updatedBy: userIdOf.get("workshop_manager"),
+    });
   });
 });
