@@ -64,6 +64,8 @@ function toMissionBudget(row: MissionBudgetRow): MissionBudget {
     approvedAt: row.approvedAt ? row.approvedAt.toISOString() : null,
     disbursedBy: row.disbursedBy ?? null,
     disbursedAt: row.disbursedAt ? row.disbursedAt.toISOString() : null,
+    settledBy: row.settledBy ?? null,
+    settledAt: row.settledAt ? row.settledAt.toISOString() : null,
     createdBy: row.createdBy ?? null,
     updatedBy: row.updatedBy ?? null,
     createdAt: row.createdAt.toISOString(),
@@ -336,6 +338,42 @@ export async function onMissionStatusChange(tx: Executor, missionId: number, nex
   if (reversed > 0) log.info({ missionId, budgetIds: disbursed.map((b) => b.id), reversed }, "budget de mission contre-passé (mission annulée)");
 }
 
+/**
+ * Solde d'un budget de mission terminée (Q18) : le reliquat non justifié de chaque ligne revient au compte
+ * source (contre-passation « mission soldée »), puis `settledAt` / `settledBy` figent les dépenses.
+ * Verrous dans l'ordre des autres écritures : mission FOR SHARE (terminée, sinon 409), puis budget FOR UPDATE.
+ * Deux soldes simultanés : le second attend le premier, lit `settledAt` et ne réécrit rien (`changed: false`).
+ * `settledAt` est indispensable : un reliquat nul n'écrit aucune contre-passation.
+ */
+export async function settleMissionBudget(id: number, userId: number): Promise<{ budget: MissionBudget; changed: boolean; reversed: number }> {
+  const result = await db.transaction(async (tx) => {
+    const [target] = await tx.select({ missionId: missionBudgets.missionId }).from(missionBudgets).where(eq(missionBudgets.id, id));
+    if (!target) throw new AppError(404, "Budget de mission introuvable.");
+    const [mission] = await tx.select({ status: missions.status }).from(missions).where(eq(missions.id, target.missionId)).for("share");
+    if (!mission) throw new AppError(404, "Mission introuvable.");
+    if (mission.status !== "completed") throw new AppError(409, "La mission doit être terminée avant de solder son budget.");
+    const [current] = await tx.select().from(missionBudgets).where(eq(missionBudgets.id, id)).for("update");
+    if (current.settledAt) return { row: current, changed: false, reversed: 0 };
+    if (current.status !== "disbursed") throw new AppError(409, "Seul un budget décaissé se solde.");
+    const reversed = await reverseMissionBudgetDisbursements(tx as never, [id], userId, "mission soldée");
+    const now = new Date();
+    const [row] = await tx
+      .update(missionBudgets)
+      .set({ settledAt: now, settledBy: userId, updatedBy: userId, updatedAt: now })
+      .where(and(eq(missionBudgets.id, id), isNull(missionBudgets.settledAt)))
+      .returning();
+    // Seconde barrière derrière le verrou : un budget déjà soldé n'est jamais réécrit.
+    if (!row) throw new AppError(409, "Ce budget est déjà soldé.");
+    return { row, changed: true, reversed };
+  });
+  const budget = toMissionBudget(result.row);
+  if (result.changed) {
+    log.info({ budgetId: id, missionId: budget.missionId, userId, reversed: result.reversed }, "budget de mission soldé, reliquat rendu");
+    notify(budget);
+  }
+  return { budget, changed: result.changed, reversed: result.reversed };
+}
+
 /** Montant décaissé sur une ligne : FDR + frais annexes, ou carburant. Plafond de ses dépenses (L1e). */
 function disbursedOf(row: MissionBudgetRow, line: MissionBudgetExpenseLine): number {
   return line === "fdr" ? Number(row.fdrAmount) + Number(row.extrasAmount) : Number(row.fuelAmount);
@@ -368,6 +406,8 @@ async function lockBudgetForExpenses(tx: Executor, budgetId: number): Promise<Mi
   await lockMission(tx, target.missionId, MISSION_STATUSES_WITHOUT_EXPENSES, CANCELLED_MISSION_EXPENSES);
   const [row] = await tx.select().from(missionBudgets).where(eq(missionBudgets.id, budgetId)).for("update");
   if (row.status !== "disbursed") throw new AppError(409, "Ce budget n'est pas décaissé : aucune dépense à justifier.");
+  // Soldé (Q18) : refusé même quand le reliquat était nul, faute de contre-passation à relire.
+  if (row.settledAt) throw new AppError(409, "Ce budget est soldé : ses dépenses ne changent plus.");
   if (await isMissionBudgetReversed(tx as never, budgetId)) {
     throw new AppError(409, "Le reliquat de ce budget a été rendu au compte source : ses dépenses ne changent plus.");
   }

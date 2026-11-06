@@ -10,12 +10,12 @@ import {
   missionBudgetExpensesPath,
   missionBudgetExpensesResponseSchema,
   missionBudgetSchema,
+  missionBudgetSettlePath,
 } from "../../shared/contracts/mission-budgets";
 import { isoDateInZone } from "../../shared/contracts/kpi-period";
 import { addDaysToIsoDate } from "../../shared/constants/document-renewal-statuses";
 import { fuelPrices, missionBudgetExpenses, missionBudgets, missions, treasuryAccounts, treasuryEntries } from "../../shared/schema";
 import { db } from "../../server/db";
-import { reverseMissionBudgetDisbursements } from "../../server/services/treasury-links";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
@@ -89,6 +89,9 @@ async function disbursedBudget() {
 const expense = (line: "fdr" | "carburant", amount: number, extra: Record<string, unknown> = {}) => ({ line, amount, label: "Péage Edéa", ...extra });
 const addExpense = (budgetId: number, body: unknown, role = "logistics") => call("POST", missionBudgetExpensesPath(budgetId), role, body);
 const cancelMission = (missionId: number) => call("PUT", `/api/missions/${missionId}/status`, "admin", { status: "cancelled" });
+const settle = (budgetId: number, role = "secretary") => call("POST", missionBudgetSettlePath(budgetId), role);
+const balanceOf = async (accountId: number) =>
+  Number((await call("GET", "/api/treasury/accounts", "admin")).body.find((a: { id: number }) => a.id === accountId).currentBalance);
 const reversalsOf = (budgetId: number) =>
   db.select().from(treasuryEntries).where(like(treasuryEntries.requestKey, `mission-budget:${budgetId}:%:reverse`));
 
@@ -299,15 +302,14 @@ describe("Dépenses justifiées du budget de mission (L1e)", { timeout: 120000 }
     expect(lines.find((l) => l.line === "fdr")?.justified).toBe(2_000);
   });
 
-  it("mission terminée, reliquat rendu : saisie et suppression refusées (409)", async () => {
+  it("mission terminée puis soldée : saisie et suppression refusées (409)", async () => {
     const { missionId, budgetId } = await disbursedBudget();
     const created = missionBudgetExpenseSchema.parse((await addExpense(budgetId, expense("fdr", 1_000))).body);
     await complete(missionId);
-    // Aucun écran ne rend encore le reliquat d'une mission terminée : contre-passation par le service réel.
-    expect(await db.transaction((tx) => reverseMissionBudgetDisbursements(tx as never, [budgetId], null))).toBeGreaterThan(0);
+    expect((await settle(budgetId)).status).toBe(200);
     const refused = await addExpense(budgetId, expense("fdr", 1_000));
     expect(refused.status).toBe(409);
-    expect(refused.body.message).toBe("Le reliquat de ce budget a été rendu au compte source : ses dépenses ne changent plus.");
+    expect(refused.body.message).toBe("Ce budget est soldé : ses dépenses ne changent plus.");
     expect((await call("DELETE", missionBudgetExpensePath(budgetId, created.id), "logistics")).status).toBe(409);
   });
 
@@ -337,6 +339,105 @@ describe("Dépenses justifiées du budget de mission (L1e)", { timeout: 120000 }
       expect((await call("GET", missionBudgetExpensesPath(budgetId), "admin")).status).toBe(404);
       expect((await addExpense(budgetId, expense("fdr", 1), "admin")).status).toBe(404);
       expect((await call("DELETE", missionBudgetExpensePath(budgetId, 1), "admin")).status).toBe(404);
+    } finally {
+      process.env.FEATURE_FLAGS = "finance=on";
+    }
+  });
+});
+
+describe("Solde d'une mission terminée (Q18)", { timeout: 120000 }, () => {
+  const complete = (missionId: number) =>
+    db.update(missions).set({ status: "completed", completedAt: new Date() }).where(eq(missions.id, missionId));
+
+  it("parcours : reliquat exact au FCFA (dépenses d'après la fin comprises) rendu au compte, budget figé, rejeu sans écriture", async () => {
+    const { missionId, budgetId } = await disbursedBudget();
+    expect((await addExpense(budgetId, expense("fdr", 15_000))).status).toBe(201);
+    await complete(missionId);
+    expect((await addExpense(budgetId, expense("fdr", 5_000))).status, "dépense saisie après la fin (R1)").toBe(201);
+    expect((await addExpense(budgetId, expense("carburant", 150_000))).status).toBe(201);
+    const before = await balanceOf(bank);
+
+    const res = await settle(budgetId);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const settled = missionBudgetSchema.parse(res.body);
+    expect(settled.settledBy).toBe(userIds.get("secretary"));
+    expect(settled.settledAt).not.toBeNull();
+    const reversals = await reversalsOf(budgetId);
+    expect(reversals.map((e) => [e.requestKey, e.amount, e.direction]).sort()).toEqual([
+      [`mission-budget:${budgetId}:carburant:reverse`, "50000.00", "in"],
+      [`mission-budget:${budgetId}:fdr:reverse`, "25000.00", "in"],
+    ]);
+    expect(reversals.every((e) => e.label.startsWith("Contre-passation (mission soldée)"))).toBe(true);
+    expect(await balanceOf(bank)).toBe(before + 75_000);
+
+    const replay = await settle(budgetId, "admin");
+    expect(replay.status).toBe(200);
+    expect(missionBudgetSchema.parse(replay.body).settledAt).toBe(settled.settledAt);
+    expect(missionBudgetSchema.parse(replay.body).settledBy).toBe(userIds.get("secretary"));
+    expect(await reversalsOf(budgetId)).toHaveLength(2);
+    expect(await balanceOf(bank)).toBe(before + 75_000);
+  });
+
+  it("reliquat nul : aucune écriture au journal, budget soldé quand même, dépenses figées", async () => {
+    const { missionId, budgetId } = await disbursedBudget();
+    const fdr = missionBudgetExpenseSchema.parse((await addExpense(budgetId, expense("fdr", FDR))).body);
+    expect((await addExpense(budgetId, expense("carburant", FUEL))).status).toBe(201);
+    await complete(missionId);
+    const res = await settle(budgetId);
+    expect(res.status).toBe(200);
+    expect(missionBudgetSchema.parse(res.body).settledAt).not.toBeNull();
+    expect(await reversalsOf(budgetId)).toHaveLength(0);
+    expect((await call("DELETE", missionBudgetExpensePath(budgetId, fdr.id), "logistics")).status).toBe(409);
+  });
+
+  it("deux soldes simultanés : un seul jeu de contre-passations, même date de solde", async () => {
+    const { missionId, budgetId } = await disbursedBudget();
+    await complete(missionId);
+    const before = await balanceOf(bank);
+    const [a, b] = await Promise.all([settle(budgetId), settle(budgetId, "admin")]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    expect(a.body.settledAt).toBe(b.body.settledAt);
+    expect(await reversalsOf(budgetId)).toHaveLength(2);
+    expect(await balanceOf(bank)).toBe(before + FDR + FUEL);
+  });
+
+  it("secrétariat et administrateur soldent ; logistique, direction, technicien, chauffeur, client : 403 ; anonyme : 401 ; rien n'est écrit", async () => {
+    const { missionId, budgetId } = await disbursedBudget();
+    await complete(missionId);
+    for (const role of ["logistics", "management", "technician", "driver", "client"]) expect((await settle(budgetId, role)).status, role).toBe(403);
+    expect((await settle(budgetId, "")).status).toBe(401);
+    const [row] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, budgetId));
+    expect(row.settledAt).toBeNull();
+    expect(await reversalsOf(budgetId)).toHaveLength(0);
+  });
+
+  it("mission non terminée ou budget non décaissé : 409 sans écriture ; budget inconnu : 404 ; id illisible : 400", async () => {
+    const { budgetId } = await disbursedBudget();
+    const open = await settle(budgetId);
+    expect(open.status).toBe(409);
+    expect(open.body.message).toBe("La mission doit être terminée avant de solder son budget.");
+
+    const { missionId, approved } = await approvedBudget();
+    await complete(missionId);
+    const notDisbursed = await settle(approved.id);
+    expect(notDisbursed.status).toBe(409);
+    expect(notDisbursed.body.message).toBe("Seul un budget décaissé se solde.");
+
+    for (const id of [budgetId, approved.id]) {
+      const [row] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, id));
+      expect(row.settledAt).toBeNull();
+      expect(await reversalsOf(id)).toHaveLength(0);
+    }
+    expect((await settle(2_000_000_000)).status).toBe(404);
+    expect((await call("POST", "/api/mission-budgets/abc/settle", "secretary")).status).toBe(400);
+  });
+
+  it("drapeau finance coupé : 404", async () => {
+    const { missionId, budgetId } = await disbursedBudget();
+    await complete(missionId);
+    process.env.FEATURE_FLAGS = "finance=off";
+    try {
+      expect((await settle(budgetId, "admin")).status).toBe(404);
     } finally {
       process.env.FEATURE_FLAGS = "finance=on";
     }
