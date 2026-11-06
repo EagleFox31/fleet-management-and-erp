@@ -41,20 +41,30 @@ import { ManagementPeriodSelector } from "@/components/management/management-per
 import { ManagementDashboardInfoTip } from "@/components/management/management-dashboard-info-tip";
 import { exportManagementBoardPackPdf } from "@/lib/management-board-pack-pdf";
 import { formatDistance, formatPrice } from "@/lib/utils";
+import { useFeatureFlags } from "@/hooks/use-feature";
+import {
+  REPORT_TAB_DEFS,
+  type ReportTabId,
+  reportTabForLocation,
+  visibleReportTabs,
+} from "@/lib/management-report-tabs";
 import type {
   ManagementDashboardResponse,
   ManagementPeriod,
 } from "@shared/constants/management-dashboard";
 
-type ReportTabId = "board_pack" | "finance" | "fleet" | "drivers" | "scheduled";
+const REPORT_TAB_ICONS: Record<ReportTabId, typeof Sparkles> = {
+  board_pack: Sparkles,
+  finance: Banknote,
+  fleet: Truck,
+  drivers: Award,
+  scheduled: Mail,
+};
 
-const REPORT_TABS = [
-  { value: "board_pack", label: "Board Pack Stratégique", icon: <TabIcon icon={Sparkles} />, path: "/management/reports/board-pack" },
-  { value: "finance", label: "Trésorerie & Recouvrement", icon: <TabIcon icon={Banknote} />, path: "/management/reports/finance" },
-  { value: "fleet", label: "Audit Flotte & TCO", icon: <TabIcon icon={Truck} />, path: "/management/reports/fleet" },
-  { value: "drivers", label: "Performance Chauffeurs", icon: <TabIcon icon={Award} />, path: "/management/reports/drivers" },
-  { value: "scheduled", label: "Distribution & Envois", icon: <TabIcon icon={Mail} />, path: "/management/reports/scheduled" },
-];
+const REPORT_TABS = REPORT_TAB_DEFS.map((tab) => ({
+  ...tab,
+  icon: <TabIcon icon={REPORT_TAB_ICONS[tab.value]} />,
+}));
 
 function exportCsvData(data: ManagementDashboardResponse, reportType: string) {
   const rows = [
@@ -96,17 +106,15 @@ export default function ManagementReportsPage() {
   const [location, setLocation] = useLocation();
   const [period, setPeriod] = useState<ManagementPeriod>("month");
 
-  // Détermination de l'onglet actif selon l'URL
-  const currentTab = useMemo<ReportTabId>(() => {
-    if (location.includes("/finance")) return "finance";
-    if (location.includes("/fleet")) return "fleet";
-    if (location.includes("/drivers")) return "drivers";
-    if (location.includes("/scheduled")) return "scheduled";
-    return "board_pack";
-  }, [location]);
+  // Onglets et onglet actif suivent les drapeaux, comme la barre latérale : une URL directe vers
+  // un onglet masqué retombe sur l'onglet par défaut.
+  const flags = useFeatureFlags();
+  const tabs = useMemo(() => visibleReportTabs(REPORT_TABS, flags), [flags]);
+  const currentTab = useMemo(() => reportTabForLocation(location, flags), [location, flags]);
+  const showTab = (value: ReportTabId) => tabs.some((t) => t.value === value);
 
   const handleTabChange = (value: string) => {
-    const tab = REPORT_TABS.find((t) => t.value === value);
+    const tab = tabs.find((t) => t.value === value);
     if (tab) {
       setLocation(tab.path);
     }
@@ -184,7 +192,7 @@ export default function ManagementReportsPage() {
 
       {/* 2. Sous-Menus Dédiés & Navigation par Onglets Aérée */}
       <Tabs value={currentTab} onValueChange={handleTabChange} className="space-y-6">
-        <PremiumTabsNav tabs={REPORT_TABS} />
+        <PremiumTabsNav tabs={tabs} />
 
         {/* ========================================================================= */}
         {/* SOUS-MENU 1 : Board Pack Stratégique Direction                            */}
@@ -270,6 +278,7 @@ export default function ManagementReportsPage() {
         {/* ========================================================================= */}
         {/* SOUS-MENU 2 : Trésorerie & Recouvrement (Finance & Banques)               */}
         {/* ========================================================================= */}
+        {showTab("finance") && (
         <TabsContent value="finance" className="space-y-6">
           {isLoading || !data ? (
             <Skeleton className="h-96 w-full rounded-3xl" />
@@ -319,6 +328,7 @@ export default function ManagementReportsPage() {
             </div>
           )}
         </TabsContent>
+        )}
 
         {/* ========================================================================= */}
         {/* SOUS-MENU 3 : Audit Flotte & TCO (Parc & Atelier)                         */}
@@ -429,6 +439,7 @@ export default function ManagementReportsPage() {
         {/* ========================================================================= */}
         {/* SOUS-MENU 5 : Distribution & Cadence Automatisée                          */}
         {/* ========================================================================= */}
+        {showTab("scheduled") && (
         <TabsContent value="scheduled" className="space-y-6">
           {/* Aucun service d'envoi n'existe côté serveur: l'onglet le dit, plutôt
               que d'afficher une programmation et des destinataires fictifs. */}
@@ -464,6 +475,7 @@ export default function ManagementReportsPage() {
             </CardShell>
           </div>
         </TabsContent>
+        )}
       </Tabs>
     </div>
   );
