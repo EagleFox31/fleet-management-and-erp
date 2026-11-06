@@ -622,3 +622,20 @@ WHERE po.status IN ('delivered', 'completed')
   - POST d'une commande sur une demande reçue : sur 96f519b4, 201. Maintenant, 409.
 - **Vérifications** : tsc 0 ; unitaires 3 102 ; intégration 11 fichiers, 59 tests ; contrats 38 fichiers, 457 tests.
 - **Leçon** : une règle qui interdit un chemin doit fermer tous les chemins qui mènent au même effet. La réception directe et la recommande produisaient le même double crédit. Le contrôle doit aussi lire sous le même verrou que l'écriture qu'il protège.
+
+## 2026-11-06 06:12 — CAS du statut technicien et des lignes de travail (#564)
+- **Quoi** :
+  - `updateWorkOrderStatus` (technicien) : l'UPDATE porte le statut lu ;
+  - `updateItem` (lignes de travail) : la ligne est lue sous verrou dans une transaction, avec le statut en condition de l'UPDATE ;
+  - deux entrées retirées de la liste gelée `status-update-cas-hygiene`.
+- **Comment** :
+  - transition concurrente sur l'OT : 409, ordre inchangé ;
+  - deux mises à jour d'une ligne s'enchaînent : la seconde part de l'état de la première ;
+  - le contrôle du technicien est fait hors transaction ; le poste est lu par `tx`, pour ne pas prendre une seconde connexion du pool en tenant le verrou.
+- **Pourquoi** :
+  - avant, une prise en charge lue « en attente » écrasait une clôture concurrente ;
+  - une clôture de ligne réécrivait `startedAt`.
+  Les deux tests de course échouent sur l'ancien code.
+- **À savoir** :
+  - `updateWorkOrderStatus`, `takeWorkOrder` et `completeWorkOrder` n'ont aucun appelant ;
+  - `notes` et `completedDate` étaient passés au `set` sans être des colonnes : Drizzle les ignorait.
