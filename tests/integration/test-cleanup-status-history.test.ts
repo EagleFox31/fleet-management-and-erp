@@ -15,7 +15,7 @@ afterEach(async () => {
 
 describe("ménage des restes de test : status_history", () => {
   it("supprime un compte de test orphelin qui a tracé un changement de statut", async () => {
-    const user = await createTestUser({ role: "fleet_manager" });
+    const user = await createTestUser({ role: "logistics" });
     ids.userIds.push(user.id);
     // Véhicule récent : il n'est pas orphelin, la cascade vehicle_id ne retire donc pas l'historique.
     const vehicle = await createTestVehicle();
@@ -36,7 +36,7 @@ describe("ménage des restes de test : status_history", () => {
   });
 
   it("supprime l'historique d'un compte de test suivi par cleanupCreated", async () => {
-    const user = await createTestUser({ role: "fleet_manager" });
+    const user = await createTestUser({ role: "logistics" });
     const vehicle = await createTestVehicle();
     ids.vehicleIds.push(vehicle.id);
     await db.insert(statusHistory).values({

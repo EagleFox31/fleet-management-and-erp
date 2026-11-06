@@ -1,10 +1,1 @@
-{
-  "e2e/22-work-order-cost.spec.ts": 1,
-  "tests/integration/alert-emit-fallback-relink.test.ts": 3,
-  "tests/integration/client-invoice-overdue.test.ts": 1,
-  "tests/integration/preventive-maintenance-lifecycle.test.ts": 2,
-  "tests/integration/stock-alert-broadcast.test.ts": 1,
-  "tests/integration/test-cleanup-status-history.test.ts": 2,
-  "tests/support/alert-emission-scan.ts": 1,
-  "tests/support/lockout.ts": 1
-}
+{}

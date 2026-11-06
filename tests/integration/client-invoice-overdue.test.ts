@@ -20,7 +20,8 @@ afterAll(async () => {
   await cleanupCreated(ids);
 });
 
-async function invoice(overrides: Partial<typeof clientInvoices.$inferInsert>) {
+// Le client est celui du fichier : un override ne le remplace pas.
+async function invoice(overrides: Omit<Partial<typeof clientInvoices.$inferInsert>, "clientId">) {
   if (ids.clientIds.length === 0) {
     const client = await createTestClient();
     ids.clientIds.push(client.id);

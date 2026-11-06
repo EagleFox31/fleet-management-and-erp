@@ -61,7 +61,7 @@ describe("alerte de stock bas : admins et magasiniers", { timeout: 120000 }, () 
     const recipients = await db
       .select({ role: users.role })
       .from(users)
-      .where(inArray(users.id, stored.map((alert) => alert.userId)));
+      .where(inArray(users.id, stored.flatMap((alert) => (alert.userId === null ? [] : [alert.userId]))));
     expect(recipients.every((r) => r.role === "admin" || r.role === "warehouse")).toBe(true);
 
     const frames = alertFrames();

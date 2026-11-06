@@ -779,3 +779,25 @@ WHERE po.status IN ('delivered', 'completed')
   - nouveau contrat « panne du service » : POST et PATCH répondent en 500 normalisée, avec une référence égale à `X-Request-Id` et sans le message SQL ;
   - `labor-catalog` et `work-order-items` verts (14 tests) ;
   - le mutant (routes d'origine) passe aussi : ce test fige le contrat, il ne détecte pas l'ancien code, qui était déjà conforme côté client.
+
+## 2026-11-06 — Typecheck des tests : lot 3, integration, support et e2e (12 → 0)
+
+**Quoi.** Les 12 dernières erreurs figées de `check:tests` sont corrigées. `tests/typecheck-baseline.json` est maintenant vide : toute erreur de type dans les tests fait échouer le contrôle.
+
+**Comment.** Types exacts, sans `any`, `@ts-ignore` ni `!` :
+- littéraux en `as const` pour `type`, `priority` et `status` ;
+- `mine` rendu générique, pour garder `registrationNumber` de `ScheduleCatchUp` ;
+- `scheduledDate` vérifié non nul avant la comparaison ;
+- destinataires d'alerte filtrés sur un `userId` non nul ;
+- `clientId` retiré des overrides de facture : le client est celui du fichier ;
+- garde `"body" in node` dans le scan AST ;
+- `LockoutConfig` importé de son contrat partagé (`shared/contracts/auth-lockout`), et non du service qui ne l'exporte pas.
+
+**Pourquoi.** `test-cleanup-status-history` créait des comptes au rôle `fleet_manager`, un rôle qui n'existe plus dans `users.role`. Le test passait parce que la colonne accepte du texte, mais il écrivait une valeur hors schéma. Il utilise maintenant `logistics` : le rôle n'a aucun effet sur le ménage testé.
+
+**Preuve.**
+- `tsc` : 0 erreur ;
+- `check:tests` : 0 erreur figée ;
+- unitaires `alert-emission-hygiene` et `login-lockout` verts ;
+- 5 fichiers d'intégration touchés verts sur Postgres local ;
+- `login-lockout-db-store` : 8 sur 8 en relance. Le `ECONNRESET` vient du proxy local et se produit aussi sans ce changement.

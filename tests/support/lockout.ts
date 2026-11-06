@@ -1,4 +1,5 @@
-import type { LockoutConfig, LockoutStore, LockState } from "../../server/services/login-lockout-service";
+import type { LockoutConfig } from "../../shared/contracts/auth-lockout";
+import type { LockoutStore, LockState } from "../../server/services/login-lockout-service";
 
 /**
  * Un echec de connexion tel que la garde le produit : reservation de la tentative, puis echec confirme.
