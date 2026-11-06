@@ -508,6 +508,18 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
   - mutant (le verrou du rejet retiré) : 3 essais sur 5 échouent, sur deux lancements.
 - **Leçon** : l'ordre des verrous d'une transaction compte aussi les verrous pris par les déclencheurs. Avant d'affirmer qu'il n'y a pas de cycle, lire les déclencheurs de chaque table écrite, pas seulement le code TypeScript.
 
+## 2026-11-06 — Cliquet : pas de montant dans les journaux
+
+- **Quoi** : `tests/unit/server/log-amounts-hygiene.test.ts` balaie les appels `log.*` et `console.*` de `server/` (hors `_archive`). Il échoue sur tout appel dont les arguments portent une valeur monétaire : une clé ou une interpolation nommée prix, coût, montant, solde, TTC ou TVA, ou un `${…} FCFA` / `XAF`.
+- **Comment** :
+  - seul le code des arguments compte (le texte des chaînes est retiré, les `${…}` restent) : le mot dans le message (« fuel balance error ») n'est pas un montant ;
+  - noms exclus : suffixes `Error`, `Changed`, `Id`, `Count`, `Mode`, `Rate`… ;
+  - un segment camelCase entier est exigé : `notValidated` ne contient pas « TVA » (premier essai trop large, 3 faux positifs dans `init-database.ts`) ;
+  - dix cas d'exemple fixent le comportement du détecteur.
+- **Corrigés** (signalés par la relecture sécurité) : `part-requirements-service.ts` (2 `log.debug`) et `stock-alerts-service.ts` (1). Les logs sont conservés, sans montant ; ils journalisent les identifiants.
+- **Gelés** : 14 appels dans 8 fichiers. Ce sont des paiements, recharges et consommations carburant, le prix convenu de mission, des statistiques en `console.log`. Le compte par fichier ne fait que baisser.
+- **Pourquoi** : les journaux sont lus bien au-delà des rôles finance. L'identifiant de l'objet suffit à retrouver le montant en base.
+- **Reste** : décider si les journaux d'audit métier (paiement enregistré, prix convenu modifié) gardent le montant. C'est à trancher par 0a ; d'ici là, ils sont gelés.
 ## 2026-11-06 — `feature-flags.contract` rouge en suite complète : fuite de `FEATURE_FLAGS` entre fichiers
 
 - **Symptôme** : le test est vert seul et rouge en suite complète avec « expected 200 to be 501 ».
@@ -530,3 +542,14 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
 - **Quoi** : `storage.updateVehicleDocument` n'écrit plus un objet générique `Partial<InsertVehicleDocument>` mais les seuls champs d'une correction (`name`, `description`, `expiryDate`, `updatedBy`), nommés un à un dans le `.set(…)`. Le `catch` qui avalait l'erreur SQL et renvoyait `undefined` (faux 404) est retiré. `server/services/documentStorage.ts`, sans aucun importeur, est supprimé.
 - **Comment** : type `VehicleDocumentCorrection` (Pick des quatre champs) dans l'interface `IStorage`. L'appelant unique (`PATCH /api/documents/:id`) ne change pas. Nouveau contrat : un corps qui forge `vehicleId`, `filePath`, `type`, `uploadedBy` ou `updatedBy` n'écrit que le nom, et l'auteur reste l'utilisateur de la session.
 - **Pourquoi** : écriture illisible statiquement sous `eq(id)` seul, comptée dans `FROZEN_OPAQUE` (storage.ts et documentStorage.ts). `vehicle_documents` n'a pas de colonne `status` : aucune transition n'est en jeu, il suffit de rendre le contenu écrit lisible. La liste `swallowed-write-catch-hygiene` perd trois entrées. `FROZEN_OPAQUE` n'existe pas encore sur `main` (arrive avec #559) : son abaissement se fera en fusionnant `main` après la pile.
+## 2026-11-06 — Clôture automatique de commande : verrou et CAS, plus de note perdue
+
+- **Contexte** : `autoCloseDeliveredOrderIfFinanceDone` (`three-way-matching-service.ts`) passe la commande de `delivered` à `completed` quand toutes ses factures sont soldées. C'était la dernière écriture de statut de ce fichier sans condition sur l'état lu, gelée dans `status-update-cas-hygiene`.
+- **Défaut** : la commande était lue hors transaction puis réécrite en entier (statut et notes) par un `UPDATE … WHERE id`. Deux factures soldées en même temps, ou une modification des notes pendant la clôture, donnaient deux transitions et des notes réécrites à partir d'une lecture périmée : la note ajoutée entre-temps était effacée.
+- **Correctif** : une transaction qui verrouille la commande (`FOR NO KEY UPDATE`), relit sous ce verrou son statut, ses notes et les factures liées, puis écrit `WHERE id AND status = 'delivered'` avec `returning`. La seconde clôture devient un no-op : pas de deuxième trace, pas de log en double. `no key update` reste compatible avec le `key share` des contrôles de clé étrangère des factures. Aucun déclencheur sur `purchase_orders`. La clôture s'exécute après le commit du rapprochement et ne prend que ce verrou, donc pas de cycle possible. Le `console.log` de la clôture passe par `moduleLogger("three-way-matching")`.
+- **Preuve** :
+  - `tests/integration/purchase-order-auto-close.test.ts` : témoin, une facture non soldée, commande déjà clôturée ou annulée. Cas concurrent : le test tient le verrou de la commande, modifie ses notes, attend dans `pg_stat_activity` deux clôtures bloquées, puis relâche le verrou. Résultat attendu : une transition, une trace, la note conservée ;
+  - mutant (code d'origine) : le cas concurrent échoue, la note ajoutée est perdue. Avant l'ajout de cette note, le test passait aussi sur le code d'origine, parce que l'écrasement par la seconde clôture laissait une seule trace ;
+  - contrats liés (`purchase-order-three-way`, `supplier-settlement*`, `supplier-invoice*`) : 13 fichiers, 125 tests verts. Suite unitaire verte.
+- **Prévention** : l'entrée gelée est retirée de `status-update-cas-hygiene` : toute nouvelle écriture de statut non conditionnée dans ce fichier fait échouer le test.
+- **Leçon** : pour tester un CAS, compter les traces ne suffit pas, car un écrasement en laisse une seule lui aussi. Il faut un observable que seule la mise à jour perdue détruit, par exemple une écriture concurrente qui doit survivre.
