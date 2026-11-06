@@ -13,9 +13,12 @@ import {
 } from "@shared/schema";
 import { eq, and, desc, sql, gte, lte, or, lt, ne, inArray } from "drizzle-orm";
 import { AppError } from "../lib/app-error";
+import { moduleLogger } from "../lib/logger";
 import { isSettlementProofReference } from "../lib/settlement-proof";
 import { linkSupplierSettlement, reverseSupplierSettlement } from "./treasury-links";
 import type { DiscrepancyResult } from "@shared/contracts/supplier-invoice-discrepancies";
+
+const log = moduleLogger("three-way-matching");
 
 const INVOICE_DISPUTED_RECONCILE_MESSAGE = "Cette facture est en litige. Lever le litige avant de rapprocher un règlement.";
 
@@ -76,60 +79,65 @@ export class ThreeWayMatchingService {
     }
 
     const orderId = invoice.purchaseOrderId;
-
-    const [order] = await db
-      .select({
-        id: purchaseOrders.id,
-        orderNumber: purchaseOrders.orderNumber,
-        status: purchaseOrders.status,
-        notes: purchaseOrders.notes,
-      })
-      .from(purchaseOrders)
-      .where(eq(purchaseOrders.id, orderId))
-      .limit(1);
-
-    if (!order || order.status !== "delivered") {
-      return;
-    }
-
-    const linkedInvoices = await db
-      .select({
-        id: supplierInvoices.id,
-        status: supplierInvoices.status,
-      })
-      .from(supplierInvoices)
-      .where(eq(supplierInvoices.purchaseOrderId, orderId));
-
-    if (linkedInvoices.length === 0) {
-      return;
-    }
-
-    const allPaid = linkedInvoices.every((row) => row.status === "paid");
-    if (!allPaid) {
-      return;
-    }
-
     const actorLabel = await this.resolveActorLabel(actorId);
-    const traceLine = [
-      `[TRACE_PO] ${new Date().toISOString()}`,
-      "delivered -> completed",
-      "by=Système (Finance auto)",
-      `financeTriggeredBy=${encodeURIComponent(actorLabel)}`,
-      `invoiceId=${invoice.id}`,
-    ].join(" | ");
 
-    await db
-      .update(purchaseOrders)
-      .set({
-        status: "completed",
-        notes: this.appendOrderTrace(order.notes, traceLine),
-        updatedAt: new Date(),
-      })
-      .where(eq(purchaseOrders.id, orderId));
+    // Deux factures soldées en même temps déclenchent deux clôtures : la commande est verrouillée,
+    // son état relu sous verrou, et l'écriture conditionnée à `delivered`. La seconde est un no-op,
+    // sans trace en double ni notes écrasées. `no key update` reste compatible avec le `key share`
+    // des contrôles de clé étrangère des factures liées : pas d'attente avec un rapprochement en cours.
+    // Les factures liées sont lues `for share` : une facture qui repasse non soldée dans une transaction
+    // en cours (règlement annulé, litige) est attendue puis relue, jamais lue soldée à tort. Ordre des
+    // verrous : commande puis factures ; aucun chemin ne verrouille une facture puis la commande (pas de
+    // déclencheur sur `purchase_orders`, la clé de commande d'une facture n'y prend que `key share`).
+    // Une facture créée après la clôture reste hors de ce contrôle, comme une facture créée plus tard.
+    const closed = await db.transaction(async (tx) => {
+      const [order] = await tx
+        .select({
+          id: purchaseOrders.id,
+          orderNumber: purchaseOrders.orderNumber,
+          status: purchaseOrders.status,
+          notes: purchaseOrders.notes,
+        })
+        .from(purchaseOrders)
+        .where(eq(purchaseOrders.id, orderId))
+        .for("no key update");
 
-    console.log(
-      `✅ Commande #${order.id} (${order.orderNumber}) clôturée automatiquement après règlement finance complet`
-    );
+      if (!order || order.status !== "delivered") return null;
+
+      const linkedInvoices = await tx
+        .select({ status: supplierInvoices.status })
+        .from(supplierInvoices)
+        .where(eq(supplierInvoices.purchaseOrderId, orderId))
+        .for("share");
+
+      if (linkedInvoices.length === 0 || !linkedInvoices.every((row) => row.status === "paid")) return null;
+
+      const traceLine = [
+        `[TRACE_PO] ${new Date().toISOString()}`,
+        "delivered -> completed",
+        "by=Système (Finance auto)",
+        `financeTriggeredBy=${encodeURIComponent(actorLabel)}`,
+        `invoiceId=${invoice.id}`,
+      ].join(" | ");
+
+      const [updated] = await tx
+        .update(purchaseOrders)
+        .set({
+          status: "completed",
+          notes: this.appendOrderTrace(order.notes, traceLine),
+          updatedAt: new Date(),
+        })
+        .where(and(eq(purchaseOrders.id, orderId), eq(purchaseOrders.status, "delivered")))
+        .returning({ id: purchaseOrders.id, orderNumber: purchaseOrders.orderNumber });
+      return updated ?? null;
+    });
+
+    if (closed) {
+      log.info(
+        { purchaseOrderId: closed.id, orderNumber: closed.orderNumber, invoiceId: invoice.id },
+        "commande clôturée automatiquement après règlement finance complet",
+      );
+    }
   }
 
   /**

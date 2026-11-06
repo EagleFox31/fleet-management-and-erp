@@ -11,6 +11,7 @@ import {
 } from "@shared/constants/roles";
 import {
   MISSION_STATUSES_WITHOUT_BUDGET,
+  MISSION_STATUSES_WITHOUT_EXPENSES,
   type DailyNeed,
   type MissionBudget,
   type MissionBudgetExpenses,
@@ -31,7 +32,9 @@ export type MissionBudgetActions = {
 };
 
 /**
- * Mission terminée ou annulée : plus aucune action (le serveur répond 409).
+ * Mission terminée ou annulée : plus aucune action sur le budget (le serveur répond 409). Les dépenses
+ * d'une mission terminée restent ouvertes tant que le reliquat n'est pas rendu (R1, refus 409 du
+ * serveur ensuite) ; annulée, jamais.
  * Sans budget : seule la saisie. Ensuite, chaque statut n'ouvre que son étape suivante.
  */
 export function missionBudgetActions(
@@ -47,7 +50,10 @@ export function missionBudgetActions(
     edit: write && status === "requested",
     approve: open && has(MISSION_BUDGET_APPROVE_ROLES, role) && status === "requested",
     disburse: open && has(MISSION_BUDGET_DISBURSE_ROLES, role) && status === "approved",
-    expenses: open && has(MISSION_BUDGET_DISBURSE_ROLES, role) && status === "disbursed",
+    expenses:
+      !(MISSION_STATUSES_WITHOUT_EXPENSES as readonly string[]).includes(String(missionStatus ?? "")) &&
+      has(MISSION_BUDGET_DISBURSE_ROLES, role) &&
+      status === "disbursed",
   };
 }
 

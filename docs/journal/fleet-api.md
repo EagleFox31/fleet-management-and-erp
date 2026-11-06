@@ -812,6 +812,13 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Comment tester (QA)** : `tests/contract/parts-used-removal-defects.contract.test.ts` (10 passés) sur Postgres local ; mutants : sans garde de statut 2 échecs, sans transaction 1 échec.
 - **Reste / risques** : l'écran OT affiche encore la corbeille au technicien (403 à l'usage) et seulement hors `completed` (pas `cancelled`) : à aligner côté front.
 
+
+## 2026-11-05 23:06 — Dépenses de mission après mission terminée (R1)
+- **Quoi** : une mission terminée garde ses dépenses justifiées ouvertes (saisie et suppression douce) tant que le reliquat n'est pas rendu ; reliquat rendu, 409 ; mission annulée, 409 « Cette mission est annulée : ses dépenses ne changent plus. ». Saisie, correction, approbation et décaissement du budget restent fermés sur mission terminée ou annulée.
+- **Comment** : `MISSION_STATUSES_WITHOUT_EXPENSES = ["cancelled"]` (contrat partagé), lu par le serveur (`lockMission` générique, même verrou FOR SHARE) et par le client (`missionBudgetActions.expenses`).
+- **Pourquoi** : décision produit : dépenses autorisées après la fin de la mission jusqu'au retour du reliquat, jamais si la mission est annulée.
+- **Preuve** : contrats dépenses et budgets 56/56 (terminée + reliquat non rendu 201/204, plafond maintenu ; terminée + reliquat rendu 409 ; annulée sans contre-passation 409) ; unitaire actions 8/8 ; mutants 5/5 tués.
+- **Dette** : clôture financière d'une mission terminée. Aucun parcours ne rend encore le reliquat d'une mission terminée : ses dépenses restent ouvertes sans fin. Lot suivant décidé (Q18) : bouton « mission soldée » tenu par la comptabilité.
 ## 2026-11-05 23:41 — Montants du budget de mission réservés à leurs lecteurs, routes /api/missions (Q19)
 - **Statut** : fait
 - **Quoi** : technicien, chauffeur et client ne reçoivent plus aucun montant du budget d'une mission, drapeau `finance` actif comme coupé : `estimatedFuelCost`, ancien budget `workflowData.budgetPlan`, budget de mission, totaux carburant (`estimatedBudget`, `budgetDelta`), suggestion de budget, solde de la carte carburant. Verdicts de la check-list conservés (« Budget approuvé. », « Budget renseigné. », « Solde suffisant. »). Motif de refus du PUT de statut sans montant.
