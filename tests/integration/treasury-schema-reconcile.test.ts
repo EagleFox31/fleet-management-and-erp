@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { PoolClient } from "pg";
+import type { PoolClient } from "@neondatabase/serverless";
 import { pool } from "../../server/db";
 import { reportCdcConstraintGaps, TREASURY_RECONCILED_CONSTRAINTS, TREASURY_SCHEMA_STATEMENTS } from "../../server/init-database";
 
