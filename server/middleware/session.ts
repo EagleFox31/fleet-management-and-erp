@@ -18,6 +18,18 @@ if (process.env.NODE_ENV === "production" && !cookieFlags.secure) {
 }
 
 /**
+ * Store des sessions. Avec un pool fourni, connect-pg-simple n'en appelle que `query(text, params)`
+ * (promesse) : ni `connect`, ni `end`, ni `on`. Exporté pour le test d'intégration qui le prouve.
+ */
+export const sessionStore = new PgSession({
+  // Le Pool neon est un pg.Pool à l'exécution (pg embarqué) ; depuis neon 1.1 ses types sont
+  // inlinés et n'ont plus l'identité de ceux de @types/pg qu'attend connect-pg-simple.
+  pool: pool as unknown as PgPool,
+  tableName: "session",
+  createTableIfMissing: true,
+});
+
+/**
  * Shared session middleware instance with PostgreSQL storage
  * Compatible avec les requêtes inter-origines de l'APK Capacitor (https://localhost)
  * et le web local / distant.
@@ -34,11 +46,5 @@ export const sessionMiddleware = session({
     sameSite: cookieFlags.sameSite,
     maxAge: 30 * 24 * 60 * 60 * 1000, // 30 jours
   },
-  store: new PgSession({
-    // Le Pool neon est un pg.Pool à l'exécution (pg embarqué) ; depuis neon 1.1 ses types sont
-    // inlinés et n'ont plus l'identité de ceux de @types/pg qu'attend connect-pg-simple.
-    pool: pool as unknown as PgPool,
-    tableName: "session",
-    createTableIfMissing: true,
-  }),
+  store: sessionStore,
 });
