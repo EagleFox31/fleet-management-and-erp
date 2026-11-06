@@ -47,7 +47,7 @@ const FROZEN_OPAQUE: Record<string, number> = {
   "server/services/tariff-grid-service.ts": 1,
   "server/services/tires-service-simplified.ts": 1,
   // Méthodes génériques `update<Entité>(id, data)`.
-  "server/storage.ts": 5,
+  "server/storage.ts": 3,
 };
 
 const repoDir = fileURLToPath(new URL("../../..", import.meta.url));
