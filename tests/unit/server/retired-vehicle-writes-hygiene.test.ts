@@ -8,17 +8,25 @@ import {
   RETIRED_VEHICLE_WRITE_ROUTES,
   routeParts,
 } from "../../../server/lib/retired-vehicle-write-routes";
-import { routeSignature, scanWriteRoutes } from "../../support/route-guard-scan";
+import {
+  ROUTER_MOUNT,
+  routeSignature,
+  scanNestedRouterMounts,
+  scanUnreachedWriteRoutes,
+  scanWriteRoutes,
+} from "../../support/route-guard-scan";
 
 /**
  * L3 : toute écriture qui porte un véhicule est refusée sur véhicule retiré (409). Une route d'écriture
  * dont la déclaration mentionne un véhicule doit figurer à `RETIRED_VEHICLE_WRITE_ROUTES` (garde de
  * montage), appeler `assertVehicleWritable(` dans sa poignée (corps multipart), ou être ci-dessous avec
  * sa raison. Cliquet : la liste ne fait que rétrécir, une entrée devenue couverte la fait échouer.
- * Limite : seuls les routeurs montés dans `server/api/index.ts` et `routes.ts` sont vus, et une route
- * qui n'atteint le véhicule que par un OT (`workOrderId` seul), ou qui passe le corps entier à un schéma
- * Zod sans nommer `vehicleId`, n'est pas détectée. D'où le plancher de la table : la retirer d'une
- * entrée exige de baisser `TABLE_FLOOR`, donc une revue.
+ * L3b : une écriture qui n'atteint le véhicule que par un OT est soumise à la même règle, qu'elle nomme
+ * `workOrderId` ou vise un objet d'OT par son chemin (OT, ligne, pièce posée, demande de pièce).
+ * Le balayage ne lit que `routes.ts` et les routeurs montés par `server/api/index.ts` : deux tests
+ * ferment cette limite (aucun sous-routeur monté ailleurs, aucune écriture de `server/api/` hors montage).
+ * Reste non détectée une route qui passe le corps entier à un schéma Zod sans nommer le véhicule ni
+ * l'OT. D'où le plancher de la table : en retirer une entrée exige de baisser `TABLE_FLOOR`, donc une revue.
  */
 const NOT_GUARDED: Record<string, string> = {
   "POST /api/missions": "garde en ligne historique, 400 (vehicle-soft-delete.contract.test.ts)",
@@ -29,12 +37,20 @@ const NOT_GUARDED: Record<string, string> = {
   "PATCH /api/fuel-card/anomalies/:p": "traitement d'une anomalie (clé d'anomalie), aucune saisie sur le véhicule",
   "DELETE /api/work-orders/bulk-pending-unassigned": "purge administrative en masse, pas une saisie sur un véhicule",
   "POST /api/vehicles/activate-from-workflow": "crée le véhicule, ne vise pas un véhicule existant",
+  // Décision 0a (L3b) : livraison d'une commande, les demandes de l'OT d'un véhicule retiré passent à reçue.
+  "PATCH /api/purchase-orders/:p/status": "réception physique permise, la marchandise entre en stock",
 };
 
 // Égal à la taille de la table : en ajouter une entrée oblige à relever ce nombre, sinon le cliquet
 // se périmerait et laisserait retirer une entrée sans revue.
-const TABLE_FLOOR = 44;
-const VEHICLE_MARKER = /\b(vehicleId|vehicle_id|vehicleTireId|fuelRecordId)\b/;
+const TABLE_FLOOR = 45;
+const VEHICLE_MARKER = /\b(vehicleId|vehicle_id|vehicleTireId|fuelRecordId|workOrderId|work_order_id|partRequirementId|part_requirement_id)\b/;
+// Objet d'OT désigné par le chemin : le véhicule s'atteint par l'OT, même si la poignée ne nomme ni l'un ni l'autre.
+const WORK_ORDER_PATH = /\/(work-orders|work-order-items|parts-used|part-requirements)\/:p(\/|$)/;
+// Méthodes de service qui font avancer des demandes de pièce d'OT sans que la poignée les nomme.
+const WORK_ORDER_SERVICE_CALL = /\.\s*updateOrderStatus\s*\(/;
+const reachesVehicle = (r: { signature: string; handler: string }) =>
+  VEHICLE_MARKER.test(r.handler) || WORK_ORDER_PATH.test(r.signature) || WORK_ORDER_SERVICE_CALL.test(r.handler);
 const serverDir = fileURLToPath(new URL("../../../server", import.meta.url));
 const signatureOf = (route: string) => {
   const [method, path] = route.split(" ");
@@ -48,7 +64,7 @@ describe("écritures sur véhicule retiré : couverture de la garde", () => {
   const uncovered = [
     ...new Set(
       routes
-        .filter((r) => VEHICLE_MARKER.test(r.handler) && !table.has(r.signature) && !r.handler.includes("assertVehicleWritable("))
+        .filter((r) => reachesVehicle(r) && !table.has(r.signature) && !r.handler.includes("assertVehicleWritable("))
         .map((r) => r.signature),
     ),
   ].sort();
@@ -78,6 +94,37 @@ describe("écritures sur véhicule retiré : couverture de la garde", () => {
 
   it("le démontage de pneus reste hors table", () => {
     expect(table.has("PATCH /api/vehicle-tires/:p/remove")).toBe(false);
+  });
+
+  it("L3b : la détection voit les écritures atteintes par un OT", () => {
+    const flagged = (signature: string) => routes.some((r) => r.signature === signature && reachesVehicle(r));
+    for (const route of [
+      "POST /api/work-orders/:p/parts",
+      "PATCH /api/work-order-items/:p",
+      "DELETE /api/parts-used/:p",
+      "PATCH /api/part-requirements/:p",
+      "POST /api/warehouse/stock-movement",
+      "PATCH /api/purchase-orders/:p/status",
+    ]) {
+      expect(flagged(route), route).toBe(true);
+    }
+  });
+});
+
+describe("L3b : le balayage voit tous les routeurs d'écriture", () => {
+  it("aucun sous-routeur monté hors de server/api/index.ts et server/app.ts", () => {
+    expect(scanNestedRouterMounts(serverDir), "monter le routeur dans server/api/index.ts : le balayage des gardes ne lit que ces montages").toEqual([]);
+  });
+
+  it("aucune écriture de server/api hors d'un routeur monté par index.ts", () => {
+    expect(scanUnreachedWriteRoutes(serverDir)).toEqual([]);
+  });
+
+  it("le motif de montage reconnaît un routeur et ignore une fonction en ligne", () => {
+    expect(ROUTER_MOUNT.test('router.use("/sub", isStaff, nestedRoutes)')).toBe(true);
+    expect(ROUTER_MOUNT.test("router.use(otherRouter)")).toBe(true);
+    expect(ROUTER_MOUNT.test('router.use("/check", (_req, _res, next) => next("router"))')).toBe(false);
+    expect(ROUTER_MOUNT.test("router.use(isStaff)")).toBe(false);
   });
 });
 

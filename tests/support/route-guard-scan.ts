@@ -674,16 +674,48 @@ function namedHandlerText(source: string, name: string): string {
 }
 
 export function scanWriteRoutes(serverDir: string): Array<{ signature: string; file: string; handler: string }> {
+  return walkWriteRoutes(serverDir).reached;
+}
+
+/**
+ * Écritures de `server/api/` que `scanWriteRoutes` ne voit pas : fichier non monté par `index.ts`, ou
+ * routeur du fichier sans montage. Elles échappent à tout garde-fou qui s'appuie sur ce balayage.
+ */
+export function scanUnreachedWriteRoutes(serverDir: string): string[] {
+  return walkWriteRoutes(serverDir).unreached;
+}
+
+// Montage d'un routeur : `x.use("/p", ..., fooRoutes)` ou `x.use(fooRouter)`. Une fonction en ligne n'en est pas un.
+export const ROUTER_MOUNT = /\.\s*use\(\s*(?:["'`][^"'`]*["'`]\s*,\s*)?(?:[^()]*,\s*)?\w*(?:Router|Routes|routes|router)\s*\)/;
+
+/**
+ * Fichiers serveur qui montent un routeur hors de `server/api/index.ts` et `server/app.ts` : leurs
+ * routes recevraient un préfixe en cascade que `parseMounts` ne lit pas.
+ */
+export function scanNestedRouterMounts(serverDir: string): string[] {
+  const allowed = new Set(["api/index.ts", "app.ts"]);
+  return sourceFiles(serverDir)
+    .map((path) => path.slice(serverDir.length + 1).replace(/\\/g, "/"))
+    .filter((file) => !allowed.has(file))
+    .filter((file) => ROUTER_MOUNT.test(stripComments(readFileSync(join(serverDir, file), "utf8"))))
+    .map((file) => `server/${file}`);
+}
+
+function walkWriteRoutes(serverDir: string): { reached: Array<{ signature: string; file: string; handler: string }>; unreached: string[] } {
   const indexSource = readFileSync(join(serverDir, "api", "index.ts"), "utf8");
   const mounts = parseMounts(indexSource, { restrictive: new Set(), permissive: new Set(), neutral: new Set(), arrays: new Map(), roles: {} });
   const out: Array<{ signature: string; file: string; handler: string }> = [];
+  const unreached: string[] = [];
   const collect = (file: string, raw: string, prefixOf: (routerVar: string) => string | undefined) => {
     const source = stripComments(raw);
     const routers = routerVarsOf(source);
     for (const m of source.matchAll(/\b(\w+)\s*\.\s*(post|put|patch|delete)\(\s*(["'`])([^"'`]*)\3/g)) {
       if (!routers.has(m[1]) || (m[3] === "`" && m[4].includes("${"))) continue;
       const prefix = prefixOf(m[1]);
-      if (prefix === undefined) continue;
+      if (prefix === undefined) {
+        unreached.push(`${file}: ${m[2].toUpperCase()} ${m[4]}`);
+        continue;
+      }
       const open = source.indexOf("(", m.index! + m[1].length);
       const close = matchingClose(source, open);
       const declaration = source.slice(open, close < 0 ? undefined : close);
@@ -697,15 +729,18 @@ export function scanWriteRoutes(serverDir: string): Array<{ signature: string; f
   collect("server/routes.ts", readFileSync(join(serverDir, "routes.ts"), "utf8"), (v) => (v === "app" ? "" : undefined));
   for (const path of sourceFiles(join(serverDir, "api"))) {
     const file = `server/api/${path.slice(join(serverDir, "api").length + 1).replace(/\\/g, "/")}`;
+    if (file === "server/api/index.ts") {
+      collect(file, readFileSync(path, "utf8"), (v) => (v === "apiRouter" ? "/api" : undefined));
+      continue;
+    }
     const fileMounts = mounts.filter((m) => m.file && file === `server/api/${m.file}.ts`);
-    if (fileMounts.length === 0) continue;
     const raw = readFileSync(path, "utf8");
     collect(file, raw, (v) => {
-      const own = mountOf(fileMounts, v, raw);
+      const own = fileMounts.length === 0 ? undefined : mountOf(fileMounts, v, raw);
       return own ? `/api${own.prefix}` : undefined;
     });
   }
-  return out;
+  return { reached: out, unreached };
 }
 
 /**
