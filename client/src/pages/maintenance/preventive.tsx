@@ -45,11 +45,11 @@ import { FormDraftBadge, FormDraftDiscardButton } from "@/components/form-draft/
 import { preventiveDraft } from "@/lib/form-drafts";
 
 const scheduleSchema = z.object({
-  vehicleId: z.number({ required_error: "Le vehicule est requis" }),
+  vehicleId: z.number({ required_error: "Le véhicule est requis" }),
   title: z.string().min(1, "Le titre est requis"),
   description: z.string().optional(),
   frequency: z.enum(["daily", "weekly", "monthly", "quarterly", "yearly", "mileage"]),
-  frequencyValue: z.number().min(1, "La frequence doit etre positive"),
+  frequencyValue: z.number().min(1, "La fréquence doit être positive"),
   scheduledDate: z.string().min(1, "La date est requise"),
   scheduledMileage: z.number().optional(),
   isActive: z.boolean().default(true),
@@ -98,7 +98,7 @@ const getStatusMeta = (schedule: MaintenanceSchedule) => {
   // Jour d'échéance UTC (#342) : plus de division de millisecondes dépendante du fuseau.
   const scheduledDay = toExpiryDateOnly(schedule.scheduledDate);
   if (scheduledDay === null) {
-    return { status: "pending", label: "A verifier" };
+    return { status: "pending", label: "À vérifier" };
   }
 
   const diffDays = daysBetweenDateOnly(scheduledDay, todayUtcDateOnly());
@@ -108,7 +108,7 @@ const getStatusMeta = (schedule: MaintenanceSchedule) => {
   }
 
   if (diffDays <= 7) {
-    return { status: "partial", label: "Bientot du" };
+    return { status: "partial", label: "Bientôt due" };
   }
 
   return { status: "approved", label: "Actif" };
@@ -163,14 +163,14 @@ export default function PreventiveMaintenancePage() {
         frequencyValue: 1,
       });
       toast({
-        title: "Planification creee",
-        description: "La planification preventive a ete creee avec succes.",
+        title: "Planification créée",
+        description: "La planification préventive a été créée avec succès.",
       });
     },
     onError: (error: any) => {
       toast({
         title: "Erreur",
-        description: userMessageOf(error, "Impossible de creer la planification."),
+        description: userMessageOf(error, "Impossible de créer la planification."),
         variant: "destructive",
       });
     },
@@ -185,8 +185,8 @@ export default function PreventiveMaintenancePage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/maintenance-schedules"] });
       toast({
-        title: "Planification mise a jour",
-        description: "Le statut de la planification a ete modifie.",
+        title: "Planification mise à jour",
+        description: "Le statut de la planification a été modifié.",
       });
     },
   });
@@ -201,7 +201,7 @@ export default function PreventiveMaintenancePage() {
       (acc, schedule) => {
         const status = getStatusMeta(schedule).label;
         if (status === "En retard") acc.overdue += 1;
-        if (status === "Bientot du") acc.upcoming += 1;
+        if (status === "Bientôt due") acc.upcoming += 1;
         return acc;
       },
       { overdue: 0, upcoming: 0 },
@@ -225,7 +225,7 @@ export default function PreventiveMaintenancePage() {
         <div className="min-w-0">
           <p className="font-semibold text-gray-800 truncate">{schedule.title}</p>
           <p className="text-xs text-gray-400 truncate">
-            {schedule.vehicleRegistrationNumber || "Vehicule"}
+            {schedule.vehicleRegistrationNumber || "Véhicule"}
             {(schedule.vehicleBrand || schedule.vehicleModel)
               ? ` · ${schedule.vehicleBrand || ""} ${schedule.vehicleModel || ""}`
               : ""}
@@ -235,7 +235,7 @@ export default function PreventiveMaintenancePage() {
     },
     {
       id: "frequency",
-      header: "Frequence",
+      header: "Fréquence",
       widthClassName: "w-[180px]",
       cell: (schedule) => (
         <span className="text-sm text-gray-600">
@@ -312,9 +312,9 @@ export default function PreventiveMaintenancePage() {
   return (
     <div className="space-y-5">
       <HeaderCard
-        moduleLabel="Maintenance · Preventif"
-        title="Planifications preventives"
-        subtitle="Gestion des echeances et cycles d'entretien"
+        moduleLabel="Maintenance · Préventif"
+        title="Planifications préventives"
+        subtitle="Gestion des échéances et cycles d'entretien"
         icon={<ShieldCheck className="h-5 w-5" />}
         actions={
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -326,7 +326,7 @@ export default function PreventiveMaintenancePage() {
             </DialogTrigger>
             <DialogContent className="max-w-2xl">
               <DialogHeader>
-                <DialogTitle>Creer une planification preventive</DialogTitle>
+                <DialogTitle>Créer une planification préventive</DialogTitle>
               </DialogHeader>
 
               <Form {...form}>
@@ -346,11 +346,11 @@ export default function PreventiveMaintenancePage() {
                       name="vehicleId"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Vehicule</FormLabel>
+                          <FormLabel>Véhicule</FormLabel>
                           <Select onValueChange={(value) => field.onChange(parseInt(value, 10))}>
                             <FormControl>
                               <SelectTrigger>
-                                <SelectValue placeholder="Selectionner un vehicule" />
+                                <SelectValue placeholder="Sélectionner un véhicule" />
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
@@ -388,7 +388,7 @@ export default function PreventiveMaintenancePage() {
                       <FormItem>
                         <FormLabel>Description</FormLabel>
                         <FormControl>
-                          <Textarea placeholder="Details de la maintenance..." {...field} />
+                          <Textarea placeholder="Détails de la maintenance..." {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
@@ -401,7 +401,7 @@ export default function PreventiveMaintenancePage() {
                       name="frequency"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Frequence</FormLabel>
+                          <FormLabel>Fréquence</FormLabel>
                           <Select onValueChange={field.onChange} defaultValue={field.value}>
                             <FormControl>
                               <SelectTrigger>
@@ -414,7 +414,7 @@ export default function PreventiveMaintenancePage() {
                               <SelectItem value="monthly">Mensuel</SelectItem>
                               <SelectItem value="quarterly">Trimestriel</SelectItem>
                               <SelectItem value="yearly">Annuel</SelectItem>
-                              <SelectItem value="mileage">Kilometrage</SelectItem>
+                              <SelectItem value="mileage">Kilométrage</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
@@ -447,7 +447,7 @@ export default function PreventiveMaintenancePage() {
                       name="scheduledDate"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Date prevue</FormLabel>
+                          <FormLabel>Date prévue</FormLabel>
                           <FormControl>
                             <Input type="date" {...field} />
                           </FormControl>
@@ -463,7 +463,7 @@ export default function PreventiveMaintenancePage() {
                       name="scheduledMileage"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Kilometrage prevu</FormLabel>
+                          <FormLabel>Kilométrage prévu</FormLabel>
                           <FormControl>
                             <Input
                               type="number"
@@ -485,7 +485,7 @@ export default function PreventiveMaintenancePage() {
                       Annuler
                     </Button>
                     <Button type="submit" disabled={createScheduleMutation.isPending}>
-                      {createScheduleMutation.isPending ? "Creation..." : "Creer"}
+                      {createScheduleMutation.isPending ? "Création..." : "Créer"}
                     </Button>
                   </div>
                 </form>
@@ -511,7 +511,7 @@ export default function PreventiveMaintenancePage() {
             valueClassName={stats.active > 0 ? "text-green-700" : undefined}
           />
           <KpiTile
-            label="Bientot dues"
+            label="Bientôt dues"
             value={stats.upcoming}
             subValue="Sous 7 jours"
             icon={<Timer className="h-4 w-4" />}
@@ -553,7 +553,7 @@ export default function PreventiveMaintenancePage() {
             rows={schedules}
             rowKey={(schedule) => schedule.id}
             rowClassName={(_, index) => (index % 2 === 0 ? "bg-white" : "bg-gray-50/35")}
-            emptyState="Aucune planification preventive."
+            emptyState="Aucune planification préventive."
             tableContainerClassName="border border-gray-100 rounded-xl overflow-hidden"
           />
         </div>
