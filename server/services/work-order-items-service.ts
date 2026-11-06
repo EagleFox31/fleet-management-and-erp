@@ -59,6 +59,8 @@ export interface WorkOrderItemPayload {
   notes?: string | null;
 }
 
+export const WORK_ORDER_ITEM_CHANGED_ERROR = "Cette ligne de travail vient de changer. Rechargez l'ordre de travail.";
+
 export type ServiceResult<T> = { success: true; data: T } | { success: false; error: string };
 
 /** `numeric` part et revient en chaîne côté pg. On centralise la conversion. */
@@ -285,87 +287,107 @@ export class WorkOrderItemsService {
     itemId: number,
     payload: WorkOrderItemPayload,
   ): Promise<ServiceResult<WorkOrderItemsResult & { workOrderId: number }>> {
-    const existant = await this.getItem(itemId);
-    if (!existant) {
-      return { success: false, error: "Ligne de travail introuvable." };
-    }
-
-    const fusion = {
-      laborCatalogId: estFourni(payload, "laborCatalogId") ? payload.laborCatalogId : existant.laborCatalogId,
-      customLabel: estFourni(payload, "customLabel") ? payload.customLabel : existant.customLabel,
-      estimatedHours: estFourni(payload, "estimatedHours") ? payload.estimatedHours : existant.estimatedHours,
-      actualHours: estFourni(payload, "actualHours") ? payload.actualHours : existant.actualHours,
-      status: estFourni(payload, "status") ? payload.status : existant.status,
-    };
-
-    const verdict = validateWorkOrderItem(fusion);
-    if (!verdict.valid) {
-      return { success: false, error: verdict.errors.join(" ") };
-    }
-
+    // Ne dépend pas de la ligne : vérifié hors transaction, sans tenir le verrou.
     if (estFourni(payload, "technicianId")) {
       const technicienInconnu = await this.refusTechnicien(payload.technicianId);
       if (technicienInconnu) return { success: false, error: technicienInconnu };
     }
-    if (estFourni(payload, "laborCatalogId") && Number(payload.laborCatalogId) !== existant.laborCatalogId) {
-      const posteId = Number(payload.laborCatalogId);
-      if (Number.isInteger(posteId) && posteId > 0) {
-        const [poste] = await db
-          .select({ id: laborCatalog.id })
-          .from(laborCatalog)
-          .where(and(eq(laborCatalog.id, posteId), eq(laborCatalog.isActive, true)))
-          .limit(1);
-        if (!poste) {
-          return { success: false, error: "Poste de main-d'œuvre introuvable ou désactivé." };
+
+    // La ligne est verrouillée le temps de la mise à jour : deux modifications simultanées
+    // s'enchaînent, et la seconde part de l'état écrit par la première (horodatages de début
+    // et de fin, statut). Le statut lu reste la condition d'écriture.
+    const ecriture = await db.transaction(async (tx): Promise<ServiceResult<{ workOrderId: number }>> => {
+      const [existant] = await tx
+        .select()
+        .from(workOrderItems)
+        .where(eq(workOrderItems.id, itemId))
+        .for("no key update");
+      if (!existant) {
+        return { success: false, error: "Ligne de travail introuvable." };
+      }
+
+      const fusion = {
+        laborCatalogId: estFourni(payload, "laborCatalogId") ? payload.laborCatalogId : existant.laborCatalogId,
+        customLabel: estFourni(payload, "customLabel") ? payload.customLabel : existant.customLabel,
+        estimatedHours: estFourni(payload, "estimatedHours") ? payload.estimatedHours : existant.estimatedHours,
+        actualHours: estFourni(payload, "actualHours") ? payload.actualHours : existant.actualHours,
+        status: estFourni(payload, "status") ? payload.status : existant.status,
+      };
+
+      const verdict = validateWorkOrderItem(fusion);
+      if (!verdict.valid) {
+        return { success: false, error: verdict.errors.join(" ") };
+      }
+
+      if (estFourni(payload, "laborCatalogId") && Number(payload.laborCatalogId) !== existant.laborCatalogId) {
+        const posteId = Number(payload.laborCatalogId);
+        if (Number.isInteger(posteId) && posteId > 0) {
+          const [poste] = await tx
+            .select({ id: laborCatalog.id })
+            .from(laborCatalog)
+            .where(and(eq(laborCatalog.id, posteId), eq(laborCatalog.isActive, true)))
+            .limit(1);
+          if (!poste) {
+            return { success: false, error: "Poste de main-d'œuvre introuvable ou désactivé." };
+          }
         }
       }
-    }
 
-    const maj: Record<string, unknown> = { updatedAt: new Date() };
+      const maj: Record<string, unknown> = { updatedAt: new Date() };
 
-    if (estFourni(payload, "laborCatalogId")) {
-      const id = Number(payload.laborCatalogId);
-      maj.laborCatalogId = Number.isInteger(id) && id > 0 ? id : null;
-    }
-    if (estFourni(payload, "customLabel")) {
-      const libelle = typeof payload.customLabel === "string" ? payload.customLabel.trim() : "";
-      maj.customLabel = libelle === "" ? null : libelle;
-    }
-    if (estFourni(payload, "technicianId")) {
-      const id = Number(payload.technicianId);
-      maj.technicianId = Number.isInteger(id) && id > 0 ? id : null;
-    }
-    if (estFourni(payload, "estimatedHours")) {
-      maj.estimatedHours = toNumericColumn(payload.estimatedHours);
-    }
-    if (estFourni(payload, "actualHours")) {
-      maj.actualHours = toNumericColumn(payload.actualHours);
-    }
-    if (estFourni(payload, "notes")) {
-      const notes = typeof payload.notes === "string" ? payload.notes.trim() : "";
-      maj.notes = notes === "" ? null : notes;
-    }
-
-    if (estFourni(payload, "status") && payload.status !== existant.status) {
-      const statut = payload.status as WorkOrderItemStatus;
-      maj.status = statut;
-
-      if (statut === "in_progress" && !existant.startedAt) {
-        maj.startedAt = new Date();
+      if (estFourni(payload, "laborCatalogId")) {
+        const id = Number(payload.laborCatalogId);
+        maj.laborCatalogId = Number.isInteger(id) && id > 0 ? id : null;
       }
-      if (statut === "done") {
-        maj.completedAt = new Date();
-        if (!existant.startedAt) maj.startedAt = new Date();
+      if (estFourni(payload, "customLabel")) {
+        const libelle = typeof payload.customLabel === "string" ? payload.customLabel.trim() : "";
+        maj.customLabel = libelle === "" ? null : libelle;
       }
-      if (statut === "pending" || statut === "cancelled") {
-        maj.completedAt = null;
+      if (estFourni(payload, "technicianId")) {
+        const id = Number(payload.technicianId);
+        maj.technicianId = Number.isInteger(id) && id > 0 ? id : null;
       }
-    }
+      if (estFourni(payload, "estimatedHours")) {
+        maj.estimatedHours = toNumericColumn(payload.estimatedHours);
+      }
+      if (estFourni(payload, "actualHours")) {
+        maj.actualHours = toNumericColumn(payload.actualHours);
+      }
+      if (estFourni(payload, "notes")) {
+        const notes = typeof payload.notes === "string" ? payload.notes.trim() : "";
+        maj.notes = notes === "" ? null : notes;
+      }
 
-    await db.update(workOrderItems).set(maj).where(eq(workOrderItems.id, itemId));
+      if (estFourni(payload, "status") && payload.status !== existant.status) {
+        const statut = payload.status as WorkOrderItemStatus;
+        maj.status = statut;
 
-    const resultat = await this.getItemsForWorkOrder(existant.workOrderId);
-    return { success: true, data: { ...resultat, workOrderId: existant.workOrderId } };
+        if (statut === "in_progress" && !existant.startedAt) {
+          maj.startedAt = new Date();
+        }
+        if (statut === "done") {
+          maj.completedAt = new Date();
+          if (!existant.startedAt) maj.startedAt = new Date();
+        }
+        if (statut === "pending" || statut === "cancelled") {
+          maj.completedAt = null;
+        }
+      }
+
+      const ecrites = await tx
+        .update(workOrderItems)
+        .set(maj)
+        .where(and(eq(workOrderItems.id, itemId), eq(workOrderItems.status, existant.status)))
+        .returning({ id: workOrderItems.id });
+      if (ecrites.length === 0) {
+        throw new AppError(409, WORK_ORDER_ITEM_CHANGED_ERROR);
+      }
+      return { success: true, data: { workOrderId: existant.workOrderId } };
+    });
+    if (!ecriture.success) return ecriture;
+
+    const resultat = await this.getItemsForWorkOrder(ecriture.data.workOrderId);
+    return { success: true, data: { ...resultat, workOrderId: ecriture.data.workOrderId } };
   }
 
   /** Message de refus si `technicianId` désigne un utilisateur inexistant ; vide ou absent : rien à vérifier. */

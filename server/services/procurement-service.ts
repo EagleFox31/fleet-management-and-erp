@@ -1,4 +1,4 @@
-import { db } from "../db";
+import { db, type DbExecutor } from "../db";
 import { 
   purchaseOrders, 
   purchaseOrderLines,
@@ -23,6 +23,7 @@ import { broadcastAlertCreated, type BroadcastableAlert } from "../lib/alert-bro
 import { moduleLogger } from "../lib/logger";
 import { canTransitionPurchaseOrder, getPurchaseOrderStatusLabel } from "@shared/constants/purchase-order-statuses";
 import { workOrderStaffScope } from "../lib/work-order-realtime-scope";
+import { deliveryReceipts } from "../lib/purchase-order-delivery";
 
 /**
  * Service de gestion des commandes d'achat groupées
@@ -30,6 +31,10 @@ import { workOrderStaffScope } from "../lib/work-order-realtime-scope";
  * Objectif : 5-10% d'économies sur les achats
  */
 const log = moduleLogger("procurement-service");
+
+/** Demande qui n'est plus approuvée au moment de la commande (déjà commandée, reçue, annulée). */
+export const REQUIREMENT_NOT_ORDERABLE_ERROR =
+  "Cette demande n'est plus à commander. Rechargez la liste des demandes.";
 
 export class ProcurementService {
   private readonly VAT_RATE = 19.25; // TVA au Cameroun
@@ -203,32 +208,11 @@ export class ProcurementService {
   }
 
   /**
-   * Quand une commande est réceptionnée globalement, aligner les lignes de commande.
-   * Cela évite les incohérences "commande livrée" mais lignes "pending".
-   */
-  private async markOrderLinesAsDelivered(orderId: number): Promise<void> {
-    await db
-      .update(purchaseOrderLines)
-      .set({
-        deliveryStatus: sql`CASE
-          WHEN ${purchaseOrderLines.deliveryStatus} IN ('pending', 'partial')
-          THEN 'delivered'
-          ELSE ${purchaseOrderLines.deliveryStatus}
-        END`,
-        quantityReceived: sql`CASE
-          WHEN ${purchaseOrderLines.deliveryStatus} IN ('pending', 'partial')
-          THEN ${purchaseOrderLines.quantityOrdered}
-          ELSE ${purchaseOrderLines.quantityReceived}
-        END`,
-        updatedAt: new Date(),
-      })
-      .where(eq(purchaseOrderLines.purchaseOrderId, orderId));
-  }
-
-  /**
    * Crédite le stock d'une pièce lors de la réception fournisseur et trace le mouvement.
+   * Appelée dans la transaction qui écrit la réception : stock et réception sont validés ensemble.
    */
   private async registerPartReception(
+    executor: DbExecutor,
     partId: number,
     quantity: number,
     reason: string,
@@ -238,7 +222,7 @@ export class ProcurementService {
     if (quantity <= 0) return;
 
     // Incrément atomique : deux réceptions simultanées ne s'écrasent pas.
-    const [credited] = await db
+    const [credited] = await executor
       .update(parts)
       .set({ quantity: sql`coalesce(${parts.quantity}, 0) + ${quantity}` })
       .where(eq(parts.id, partId))
@@ -249,7 +233,7 @@ export class ProcurementService {
     const newStock = credited.quantity || 0;
     const previousStock = newStock - quantity;
 
-    await db.insert(partsStockMovements).values({
+    await executor.insert(partsStockMovements).values({
       partId,
       movementType: "in",
       quantity,
@@ -594,7 +578,10 @@ export class ProcurementService {
         .map((item) => [item.requirementId, Math.max(1, Math.floor(item.quantityOrdered))])
     );
     
-    console.log(`📝 Création commande pour fournisseur ${data.supplierId} avec ${requirementIds.length} demandes + ${manualLines.length} lignes manuelles`);
+    log.info(
+      { supplierId: data.supplierId, requirements: requirementIds.length, manualLines: manualLines.length },
+      "création de commande"
+    );
 
     // Calculer les totaux
     let totalHT = 0;
@@ -610,6 +597,12 @@ export class ProcurementService {
         .from(partRequirements)
         .leftJoin(parts, eq(partRequirements.partId, parts.id))
         .where(inArray(partRequirements.id, requirementIds));
+
+      // Seule une demande approuvée se commande. Une demande déjà commandée ou reçue, recommandée,
+      // ferait entrer la pièce deux fois en stock à la livraison.
+      if (requirements.some(({ requirement }) => requirement.status !== 'approved')) {
+        throw new AppError(409, REQUIREMENT_NOT_ORDERABLE_ERROR);
+      }
 
       for (const { requirement, part } of requirements) {
         const requestedQty = Math.max(1, Number(requirement.quantityNeeded || 1));
@@ -671,40 +664,49 @@ export class ProcurementService {
     const expectedDelivery = new Date();
     expectedDelivery.setDate(expectedDelivery.getDate() + 10);
 
-    // Créer la commande
-    const [order] = await db.insert(purchaseOrders).values({
-      orderNumber,
-      supplierId: data.supplierId,
-      orderDate: new Date().toISOString().split('T')[0],
-      expectedDeliveryDate: expectedDelivery.toISOString().split('T')[0],
-      status: 'draft',
-      totalAmountHT: String(totalHT),
-      vatAmount: String(vatAmount),
-      totalAmountTTC: String(totalTTC),
-      discountPercentage: String(discountPct),
-      discountAmount: String(discountAmount),
-      urgency: data.urgency || 'medium',
-      notes: data.notes,
-      createdBy: data.createdBy,
-    }).returning();
+    // Commande, lignes, puis demandes, dans une transaction (ordre des verrous : commande, lignes,
+    // demandes). Le passage à `ordered` ne vaut que pour une demande encore approuvée : une demande
+    // commandée ou reçue entre la lecture et l'écriture fait échouer la création entière.
+    const uniqueRequirementIds = Array.from(new Set(requirementIds));
+    const { order, createdLines } = await db.transaction(async (tx) => {
+      const [order] = await tx.insert(purchaseOrders).values({
+        orderNumber,
+        supplierId: data.supplierId,
+        orderDate: new Date().toISOString().split('T')[0],
+        expectedDeliveryDate: expectedDelivery.toISOString().split('T')[0],
+        status: 'draft',
+        totalAmountHT: String(totalHT),
+        vatAmount: String(vatAmount),
+        totalAmountTTC: String(totalTTC),
+        discountPercentage: String(discountPct),
+        discountAmount: String(discountAmount),
+        urgency: data.urgency || 'medium',
+        notes: data.notes,
+        createdBy: data.createdBy,
+      }).returning();
 
-    // Créer les lignes de commande
-    const createdLines = await db.insert(purchaseOrderLines).values(
-      lines.map(line => ({
-        ...line,
-        purchaseOrderId: order.id,
-      }))
-    ).returning();
+      // Créer les lignes de commande
+      const createdLines = await tx.insert(purchaseOrderLines).values(
+        lines.map(line => ({
+          ...line,
+          purchaseOrderId: order.id,
+        }))
+      ).returning();
 
-    // Mettre à jour le statut des demandes (seulement si présentes)
-    if (requirementIds.length > 0) {
-      await db.update(partRequirements)
-        .set({ 
-          status: 'ordered',
-          updatedAt: new Date(),
-        })
-        .where(inArray(partRequirements.id, requirementIds));
-    }
+      if (uniqueRequirementIds.length > 0) {
+        const ordered = await tx.update(partRequirements)
+          .set({
+            status: 'ordered',
+            updatedAt: new Date(),
+          })
+          .where(and(inArray(partRequirements.id, uniqueRequirementIds), eq(partRequirements.status, 'approved')))
+          .returning({ id: partRequirements.id });
+        if (ordered.length !== uniqueRequirementIds.length) {
+          throw new AppError(409, REQUIREMENT_NOT_ORDERABLE_ERROR);
+        }
+      }
+      return { order, createdLines };
+    });
 
     log.info({ orderId: order.id, orderNumber, lines: createdLines.length }, "commande fournisseur créée");
 
@@ -712,8 +714,6 @@ export class ProcurementService {
       ...order,
       lines: createdLines,
     };
-    
-    console.log(`📦 Returning order with ID: ${result.id}`);
     
     return result;
   }
@@ -833,22 +833,9 @@ export class ProcurementService {
         .leftJoin(partRequirements, eq(purchaseOrderLines.partRequirementId, partRequirements.id))
         .where(eq(purchaseOrderLines.purchaseOrderId, id));
 
-    let lines = await fetchLinesWithDetails();
-
-    // Auto-rattrapage pour les anciennes commandes déjà réceptionnées
-    // dont les lignes sont restées "pending"/"partial" par incohérence historique.
-    const shouldNormalizeDeliveredLines =
-      (order.status === "delivered" || order.status === "completed")
-      && lines.some(({ line }) => {
-        const qtyReceived = Number(line.quantityReceived ?? 0);
-        const qtyOrdered = Number(line.quantityOrdered ?? 0);
-        return line.deliveryStatus === "pending" || line.deliveryStatus === "partial" || qtyReceived < qtyOrdered;
-      });
-
-    if (shouldNormalizeDeliveredLines) {
-      await this.markOrderLinesAsDelivered(id);
-      lines = await fetchLinesWithDetails();
-    }
+    // Lecture seule. Une ligne restée ouverte sur une commande livrée n'est pas alignée ici : un
+    // alignement sans entrée en stock ferait diverger le reçu et le stock.
+    const lines = await fetchLinesWithDetails();
 
     const requesterIds = Array.from(
       new Set(
@@ -922,68 +909,6 @@ export class ProcurementService {
     deliveryCode?: string,
     cancellationReason?: string
   ): Promise<PurchaseOrder> {
-    const [currentOrder] = await db
-      .select()
-      .from(purchaseOrders)
-      .where(eq(purchaseOrders.id, orderId))
-      .limit(1);
-
-    if (!currentOrder) {
-      throw new AppError(404, "Commande introuvable.");
-    }
-
-    if (currentOrder.status === status) {
-      return currentOrder;
-    }
-
-    if (!canTransitionPurchaseOrder(currentOrder.status, status)) {
-      throw new AppError(
-        409,
-        `Impossible de passer la commande de « ${getPurchaseOrderStatusLabel(currentOrder.status)} » à « ${getPurchaseOrderStatusLabel(status)} ».`,
-      );
-    }
-
-    // Règle métier stricte:
-    // la clôture commande ne peut intervenir que lorsque la finance a terminé.
-    if (status === "completed") {
-      const linkedInvoices = await db
-        .select({
-          id: supplierInvoices.id,
-          invoiceNumber: supplierInvoices.invoiceNumber,
-          status: supplierInvoices.status,
-        })
-        .from(supplierInvoices)
-        .where(eq(supplierInvoices.purchaseOrderId, orderId));
-
-      if (linkedInvoices.length === 0) {
-        throw new AppError(409, "Clôture impossible : aucune facture fournisseur n'est rattachée à cette commande.");
-      }
-
-      const unpaidInvoices = linkedInvoices.filter((invoice) => invoice.status !== "paid");
-      if (unpaidInvoices.length > 0) {
-        const pendingRefs = unpaidInvoices
-          .map((invoice) => invoice.invoiceNumber)
-          .filter(Boolean)
-          .join(", ");
-        throw new AppError(
-          409,
-          `Clôture impossible : facture(s) fournisseur non payée(s)${pendingRefs ? ` (${pendingRefs})` : ""}.`,
-        );
-      }
-    }
-
-    const deliveryStockDeltas = status === "delivered"
-      ? await db
-          .select({
-            lineId: purchaseOrderLines.id,
-            partId: purchaseOrderLines.partId,
-            quantityOrdered: purchaseOrderLines.quantityOrdered,
-            quantityReceived: purchaseOrderLines.quantityReceived,
-          })
-          .from(purchaseOrderLines)
-          .where(eq(purchaseOrderLines.purchaseOrderId, orderId))
-      : [];
-
     let actorLabel = userId ? `Utilisateur #${userId}` : "Systeme";
     let actorRole = "";
     if (userId) {
@@ -1010,113 +935,200 @@ export class ProcurementService {
     const normalizedCancellationReason =
       status === "cancellation_requested" ? cancellationReason?.trim() : undefined;
 
-    const traceLine = [
-      `[TRACE_PO] ${new Date().toISOString()}`,
-      `${currentOrder.status} -> ${status}`,
-      `by=${actorLabel}${actorRole}`,
-      deliveryCode ? `deliveryCode=${deliveryCode}` : "",
-      normalizedCancellationReason ? `cancelReason=${encodeURIComponent(normalizedCancellationReason)}` : "",
-    ]
-      .filter(Boolean)
-      .join(" | ");
+    // Deux transitions simultanées (double clic, clôture manuelle pendant la clôture automatique) :
+    // la commande est verrouillée et relue sous verrou, l'écriture est conditionnée au statut relu.
+    // L'appel perdant trouve le statut déjà atteint et repart sans effet : pas de seconde entrée en
+    // stock, pas de trace en double. Ordre des verrous : commande puis factures, comme la clôture
+    // automatique (`three-way-matching-service`).
+    const outcome = await db.transaction(async (tx) => {
+      const [currentOrder] = await tx
+        .select()
+        .from(purchaseOrders)
+        .where(eq(purchaseOrders.id, orderId))
+        .for("no key update");
 
-    const updateData: any = {
-      status,
-      updatedAt: new Date(),
-      notes: this.appendOrderTrace(currentOrder.notes, traceLine),
-    };
+      if (!currentOrder) {
+        throw new AppError(404, "Commande introuvable.");
+      }
 
-    // Si on approuve, enregistrer l'approbateur
-    if (status === 'sent' && userId) {
-      updateData.approvedBy = userId;
-      updateData.approvedAt = new Date();
-    }
+      if (currentOrder.status === status) {
+        return { order: currentOrder, transitioned: false };
+      }
 
-    // Si on marque comme livré, enregistrer le code de livraison et la date
-    if (status === 'delivered' && deliveryCode) {
-      updateData.deliveryCode = deliveryCode;
-      updateData.actualDeliveryDate = new Date();
-    }
-
-    const [updated] = await db
-      .update(purchaseOrders)
-      .set(updateData)
-      .where(eq(purchaseOrders.id, orderId))
-      .returning();
-
-    // Réception complète: aligner automatiquement toutes les lignes
-    // pour éviter "commande livrée" avec lignes restées en attente fournisseur.
-    if (status === "delivered") {
-      await this.markOrderLinesAsDelivered(orderId);
-
-      for (const line of deliveryStockDeltas) {
-        if (!line.partId) continue;
-
-        const alreadyReceived = line.quantityReceived || 0;
-        const ordered = line.quantityOrdered || 0;
-        const quantityToReceive = Math.max(0, ordered - alreadyReceived);
-        if (quantityToReceive <= 0) continue;
-
-        await this.registerPartReception(
-          line.partId,
-          quantityToReceive,
-          `Réception commande #${orderId}`,
-          `Entrée stock depuis commande fournisseur, ligne #${line.lineId}`,
-          userId
+      if (!canTransitionPurchaseOrder(currentOrder.status, status)) {
+        throw new AppError(
+          409,
+          `Impossible de passer la commande de « ${getPurchaseOrderStatusLabel(currentOrder.status)} » à « ${getPurchaseOrderStatusLabel(status)} ».`,
         );
       }
-    }
 
-    // Synchroniser le statut des demandes de pièces liées à la commande
-    if (status === 'partial' || status === 'delivered') {
-      const requirementIdRows = await db
-        .select({
-          requirementId: purchaseOrderLines.partRequirementId,
-        })
-        .from(purchaseOrderLines)
-        .where(
-          and(
-            eq(purchaseOrderLines.purchaseOrderId, orderId),
-            sql`${purchaseOrderLines.partRequirementId} IS NOT NULL`
-          )
-        );
+      // Règle métier stricte:
+      // la clôture commande ne peut intervenir que lorsque la finance a terminé.
+      if (status === "completed") {
+        const linkedInvoices = await tx
+          .select({
+            id: supplierInvoices.id,
+            invoiceNumber: supplierInvoices.invoiceNumber,
+            status: supplierInvoices.status,
+          })
+          .from(supplierInvoices)
+          .where(eq(supplierInvoices.purchaseOrderId, orderId))
+          .for("share");
 
-      const requirementIds = requirementIdRows
-        .map((row) => row.requirementId)
-        .filter((id): id is number => typeof id === 'number');
+        if (linkedInvoices.length === 0) {
+          throw new AppError(409, "Clôture impossible : aucune facture fournisseur n'est rattachée à cette commande.");
+        }
 
-      if (requirementIds.length > 0) {
-        if (status === 'partial') {
-          await db
-            .update(partRequirements)
-            .set({
-              status: 'partially_received',
-              receivedBy: userId ?? null,
-              updatedAt: new Date(),
-            })
-            .where(
-              and(
-                inArray(partRequirements.id, requirementIds),
-                inArray(partRequirements.status, ['ordered'])
-              )
-            );
-        } else {
-          await db
-            .update(partRequirements)
-            .set({
-              status: 'received',
-              receivedBy: userId ?? null,
-              updatedAt: new Date(),
-            })
-            .where(
-              and(
-                inArray(partRequirements.id, requirementIds),
-                inArray(partRequirements.status, ['ordered', 'partially_received'])
-              )
-            );
+        const unpaidInvoices = linkedInvoices.filter((invoice) => invoice.status !== "paid");
+        if (unpaidInvoices.length > 0) {
+          const pendingRefs = unpaidInvoices
+            .map((invoice) => invoice.invoiceNumber)
+            .filter(Boolean)
+            .join(", ");
+          throw new AppError(
+            409,
+            `Clôture impossible : facture(s) fournisseur non payée(s)${pendingRefs ? ` (${pendingRefs})` : ""}.`,
+          );
         }
       }
+
+      const deliveryStockDeltas = status === "delivered"
+        ? await tx
+            .select({
+              lineId: purchaseOrderLines.id,
+              partId: purchaseOrderLines.partId,
+              quantityOrdered: purchaseOrderLines.quantityOrdered,
+              quantityReceived: purchaseOrderLines.quantityReceived,
+              deliveryStatus: purchaseOrderLines.deliveryStatus,
+            })
+            .from(purchaseOrderLines)
+            .where(eq(purchaseOrderLines.purchaseOrderId, orderId))
+            // Ordre des verrous : commande, puis lignes (comme `updateOrderLine`). Une réception de
+            // ligne en cours est attendue : son crédit est déduit, pas recrédité.
+            .for("update")
+        : [];
+
+      const traceLine = [
+        `[TRACE_PO] ${new Date().toISOString()}`,
+        `${currentOrder.status} -> ${status}`,
+        `by=${actorLabel}${actorRole}`,
+        deliveryCode ? `deliveryCode=${deliveryCode}` : "",
+        normalizedCancellationReason ? `cancelReason=${encodeURIComponent(normalizedCancellationReason)}` : "",
+      ]
+        .filter(Boolean)
+        .join(" | ");
+
+      const updateData: any = {
+        status,
+        updatedAt: new Date(),
+        notes: this.appendOrderTrace(currentOrder.notes, traceLine),
+      };
+
+      // Si on approuve, enregistrer l'approbateur
+      if (status === 'sent' && userId) {
+        updateData.approvedBy = userId;
+        updateData.approvedAt = new Date();
+      }
+
+      // Si on marque comme livré, enregistrer le code de livraison et la date
+      if (status === 'delivered' && deliveryCode) {
+        updateData.deliveryCode = deliveryCode;
+        updateData.actualDeliveryDate = new Date();
+      }
+
+      const [written] = await tx
+        .update(purchaseOrders)
+        .set(updateData)
+        .where(and(eq(purchaseOrders.id, orderId), eq(purchaseOrders.status, currentOrder.status)))
+        .returning();
+
+      // Filet : sous le verrou, le statut relu ne peut pas avoir changé.
+      if (!written) {
+        throw new AppError(409, "La commande vient d'être modifiée. Rechargez-la puis réessayez.");
+      }
+
+      // Demandes de pièce avant le stock. Ordre des verrous : commande, lignes, demandes, pièce, le
+      // même que le PATCH d'une demande (demande puis pièce) ; l'ordre inverse s'interbloquait.
+      if (status === 'partial' || status === 'delivered') {
+        const requirementIdRows = await tx
+          .select({
+            requirementId: purchaseOrderLines.partRequirementId,
+          })
+          .from(purchaseOrderLines)
+          .where(
+            and(
+              eq(purchaseOrderLines.purchaseOrderId, orderId),
+              sql`${purchaseOrderLines.partRequirementId} IS NOT NULL`
+            )
+          );
+
+        const requirementIds = requirementIdRows
+          .map((row) => row.requirementId)
+          .filter((id): id is number => typeof id === 'number');
+
+        if (requirementIds.length > 0) {
+          if (status === 'partial') {
+            await tx
+              .update(partRequirements)
+              .set({
+                status: 'partially_received',
+                receivedBy: userId ?? null,
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  inArray(partRequirements.id, requirementIds),
+                  inArray(partRequirements.status, ['ordered'])
+                )
+              );
+          } else {
+            await tx
+              .update(partRequirements)
+              .set({
+                status: 'received',
+                receivedBy: userId ?? null,
+                updatedAt: new Date(),
+              })
+              .where(
+                and(
+                  inArray(partRequirements.id, requirementIds),
+                  inArray(partRequirements.status, ['ordered', 'partially_received'])
+                )
+              );
+          }
+        }
+      }
+
+      // Effets de la réception, dans la transaction : si l'un échoue, la commande n'est pas livrée et
+      // un nouvel essai refait tout. Réception complète : aligner automatiquement toutes les lignes
+      // pour éviter "commande livrée" avec lignes restées en attente fournisseur.
+      if (status === "delivered") {
+        // Mêmes lignes et mêmes quantités pour l'alignement et l'entrée en stock (`deliveryReceipts`).
+        for (const receipt of deliveryReceipts(deliveryStockDeltas)) {
+          await tx
+            .update(purchaseOrderLines)
+            .set({ deliveryStatus: "delivered", quantityReceived: receipt.receivedAfter, updatedAt: new Date() })
+            .where(eq(purchaseOrderLines.id, receipt.lineId));
+          if (receipt.partId && receipt.stockIn > 0) {
+            await this.registerPartReception(
+              tx,
+              receipt.partId,
+              receipt.stockIn,
+              `Réception commande #${orderId}`,
+              `Entrée stock depuis commande fournisseur, ligne #${receipt.lineId}`,
+              userId
+            );
+          }
+        }
+      }
+
+      return { order: written, transitioned: true };
+    });
+
+    if (!outcome.transitioned) {
+      return outcome.order;
     }
+    const updated = outcome.order;
 
     // Étape métier: réception => facture fournisseur auto si absente + relais finance.
     let financeRelay: { created: boolean; invoiceId?: number; invoiceNumber?: string } | undefined;
@@ -1124,11 +1136,11 @@ export class ProcurementService {
       financeRelay = await this.ensureAutoSupplierInvoiceFromOrder(orderId, userId);
     }
 
-    console.log(`📋 Commande #${orderId} passée au statut: ${status}${deliveryCode ? ` (Code: ${deliveryCode})` : ''}`);
+    log.info({ orderId, status, hasDeliveryCode: Boolean(deliveryCode) }, "statut de commande fournisseur mis à jour");
     if (status === "delivered") {
-      const invoiceRef = financeRelay?.invoiceNumber || `#${financeRelay?.invoiceId || "inconnue"}`;
-      console.log(
-        `💼 Relais finance actif pour commande #${orderId}: facture ${invoiceRef} (${financeRelay?.created ? "créée" : "existante"})`
+      log.info(
+        { orderId, invoiceId: financeRelay?.invoiceId, invoiceNumber: financeRelay?.invoiceNumber, created: financeRelay?.created ?? false },
+        "relais finance de la commande livrée",
       );
     }
 
@@ -1154,70 +1166,91 @@ export class ProcurementService {
     userId?: number,
     orderId?: number
   ): Promise<PurchaseOrderLine> {
-    const [currentLine] = await db
-      .select()
+    const [located] = await db
+      .select({ purchaseOrderId: purchaseOrderLines.purchaseOrderId })
       .from(purchaseOrderLines)
       .where(eq(purchaseOrderLines.id, lineId))
       .limit(1);
 
     // Une ligne d'une autre commande que celle de l'URL est introuvable ici.
-    if (!currentLine || (orderId !== undefined && currentLine.purchaseOrderId !== orderId)) {
+    if (!located || (orderId !== undefined && located.purchaseOrderId !== orderId)) {
       throw new AppError(404, "Ligne de commande introuvable.");
     }
 
-    const previousReceived = currentLine.quantityReceived || 0;
-    const nextReceived = data.quantityReceived ?? previousReceived;
-    if (nextReceived > currentLine.quantityOrdered) {
-      throw new AppError(400, `Quantité reçue supérieure au commandé (${currentLine.quantityOrdered}).`);
-    }
-    if (nextReceived < previousReceived) {
-      // Le stock déjà crédité ne serait pas repris : une correction passe par
-      // un ajustement de stock tracé.
-      throw new AppError(409, "Une quantité déjà reçue ne se retire pas ici : passez par un ajustement de stock.");
-    }
-    const nextAccepted = data.quantityAccepted ?? currentLine.quantityAccepted ?? 0;
-    const nextRejected = data.quantityRejected ?? currentLine.quantityRejected ?? 0;
-    if (nextAccepted + nextRejected > nextReceived) {
-      throw new AppError(400, "Pièces acceptées et refusées dépassent la quantité reçue.");
-    }
+    // Ordre des verrous : commande, puis ligne (comme la livraison globale). La ligne est relue sous
+    // verrou ; le stock est crédité dans la même transaction que la quantité reçue.
+    const { updated, previousReceived } = await db.transaction(async (tx) => {
+      await tx
+        .select({ id: purchaseOrders.id })
+        .from(purchaseOrders)
+        .where(eq(purchaseOrders.id, located.purchaseOrderId))
+        .for("no key update");
+      const [currentLine] = await tx
+        .select()
+        .from(purchaseOrderLines)
+        .where(eq(purchaseOrderLines.id, lineId))
+        .for("update");
+      if (!currentLine) {
+        throw new AppError(404, "Ligne de commande introuvable.");
+      }
 
-    // Écriture conditionnelle : si une autre réception a modifié la ligne
-    // entre-temps, rien n'est écrit et le stock n'est pas crédité deux fois.
-    const [updated] = await db
-      .update(purchaseOrderLines)
-      .set({
-        ...data,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(purchaseOrderLines.id, lineId),
-          currentLine.quantityReceived === null
-            ? sql`${purchaseOrderLines.quantityReceived} is null`
-            : eq(purchaseOrderLines.quantityReceived, currentLine.quantityReceived),
-        ),
-      )
-      .returning();
+      const previousReceived = currentLine.quantityReceived || 0;
+      const nextReceived = data.quantityReceived ?? previousReceived;
+      if (nextReceived > currentLine.quantityOrdered) {
+        throw new AppError(400, `Quantité reçue supérieure au commandé (${currentLine.quantityOrdered}).`);
+      }
+      if (nextReceived < previousReceived) {
+        // Le stock déjà crédité ne serait pas repris : une correction passe par
+        // un ajustement de stock tracé.
+        throw new AppError(409, "Une quantité déjà reçue ne se retire pas ici : passez par un ajustement de stock.");
+      }
+      const nextAccepted = data.quantityAccepted ?? currentLine.quantityAccepted ?? 0;
+      const nextRejected = data.quantityRejected ?? currentLine.quantityRejected ?? 0;
+      if (nextAccepted + nextRejected > nextReceived) {
+        throw new AppError(400, "Pièces acceptées et refusées dépassent la quantité reçue.");
+      }
 
-    if (!updated) {
-      throw new AppError(409, "Cette ligne vient d'être modifiée par quelqu'un d'autre. Rechargez la commande.");
-    }
+      // Écriture conditionnelle : si une autre réception a modifié la ligne
+      // entre-temps, rien n'est écrit et le stock n'est pas crédité deux fois.
+      const [updated] = await tx
+        .update(purchaseOrderLines)
+        .set({
+          ...data,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(purchaseOrderLines.id, lineId),
+            currentLine.quantityReceived === null
+              ? sql`${purchaseOrderLines.quantityReceived} is null`
+              : eq(purchaseOrderLines.quantityReceived, currentLine.quantityReceived),
+          ),
+        )
+        .returning();
+
+      if (!updated) {
+        throw new AppError(409, "Cette ligne vient d'être modifiée par quelqu'un d'autre. Rechargez la commande.");
+      }
+
+      const newReceived = updated.quantityReceived || 0;
+      const receivedDelta = Math.max(0, newReceived - previousReceived);
+      if (receivedDelta > 0 && updated.partId) {
+        await this.registerPartReception(
+          tx,
+          updated.partId,
+          receivedDelta,
+          `Réception commande #${updated.purchaseOrderId}`,
+          `Entrée stock depuis mise à jour ligne #${lineId}`,
+          userId
+        );
+      }
+      return { updated, previousReceived };
+    });
 
     log.info({ lineId }, "ligne de commande mise à jour");
 
-    const newReceived = updated.quantityReceived || 0;
-    const receivedDelta = Math.max(0, newReceived - previousReceived);
-
-    // Si la réception augmente, créditer le stock et tracer le mouvement.
+    const receivedDelta = Math.max(0, (updated.quantityReceived || 0) - previousReceived);
     if (receivedDelta > 0 && updated.partId) {
-      await this.registerPartReception(
-        updated.partId,
-        receivedDelta,
-        `Réception commande #${updated.purchaseOrderId}`,
-        `Entrée stock depuis mise à jour ligne #${lineId}`,
-        userId
-      );
-
       // Notifier les personnes concernées sur la quantité réellement ajoutée.
       await this.notifyPartReceived(lineId, updated.partId, receivedDelta);
     }

@@ -84,7 +84,6 @@ const OPAQUE_SCOPES: Record<string, number> = {
   "server/services/incident-service.ts": 1,
   "server/services/preventive-maintenance-service.ts": 1,
   "server/services/procurement-service.ts": 2,
-  "server/services/technician-work-orders-service.ts": 1,
 };
 
 /** Analyse AST des appels à `broadcastUpdate` et à ses alias locaux (`const broadcast = global.broadcastUpdate`). */

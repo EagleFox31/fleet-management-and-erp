@@ -185,22 +185,21 @@ export default function PartRequestsIndex() {
   };
 
   const getRequestActionPermissions = (request: PartRequirement) => {
-    const isLinkedToPurchaseOrder = typeof request.linkedPurchaseOrderId === "number";
-    const orderReadyForReception = ["partial", "delivered", "completed"].includes(
-      request.linkedPurchaseOrderStatus || ""
-    );
+    // Une demande rattachée à une commande se réceptionne depuis la commande (le serveur refuse
+    // la réception directe) : on propose de suivre la commande, jamais d'entrer la pièce ici.
+    const isLinkedToPurchaseOrder =
+      typeof request.linkedPurchaseOrderId === "number" && request.linkedPurchaseOrderStatus !== "cancelled";
     const canApproveReject = canValidatePendingRequest(request);
     const canOrder = request.status === "approved" && isSupplyOperator;
     const canReceive =
       request.status === "ordered" &&
       isSupplyOperator &&
-      (!isLinkedToPurchaseOrder || orderReadyForReception);
+      !isLinkedToPurchaseOrder;
     const canTrackOrder =
       request.status === "ordered" &&
       isSupplyOperator &&
-      isLinkedToPurchaseOrder &&
-      !orderReadyForReception;
-    const canViewLinkedOrder = isLinkedToPurchaseOrder;
+      isLinkedToPurchaseOrder;
+    const canViewLinkedOrder = typeof request.linkedPurchaseOrderId === "number";
 
     return {
       canApproveReject,

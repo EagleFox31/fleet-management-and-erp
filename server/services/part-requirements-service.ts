@@ -1,6 +1,6 @@
 import { db, type DbExecutor, type DbTransaction } from "../db";
 import { partRequirements, parts, vehicles, users, partsStockMovements, purchaseOrderLines, purchaseOrders } from "@shared/schema";
-import { eq, desc, and, sql, inArray } from "drizzle-orm";
+import { eq, desc, and, ne, sql, inArray } from "drizzle-orm";
 import type { PartRequirement, InsertPartRequirement } from "@shared/schema";
 import { PartRequirementWorkflow, type PartRequirementStatus } from "./part-requirements-workflow";
 import { moduleLogger } from "../lib/logger";
@@ -9,12 +9,24 @@ const log = moduleLogger("part-requirements");
 
 
 export const STALE_STATUS_ERROR = "La demande a déjà changé de statut. Rechargez la page.";
+/**
+ * Une pièce commandée entre en stock une seule fois, à la réception de la commande fournisseur
+ * (DÉCISION Q25). La réception directe reste permise pour une demande sans commande.
+ */
+export const ORDER_LINKED_RECEPTION_ERROR = "Réceptionnez cette pièce depuis la commande fournisseur.";
 /** Le chef d'atelier dont l'administrateur a retiré le droit de sortie (`users.can_issue_stock`). */
 export const STOCK_ISSUE_REVOKED_ERROR =
   "Votre droit de sortie de stock a été retiré par l'administrateur. Le magasinier sort la pièce.";
 
 /** Annule la transaction quand une autre requête a déjà fait passer la demande. */
 class StaleStatusError extends Error {}
+
+/** Annule la réception directe d'une demande qu'une commande fournisseur porte. */
+class OrderLinkedReceptionError extends Error {
+  constructor(readonly purchaseOrderId: number) {
+    super("demande rattachée à une commande");
+  }
+}
 
 export class PartRequirementsService {
   private appendAuditNote(existing: string | null | undefined, note: string): string {
@@ -234,6 +246,8 @@ export class PartRequirementsService {
     success: boolean;
     data?: PartRequirement;
     error?: string;
+    /** Code HTTP du refus, quand il n'est pas 400. */
+    status?: number;
     /** Vrai si la sortie s'est faite en dérogation (à notifier au magasin). */
     overrideApplied?: boolean;
   }> {
@@ -398,6 +412,18 @@ export class PartRequirementsService {
           .returning();
         if (!updated) throw new StaleStatusError();
 
+        // Rattachée à une commande non annulée : le stock est crédité par la commande, pas ici.
+        // Lu après le CAS, demande verrouillée : une commande créée entre-temps est vue ici.
+        if (requirement.status === 'received' || requirement.status === 'partially_received') {
+          const [orderLink] = await tx
+            .select({ purchaseOrderId: purchaseOrderLines.purchaseOrderId })
+            .from(purchaseOrderLines)
+            .innerJoin(purchaseOrders, eq(purchaseOrderLines.purchaseOrderId, purchaseOrders.id))
+            .where(and(eq(purchaseOrderLines.partRequirementId, id), ne(purchaseOrders.status, 'cancelled')))
+            .limit(1);
+          if (orderLink) throw new OrderLinkedReceptionError(orderLink.purchaseOrderId);
+        }
+
         const actorId = currentUserId ?? current.requestedBy;
         if (requirement.status === 'received') {
           await this.handlePartDelivery(tx, current, actorId);
@@ -413,6 +439,10 @@ export class PartRequirementsService {
 
       return { success: true, data: updatedRequirement, overrideApplied };
     } catch (error) {
+      if (error instanceof OrderLinkedReceptionError) {
+        log.info({ requirementId: id, purchaseOrderId: error.purchaseOrderId, userId: currentUserId }, 'réception directe refusée : demande rattachée à une commande');
+        return { success: false, error: ORDER_LINKED_RECEPTION_ERROR, status: 409 };
+      }
       if (error instanceof StaleStatusError) {
         log.info({ requirementId: id, targetStatus: requirement.status, userId: currentUserId }, 'transition ignorée : statut déjà modifié par une autre requête');
         return { success: false, error: STALE_STATUS_ERROR };
