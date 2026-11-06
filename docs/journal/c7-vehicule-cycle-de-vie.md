@@ -394,3 +394,9 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - e2e `29-retired-vehicles` (admin seul, le temps réel inter-profils est couvert par le contrat de la trame) : retirer, retrouver dans la liste, fiche en lecture seule, restaurer, ligne retirée, base à `deleted_at NULL`, fiche redevenue modifiable ;
   - `screen-route-roles` : route et menu réservés à l'admin.
 - **Limites** : les onglets internes (OT, historique de statut) n'ont pas été audités bouton par bouton. Une écriture oubliée y reçoit le 409 `VEHICLE_RETIRED` de la garde L3, avec un message lisible.
+## 2026-11-06T01:16:55+01:00 — prefix-middleware-guardrail sous la limite (suite du « À surveiller » de L3)
+
+- **Quoi** : le recensement des montages de `server/` est fait une fois par fichier de test au lieu de cinq.
+- **Pourquoi** : 3,8 s de tests pour une limite de 5 s. Cinq cas relançaient `scanFiles` (analyse TypeScript de chaque fichier serveur), à environ 700 ms par passe.
+- **Comment** : `occurrences()` mémoïse le balayage et rend une copie à chaque appel, pour qu'aucun cas ne modifie le résultat d'un autre. Aucune règle ni limite changée.
+- **Preuve** : deux mesures locales. Tests du fichier : 3,84 s, puis 1,46 s et 1,58 s. Le cas le plus long, qui porte le balayage, passe à 1,3 s ; avant, chacun des cinq cas prenait de 650 à 850 ms. 30 cas verts.
