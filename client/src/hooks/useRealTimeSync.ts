@@ -458,6 +458,21 @@ function upsertWorkOrderInCacheData(
   return currentData;
 }
 
+/**
+ * Fusion d'une mission reçue en temps réel dans le cache. La trame ne porte pas les montants du budget (Q19,
+ * `omitMissionBudget`) : `workflowData.budgetPlan` absent de la trame garde la valeur déjà en cache, que la
+ * relecture de `/api/missions` et `/api/missions/:id` met ensuite à jour pour un rôle lecteur.
+ */
+export function mergeMissionPatch(previous: Record<string, unknown>, mission: Record<string, unknown>): Record<string, unknown> {
+  const merged = { ...previous, ...mission };
+  const previousWorkflow = asRecord(previous.workflowData);
+  const nextWorkflow = asRecord(mission.workflowData);
+  if (previousWorkflow && nextWorkflow && "budgetPlan" in previousWorkflow && !("budgetPlan" in nextWorkflow)) {
+    merged.workflowData = { ...nextWorkflow, budgetPlan: previousWorkflow.budgetPlan };
+  }
+  return merged;
+}
+
 function upsertMissionInCacheData(
   currentData: unknown,
   mission: Record<string, unknown>,
@@ -477,7 +492,7 @@ function upsertMissionInCacheData(
     if (index >= 0) {
       const next = [...currentData];
       const previousItem = asRecord(next[index]) ?? {};
-      next[index] = { ...previousItem, ...mission };
+      next[index] = mergeMissionPatch(previousItem, mission);
       return next;
     }
     if (insertIfMissing) {
@@ -494,7 +509,7 @@ function upsertMissionInCacheData(
       if (index >= 0) {
         const nextMissions = [...currentMissions];
         const previousItem = asRecord(nextMissions[index]) ?? {};
-        nextMissions[index] = { ...previousItem, ...mission };
+        nextMissions[index] = mergeMissionPatch(previousItem, mission);
         return { ...typedData, missions: nextMissions };
       }
       if (insertIfMissing) {
@@ -556,7 +571,7 @@ function patchMissionCaches(mission: Record<string, unknown>, insertIfMissing: b
   if (missionId) {
     queryClient.setQueryData([`/api/missions/${missionId}`], (previousData: unknown) => {
       const previousRecord = asRecord(previousData);
-      return previousRecord ? { ...previousRecord, ...mission } : mission;
+      return previousRecord ? mergeMissionPatch(previousRecord, mission) : mission;
     });
   }
 }
