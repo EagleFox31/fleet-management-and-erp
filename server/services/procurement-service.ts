@@ -923,68 +923,6 @@ export class ProcurementService {
     deliveryCode?: string,
     cancellationReason?: string
   ): Promise<PurchaseOrder> {
-    const [currentOrder] = await db
-      .select()
-      .from(purchaseOrders)
-      .where(eq(purchaseOrders.id, orderId))
-      .limit(1);
-
-    if (!currentOrder) {
-      throw new AppError(404, "Commande introuvable.");
-    }
-
-    if (currentOrder.status === status) {
-      return currentOrder;
-    }
-
-    if (!canTransitionPurchaseOrder(currentOrder.status, status)) {
-      throw new AppError(
-        409,
-        `Impossible de passer la commande de « ${getPurchaseOrderStatusLabel(currentOrder.status)} » à « ${getPurchaseOrderStatusLabel(status)} ».`,
-      );
-    }
-
-    // Règle métier stricte:
-    // la clôture commande ne peut intervenir que lorsque la finance a terminé.
-    if (status === "completed") {
-      const linkedInvoices = await db
-        .select({
-          id: supplierInvoices.id,
-          invoiceNumber: supplierInvoices.invoiceNumber,
-          status: supplierInvoices.status,
-        })
-        .from(supplierInvoices)
-        .where(eq(supplierInvoices.purchaseOrderId, orderId));
-
-      if (linkedInvoices.length === 0) {
-        throw new AppError(409, "Clôture impossible : aucune facture fournisseur n'est rattachée à cette commande.");
-      }
-
-      const unpaidInvoices = linkedInvoices.filter((invoice) => invoice.status !== "paid");
-      if (unpaidInvoices.length > 0) {
-        const pendingRefs = unpaidInvoices
-          .map((invoice) => invoice.invoiceNumber)
-          .filter(Boolean)
-          .join(", ");
-        throw new AppError(
-          409,
-          `Clôture impossible : facture(s) fournisseur non payée(s)${pendingRefs ? ` (${pendingRefs})` : ""}.`,
-        );
-      }
-    }
-
-    const deliveryStockDeltas = status === "delivered"
-      ? await db
-          .select({
-            lineId: purchaseOrderLines.id,
-            partId: purchaseOrderLines.partId,
-            quantityOrdered: purchaseOrderLines.quantityOrdered,
-            quantityReceived: purchaseOrderLines.quantityReceived,
-          })
-          .from(purchaseOrderLines)
-          .where(eq(purchaseOrderLines.purchaseOrderId, orderId))
-      : [];
-
     let actorLabel = userId ? `Utilisateur #${userId}` : "Systeme";
     let actorRole = "";
     if (userId) {
@@ -1011,39 +949,121 @@ export class ProcurementService {
     const normalizedCancellationReason =
       status === "cancellation_requested" ? cancellationReason?.trim() : undefined;
 
-    const traceLine = [
-      `[TRACE_PO] ${new Date().toISOString()}`,
-      `${currentOrder.status} -> ${status}`,
-      `by=${actorLabel}${actorRole}`,
-      deliveryCode ? `deliveryCode=${deliveryCode}` : "",
-      normalizedCancellationReason ? `cancelReason=${encodeURIComponent(normalizedCancellationReason)}` : "",
-    ]
-      .filter(Boolean)
-      .join(" | ");
+    // Deux transitions simultanées (double clic, clôture manuelle pendant la clôture automatique) :
+    // la commande est verrouillée et relue sous verrou, l'écriture est conditionnée au statut relu.
+    // L'appel perdant trouve le statut déjà atteint et repart sans effet : pas de seconde entrée en
+    // stock, pas de trace en double. Ordre des verrous : commande puis factures, comme la clôture
+    // automatique (`three-way-matching-service`).
+    const outcome = await db.transaction(async (tx) => {
+      const [currentOrder] = await tx
+        .select()
+        .from(purchaseOrders)
+        .where(eq(purchaseOrders.id, orderId))
+        .for("no key update");
 
-    const updateData: any = {
-      status,
-      updatedAt: new Date(),
-      notes: this.appendOrderTrace(currentOrder.notes, traceLine),
-    };
+      if (!currentOrder) {
+        throw new AppError(404, "Commande introuvable.");
+      }
 
-    // Si on approuve, enregistrer l'approbateur
-    if (status === 'sent' && userId) {
-      updateData.approvedBy = userId;
-      updateData.approvedAt = new Date();
+      if (currentOrder.status === status) {
+        return { order: currentOrder, transitioned: false, deliveryStockDeltas: [] };
+      }
+
+      if (!canTransitionPurchaseOrder(currentOrder.status, status)) {
+        throw new AppError(
+          409,
+          `Impossible de passer la commande de « ${getPurchaseOrderStatusLabel(currentOrder.status)} » à « ${getPurchaseOrderStatusLabel(status)} ».`,
+        );
+      }
+
+      // Règle métier stricte:
+      // la clôture commande ne peut intervenir que lorsque la finance a terminé.
+      if (status === "completed") {
+        const linkedInvoices = await tx
+          .select({
+            id: supplierInvoices.id,
+            invoiceNumber: supplierInvoices.invoiceNumber,
+            status: supplierInvoices.status,
+          })
+          .from(supplierInvoices)
+          .where(eq(supplierInvoices.purchaseOrderId, orderId))
+          .for("share");
+
+        if (linkedInvoices.length === 0) {
+          throw new AppError(409, "Clôture impossible : aucune facture fournisseur n'est rattachée à cette commande.");
+        }
+
+        const unpaidInvoices = linkedInvoices.filter((invoice) => invoice.status !== "paid");
+        if (unpaidInvoices.length > 0) {
+          const pendingRefs = unpaidInvoices
+            .map((invoice) => invoice.invoiceNumber)
+            .filter(Boolean)
+            .join(", ");
+          throw new AppError(
+            409,
+            `Clôture impossible : facture(s) fournisseur non payée(s)${pendingRefs ? ` (${pendingRefs})` : ""}.`,
+          );
+        }
+      }
+
+      const deliveryStockDeltas = status === "delivered"
+        ? await tx
+            .select({
+              lineId: purchaseOrderLines.id,
+              partId: purchaseOrderLines.partId,
+              quantityOrdered: purchaseOrderLines.quantityOrdered,
+              quantityReceived: purchaseOrderLines.quantityReceived,
+            })
+            .from(purchaseOrderLines)
+            .where(eq(purchaseOrderLines.purchaseOrderId, orderId))
+        : [];
+
+      const traceLine = [
+        `[TRACE_PO] ${new Date().toISOString()}`,
+        `${currentOrder.status} -> ${status}`,
+        `by=${actorLabel}${actorRole}`,
+        deliveryCode ? `deliveryCode=${deliveryCode}` : "",
+        normalizedCancellationReason ? `cancelReason=${encodeURIComponent(normalizedCancellationReason)}` : "",
+      ]
+        .filter(Boolean)
+        .join(" | ");
+
+      const updateData: any = {
+        status,
+        updatedAt: new Date(),
+        notes: this.appendOrderTrace(currentOrder.notes, traceLine),
+      };
+
+      // Si on approuve, enregistrer l'approbateur
+      if (status === 'sent' && userId) {
+        updateData.approvedBy = userId;
+        updateData.approvedAt = new Date();
+      }
+
+      // Si on marque comme livré, enregistrer le code de livraison et la date
+      if (status === 'delivered' && deliveryCode) {
+        updateData.deliveryCode = deliveryCode;
+        updateData.actualDeliveryDate = new Date();
+      }
+
+      const [written] = await tx
+        .update(purchaseOrders)
+        .set(updateData)
+        .where(and(eq(purchaseOrders.id, orderId), eq(purchaseOrders.status, currentOrder.status)))
+        .returning();
+
+      // Filet : sous le verrou, le statut relu ne peut pas avoir changé.
+      if (!written) {
+        throw new AppError(409, "La commande vient d'être modifiée. Rechargez-la puis réessayez.");
+      }
+      return { order: written, transitioned: true, deliveryStockDeltas };
+    });
+
+    if (!outcome.transitioned) {
+      return outcome.order;
     }
-
-    // Si on marque comme livré, enregistrer le code de livraison et la date
-    if (status === 'delivered' && deliveryCode) {
-      updateData.deliveryCode = deliveryCode;
-      updateData.actualDeliveryDate = new Date();
-    }
-
-    const [updated] = await db
-      .update(purchaseOrders)
-      .set(updateData)
-      .where(eq(purchaseOrders.id, orderId))
-      .returning();
+    const updated = outcome.order;
+    const deliveryStockDeltas = outcome.deliveryStockDeltas;
 
     // Réception complète: aligner automatiquement toutes les lignes
     // pour éviter "commande livrée" avec lignes restées en attente fournisseur.
@@ -1125,11 +1145,11 @@ export class ProcurementService {
       financeRelay = await this.ensureAutoSupplierInvoiceFromOrder(orderId, userId);
     }
 
-    console.log(`📋 Commande #${orderId} passée au statut: ${status}${deliveryCode ? ` (Code: ${deliveryCode})` : ''}`);
+    log.info({ orderId, status, hasDeliveryCode: Boolean(deliveryCode) }, "statut de commande fournisseur mis à jour");
     if (status === "delivered") {
-      const invoiceRef = financeRelay?.invoiceNumber || `#${financeRelay?.invoiceId || "inconnue"}`;
-      console.log(
-        `💼 Relais finance actif pour commande #${orderId}: facture ${invoiceRef} (${financeRelay?.created ? "créée" : "existante"})`
+      log.info(
+        { orderId, invoiceId: financeRelay?.invoiceId, invoiceNumber: financeRelay?.invoiceNumber, created: financeRelay?.created ?? false },
+        "relais finance de la commande livrée",
       );
     }
 

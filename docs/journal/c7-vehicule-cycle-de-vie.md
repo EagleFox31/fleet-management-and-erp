@@ -524,3 +524,16 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
   - la suite complète de contrats est verte : 251 fichiers, 3 080 tests.
 - **Prévention** : `tests/unit/support/env-restore.test.ts` échoue si un contrat affecte une variable d'environnement absente de `FILE_SCOPED_ENV`.
 - **Leçon** : en `isolate: false`, l'état du processus (env, singletons) passe d'un fichier à l'autre. Une variable que les tests modifient doit être restaurée par le setup commun, pas laissée à la discipline de chaque fichier.
+
+## 2026-11-06 03:29 — Transition manuelle de commande fournisseur : verrou, relecture et CAS
+
+- **Quoi** : `updateOrderStatus` (`procurement-service.ts`) lisait la commande, vérifiait la transition, puis écrivait sous `WHERE id` seul. Deux réceptions simultanées (double clic sur « livrée ») passaient toutes deux : deux entrées en stock, deux traces, et la seconde écriture écrasait les notes écrites entre-temps. La clôture manuelle lisait les factures liées sans verrou : un règlement annulé en cours n'était pas vu.
+- **Comment** :
+  - transaction ; commande lue `FOR NO KEY UPDATE`, factures liées `FOR SHARE` (même ordre que la clôture automatique : commande puis factures) ;
+  - statut déjà atteint sous verrou : retour sans écriture ni effet ;
+  - `UPDATE … WHERE id AND status = <statut relu> RETURNING`, 409 lisible si rien n'est écrit ;
+  - effets (lignes livrées, entrée en stock, demandes de pièce, relais finance, notification) réservés à l'appel qui a écrit ;
+  - deux `console.log` migrés vers `log.info`.
+- **Garde-fou** : `status-update-cas-hygiene` résout désormais `.set(variable)` et `.set({ ...variable })` vers le littéral local. Il a révélé deux écritures de statut cachées (`technician-work-orders-service`, `work-order-items-service`), gelées dans `FROZEN`. Les contenus illisibles (paramètre, `req.body`, appel) sont gelés dans `FROZEN_OPAQUE` : 15 écritures, dont 6 dans `storage.ts`. Les deux listes sont à cliquet.
+- **Preuve** : `tests/integration/purchase-order-status-cas.test.ts` (3 tests). Deux réceptions alignées derrière un verrou donnent une trace, un mouvement et un stock de 2. Une clôture pendant qu'une facture repasse non soldée attend, puis répond 409. Témoin et rejeu : une seule trace. Avec l'ancien service, les deux cas concurrents échouent. tsc 0 ; unitaires 3 093 ; contrats achats et factures 27 fichiers, 338 tests.
+- **Pourquoi** : même motif que la clôture automatique (#557, #558). Un statut qui déclenche du stock ne s'écrit qu'une fois.
