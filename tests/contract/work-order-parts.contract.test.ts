@@ -314,6 +314,57 @@ describe("POST /api/work-orders/:id/awaiting-parts", { timeout: 120000 }, () => 
   });
 });
 
+describe("POST /api/work-orders/:id/part-requirements/:id/issue", { timeout: 120000 }, () => {
+  // La route contrôle le statut de l'OT sans verrou, puis sort la pièce. Un OT annulé dans
+  // l'intervalle ne doit rien recevoir. Déterministe : une connexion tient le verrou de ligne
+  // de l'OT, la sortie s'y bloque, l'OT est annulé, puis le verrou est libéré.
+  it("OT annulé pendant la sortie : 409 lisible, aucune pièce ne quitte le stock", async () => {
+    const { user, part, workOrder, cookie } = await seed("warehouse", 3);
+    const [requirement] = await db
+      .insert(partRequirements)
+      .values({
+        partId: part.id,
+        workOrderId: workOrder.id,
+        quantityNeeded: 2,
+        reason: "TEST sortie OT annulé",
+        status: "received",
+        requestedBy: user.id,
+      })
+      .returning();
+
+    const client = await pool.connect();
+    let res: Awaited<ReturnType<typeof call>>;
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT id FROM work_orders WHERE id = $1 FOR UPDATE", [workOrder.id]);
+      const holderPid = (await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid as number;
+      const pending = call("POST", `/api/work-orders/${workOrder.id}/part-requirements/${requirement.id}/issue`, {
+        cookie,
+        body: {},
+      });
+      await waitForBlockedWriter(holderPid);
+      await client.query("UPDATE work_orders SET status = 'cancelled' WHERE id = $1", [workOrder.id]);
+      await client.query("COMMIT");
+      res = await pending;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body.message).toContain("vient d'être terminé ou annulé");
+    const state = await stateOf(workOrder.id, part.id);
+    expect(state.status).toBe("cancelled");
+    expect(state.stock).toBe(3);
+    expect(state.lines).toHaveLength(0);
+    expect(state.requirements.map((r) => r.status)).toEqual(["received"]);
+    const movements = await db.select().from(partsStockMovements).where(eq(partsStockMovements.partId, part.id));
+    expect(movements).toHaveLength(0);
+  });
+});
+
 /** Attend qu'une requête soit bloquée PAR la connexion qui tient le verrou. */
 async function waitForBlockedWriter(holderPid: number) {
   for (let i = 0; i < 200; i++) {

@@ -536,3 +536,12 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
   - les trames WebSocket restent chez l'appelant, inchangées.
 - **Pourquoi** : la route lisait l'OT puis écrivait sous `eq(id)` seul. Un chef d'atelier qui annulait l'OT entre les deux voyait son annulation écrasée en « en attente de pièces ». Le contrat de course (verrou de ligne tenu, annulation, libération) répond 200 et écrase sur l'ancien code ; avec le correctif, 409 et l'annulation reste. Le cliquet T4 (`write-routes-frozen.ts`) perd deux routes.
 - **Suite** : lot 2 (statut du technicien), lot 3 (PATCH générique : `updateWorkOrder` refuse `status`).
+
+## 2026-11-06 — Sortie de pièce sur un OT annulé pendant la sortie (réserve sécurité #567)
+
+- **Quoi** : la sortie de pièce (`POST /api/work-orders/:id/part-requirements/:id/issue`) verrouille l'OT et revérifie son statut dans la transaction de sortie. Un OT terminé ou annulé entre-temps répond 409 lisible, et rien ne quitte le stock.
+- **Comment** :
+  - dans `onTransition`, avant `addPartToWorkOrder`, `SELECT status FROM work_orders … FOR UPDATE`. Un statut `completed` ou `cancelled` lève une `AppError(409)` ;
+  - l'erreur annule toute la transaction : la demande reste `received`, ni ligne `parts_used` ni mouvement ;
+  - ordre des verrous : la demande (compare-and-set du service), puis l'OT, puis la pièce. La demande de pièce (`work-order-part-request.ts`) prend l'OT puis la pièce, et ne touche aucune demande existante : il n'y a donc pas de cycle.
+- **Pourquoi** : le contrôle « OT terminé ou annulé » de la route lisait le statut sans verrou, et `addPartToWorkOrder` ne le recontrôle pas. Dans la fenêtre, une pièce pouvait donc sortir du stock sur un OT annulé. Le contrat de course (verrou de l'OT tenu, annulation, libération) répond 200 sur 6271754d : la pièce sort et la demande passe `issued`. Avec le correctif, il répond 409, le stock est intact et il n'y a aucun mouvement.

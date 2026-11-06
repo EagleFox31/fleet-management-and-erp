@@ -19,12 +19,12 @@ import {
   type PartRequestResult,
 } from "../services/work-order-part-request";
 import { transitionWorkOrderStatus } from "../services/work-order-status-transition";
-import { isAppError } from "../lib/app-error";
+import { AppError, isAppError } from "../lib/app-error";
 import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 
 const log = moduleLogger("work-order-parts");
-import { partRequirements, parts, users } from "@shared/schema";
+import { partRequirements, parts, users, workOrders } from "@shared/schema";
 import { alertService } from "../services/alert-service";
 import { workOrderCostScope, workOrderStaffScope } from "../lib/work-order-realtime-scope";
 
@@ -269,6 +269,9 @@ router.post("/:workOrderId/parts", isTechnician, async (req, res) => {
   }
 });
 
+const WORK_ORDER_CLOSED_DURING_ISSUE_ERROR =
+  "Cet ordre de travail vient d'être terminé ou annulé : la pièce n'est pas sortie du stock.";
+
 router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssuer, async (req, res, next) => {
   try {
     const workOrderId = parseRouteId(req.params.workOrderId, "ID invalide");
@@ -370,6 +373,17 @@ router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssue
         overrideIssueReason,
         onTransition: async (tx) => {
           try {
+            // Le statut lu plus haut n'est pas verrouillé : un OT annulé ou terminé
+            // entre-temps ne doit recevoir aucune pièce. Ordre des verrous : demande
+            // (compare-and-set du service), OT, puis pièce, comme la demande de pièce.
+            const [current] = await tx
+              .select({ status: workOrders.status })
+              .from(workOrders)
+              .where(eq(workOrders.id, workOrderId))
+              .for("update");
+            if (!current || current.status === "completed" || current.status === "cancelled") {
+              throw new AppError(409, WORK_ORDER_CLOSED_DURING_ISSUE_ERROR);
+            }
             partUsed = await storage.addPartToWorkOrder(
               { workOrderId, partId, quantity: quantityNeeded, unitPrice },
               user?.id,
