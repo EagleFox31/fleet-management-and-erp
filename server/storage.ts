@@ -10,6 +10,7 @@ import { isAdminGuardDbRefusal, isCheckViolation } from "./lib/pg-errors";
 import { uploadedFileCandidates } from "./lib/uploaded-file";
 import { deleteFile } from "./middleware/upload";
 import { vehicleStatusService } from "./services/vehicle-status-service";
+import { applyWorkOrderStatusEffects } from "./services/work-order-status-effects";
 import {
   users, vehicles, maintenanceSchedules, workOrders, parts, partsUsed, fuelRecords, alerts,
   vehicleDocuments, statusHistory, faultCatalog, partsStockMovements, partRequirements,
@@ -1551,20 +1552,10 @@ export class DatabaseStorage implements IStorage {
         .where(eq(workOrders.id, id))
         .returning();
 
-      // Logique d'automatisation des changements de statut
-      if (workOrder.status && workOrder.status !== currentWorkOrder.status) {
-        if (workOrder.status === 'completed' && updatedWorkOrder.vehicleId) {
-          // Remettre automatiquement le véhicule en service quand l'OT est terminé
-          await this.setVehicleToOperational(updatedWorkOrder.vehicleId, id);
-        } else if (workOrder.status === 'in_progress' && updatedWorkOrder.vehicleId) {
-          // S'assurer que le véhicule est en maintenance quand l'OT est en cours
-          await this.setVehicleToMaintenance(updatedWorkOrder.vehicleId, id);
-        }
-        if (workOrder.status === 'completed') {
-          // P3-1 : un OT préventif clôturé fait avancer l'échéance de son plan.
-          const { preventiveMaintenanceService } = await import("./services/preventive-maintenance-service");
-          await preventiveMaintenanceService.onWorkOrderCompleted(id);
-        }
+      // Effets du changement de statut (véhicule, plan préventif), partagés avec
+      // `transitionWorkOrderStatus`.
+      if (workOrder.status) {
+        await applyWorkOrderStatusEffects(updatedWorkOrder, currentWorkOrder.status);
       }
 
       // Retour enrichi (technicianName, createdByName…) — le `.returning()` brut
