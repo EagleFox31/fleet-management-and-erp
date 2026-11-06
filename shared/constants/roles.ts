@@ -189,6 +189,11 @@ export const MISSION_BUDGET_APPROVE_ROLES = ["admin", "management"] as const sat
 export const MISSION_BUDGET_DISBURSE_ROLES = ["admin", "secretary", "logistics"] as const satisfies readonly AppRole[];
 /** Lecture (liste, détail, besoin du jour, destinations) : qui saisit, approuve ou décaisse lit le budget. */
 export const MISSION_BUDGET_READ_ROLES = ["admin", "logistics", "management", "secretary"] as const satisfies readonly AppRole[];
+/**
+ * Solde d'une mission terminée (Q18) : le reliquat revient au compte source, une écriture de trésorerie.
+ * Aligné sur TREASURY_WRITE_ROLES (qui tient la caisse rend le reliquat), déclaré à part pour rester explicite.
+ */
+export const MISSION_BUDGET_SETTLE_ROLES = ["admin", "secretary"] as const satisfies readonly AppRole[];
 
 /**
  * Factures en attente de paiement et retenues à la source (lot F1, `/api/finance/...`) : lecture.

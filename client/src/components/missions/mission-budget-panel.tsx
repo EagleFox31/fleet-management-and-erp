@@ -8,7 +8,7 @@
  */
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Landmark, Pencil, Plus, Trash2, Wallet } from "lucide-react";
+import { CheckCircle2, Landmark, Pencil, Plus, Trash2, Undo2, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -24,7 +24,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { formatXaf, MISSION_BUDGET_STATUS_CLASSES, missionBudgetActions, remainingOf } from "@/lib/mission-budget-ui";
 import { isoDateInZone } from "@shared/contracts/kpi-period";
-import type { FuelRechargeSourceAccount } from "@shared/contracts/treasury";
+import { TREASURY_BASE_PATH, type FuelRechargeSourceAccount } from "@shared/contracts/treasury";
 import {
   MISSION_BUDGETS_DAILY_NEED_PATH,
   MISSION_BUDGETS_PATH,
@@ -39,6 +39,7 @@ import {
   missionBudgetExpenseSchema,
   missionBudgetExpensesResponseSchema,
   missionBudgetPath,
+  missionBudgetSettlePath,
   missionBudgetSchema,
   missionBudgetsResponseSchema,
   missionDestinationsResponseSchema,
@@ -161,6 +162,19 @@ export function MissionBudgetPanel({ missionId, missionStatus, role }: { mission
     onError: fail("Décaissement refusé"),
   });
 
+  // Solde (Q18) : le reliquat revient au compte source, les soldes de trésorerie sont relus.
+  const settleMutation = useMutation({
+    mutationFn: async ({ id }: { id: number }) =>
+      missionBudgetSchema.parse(await (await apiRequest("POST", missionBudgetSettlePath(id))).json()),
+    onSuccess: (saved) => {
+      applyBudget(saved);
+      queryClient.invalidateQueries({ queryKey: missionBudgetExpensesKey(saved.id) });
+      queryClient.invalidateQueries({ predicate: (q) => String(q.queryKey[0] ?? "").startsWith(TREASURY_BASE_PATH) });
+      toast({ title: "Budget soldé", description: "Le reliquat non justifié est revenu au compte source." });
+    },
+    onError: fail("Solde refusé"),
+  });
+
   const addExpenseMutation = useMutation({
     mutationFn: async ({ budgetId, values }: { budgetId: number; values: ExpenseForm }) => {
       const res = await apiRequest("POST", missionBudgetExpensesPath(budgetId), {
@@ -211,6 +225,7 @@ export function MissionBudgetPanel({ missionId, missionStatus, role }: { mission
 
   // Argent : un seul envoi par clic (AGENTS.md §10), l'identifiant passe par les variables.
   const submitDisburse = useSingleFlightMutate(disburseMutation.mutate);
+  const submitSettle = useSingleFlightMutate(settleMutation.mutate);
   const submitExpense = useSingleFlightMutate(addExpenseMutation.mutate);
   const submitDelete = useSingleFlightMutate(deleteExpenseMutation.mutate);
   const submitApprove = useSingleFlightMutate(approveMutation.mutate);
@@ -257,6 +272,11 @@ export function MissionBudgetPanel({ missionId, missionStatus, role }: { mission
                 {MISSION_BUDGET_STATUS_LABELS[budget.status]}
               </Badge>
             )}
+            {budget?.settledAt && (
+              <Badge variant="outline" data-testid="mission-budget-settled">
+                Soldé le {new Date(budget.settledAt).toLocaleDateString("fr-FR")}
+              </Badge>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             {(actions.create || actions.edit) && (
@@ -280,6 +300,18 @@ export function MissionBudgetPanel({ missionId, missionStatus, role }: { mission
               <Button size="sm" onClick={() => { setAccountId(""); setDisburseOpen(true); }} data-testid="button-mission-budget-disburse">
                 <Landmark className="h-3.5 w-3.5 mr-1" />
                 Décaisser
+              </Button>
+            )}
+            {budget && actions.settle && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => submitSettle({ id: budget.id })}
+                disabled={settleMutation.isPending}
+                data-testid="button-mission-budget-settle"
+              >
+                <Undo2 className="h-3.5 w-3.5 mr-1" />
+                Solder
               </Button>
             )}
           </div>
