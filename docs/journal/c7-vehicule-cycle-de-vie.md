@@ -537,26 +537,6 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
 - **Prévention** : `tests/unit/support/env-restore.test.ts` échoue si un contrat affecte une variable d'environnement absente de `FILE_SCOPED_ENV`.
 - **Leçon** : en `isolate: false`, l'état du processus (env, singletons) passe d'un fichier à l'autre. Une variable que les tests modifient doit être restaurée par le setup commun, pas laissée à la discipline de chaque fichier.
 
-## 2026-11-06 — Transition de statut d'OT dédiée, lot 1 (work-order-parts)
-
-- **Quoi** : `transitionWorkOrderStatus` (`server/services/work-order-status-transition.ts`) devient l'écriture dédiée du statut d'un OT. Les deux appels de `storage.updateWorkOrder` de `work-order-parts.routes.ts` passent par elle : la mise en attente de pièces (`awaiting_parts`) et la reprise après sortie de pièce (`in_progress`).
-- **Comment** :
-  - la fonction applique elle-même `checkWorkOrderTransition` : une transition interdite répond 409 lisible, même appelée directement ;
-  - l'écriture est un compare-and-set (`WHERE id AND status = statut lu`) : une écriture concurrente gagnée répond 409, ou ne fait rien en mode `skip` ;
-  - le mode `skip` sert la reprise après sortie : la pièce est déjà sortie, et un OT annulé entre-temps ne doit ni être rouvert ni faire échouer la sortie ;
-  - les effets sur le parc (véhicule en maintenance ou en service, échéance préventive) sont extraits dans `work-order-status-effects.ts`, que `storage.updateWorkOrder` appelle aussi ;
-  - les trames WebSocket restent chez l'appelant, inchangées.
-- **Pourquoi** : la route lisait l'OT puis écrivait sous `eq(id)` seul. Un chef d'atelier qui annulait l'OT entre les deux voyait son annulation écrasée en « en attente de pièces ». Le contrat de course (verrou de ligne tenu, annulation, libération) répond 200 et écrase sur l'ancien code ; avec le correctif, 409 et l'annulation reste. Le cliquet T4 (`write-routes-frozen.ts`) perd deux routes.
-- **Suite** : lot 2 (statut du technicien), lot 3 (PATCH générique : `updateWorkOrder` refuse `status`).
-
-## 2026-11-06 — Sortie de pièce sur un OT annulé pendant la sortie (réserve sécurité #567)
-
-- **Quoi** : la sortie de pièce (`POST /api/work-orders/:id/part-requirements/:id/issue`) verrouille l'OT et revérifie son statut dans la transaction de sortie. Un OT terminé ou annulé entre-temps répond 409 lisible, et rien ne quitte le stock.
-- **Comment** :
-  - dans `onTransition`, avant `addPartToWorkOrder`, `SELECT status FROM work_orders … FOR UPDATE`. Un statut `completed` ou `cancelled` lève une `AppError(409)` ;
-  - l'erreur annule toute la transaction : la demande reste `received`, ni ligne `parts_used` ni mouvement ;
-  - ordre des verrous : la demande (compare-and-set du service), puis l'OT, puis la pièce. La demande de pièce (`work-order-part-request.ts`) prend l'OT puis la pièce, et ne touche aucune demande existante : il n'y a donc pas de cycle.
-- **Pourquoi** : le contrôle « OT terminé ou annulé » de la route lisait le statut sans verrou, et `addPartToWorkOrder` ne le recontrôle pas. Dans la fenêtre, une pièce pouvait donc sortir du stock sur un OT annulé. Le contrat de course (verrou de l'OT tenu, annulation, libération) répond 200 sur 6271754d : la pièce sort et la demande passe `issued`. Avec le correctif, il répond 409, le stock est intact et il n'y a aucun mouvement.
 ## 2026-11-06 — Clôture automatique de commande : verrou et CAS, plus de note perdue
 
 - **Contexte** : `autoCloseDeliveredOrderIfFinanceDone` (`three-way-matching-service.ts`) passe la commande de `delivered` à `completed` quand toutes ses factures sont soldées. C'était la dernière écriture de statut de ce fichier sans condition sur l'état lu, gelée dans `status-update-cas-hygiene`.
