@@ -9,6 +9,7 @@ import type { FeatureKey } from "@shared/feature-flags";
 import { FEATURE_GATED_HREFS, LOT_SCREENS, canAccessLotScreen } from "@/config/lot-screens";
 import { CDC_SCREENS, screenFeatures } from "@/config/cdc-screens";
 import {
+  Archive,
   BarChart3,
   Truck,
   Wrench,
@@ -183,6 +184,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ className, mobileOpen, onMobil
             menuKey: "administration",
             submenu: [
               { label: "Utilisateurs", href: "/admin/users", icon: User },
+              { label: "Véhicules retirés", href: "/admin/retired-vehicles", icon: Archive },
               { label: "Workflows", href: "/workflows", icon: Workflow },
               { label: "Paramètres", href: "/settings", icon: Settings },
             ]

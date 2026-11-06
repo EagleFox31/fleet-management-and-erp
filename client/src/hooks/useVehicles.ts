@@ -67,6 +67,43 @@ export function useUpdateVehicle() {
   });
 }
 
+/** Véhicule retiré de la flotte, tel que renvoyé par `GET /api/vehicles/archived` (admin). */
+export type RetiredVehicle = {
+  id: number;
+  registration_number: string;
+  brand: string | null;
+  model: string | null;
+  status: string | null;
+  archived_at: string;
+};
+
+export const RETIRED_VEHICLES_KEY = "/api/vehicles/archived";
+
+/**
+ * Remise d'un véhicule retiré dans la flotte (admin). L'id passe par les variables (AGENTS.md §10).
+ * Couche 1 : la ligne quitte la liste des retirés dès le succès ; couche 3 : resync partagé avec la
+ * suppression (`invalidateVehicleLifecycleQueries`) ; la couche 2 est la trame `vehicle_restored`.
+ */
+export function useRestoreVehicle(callbacks: {
+  onSuccess?: (response: RestoreVehicleResponse, variables: { id: number }) => void;
+  onError?: (error: unknown) => void;
+} = {}) {
+  return useMutation({
+    mutationFn: async ({ id }: { id: number }) => {
+      const res = await apiRequest("POST", `/api/vehicles/${id}/restore`);
+      return (await res.json()) as RestoreVehicleResponse;
+    },
+    onSuccess: (response, variables) => {
+      queryClient.setQueryData<RetiredVehicle[]>([RETIRED_VEHICLES_KEY], (rows) => rows?.filter((row) => row.id !== variables.id));
+      invalidateVehicleLifecycleQueries(queryClient, "vehicle_restored", variables.id);
+      callbacks.onSuccess?.(response, variables);
+    },
+    onError: (error) => callbacks.onError?.(error),
+  });
+}
+
+export type RestoreVehicleResponse = { message: string; result: { restored: boolean } };
+
 export function useDeleteVehicle() {
   return useMutation({
     mutationFn: async (id: number) => {

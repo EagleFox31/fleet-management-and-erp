@@ -132,9 +132,11 @@ const getColorForDocumentType = (type: string): string => {
 
 interface VehicleDocumentsProps {
   vehicleId: number;
+  /** Véhicule retiré : consultation et téléchargement seulement (le serveur refuse l'écriture en 409). */
+  readOnly?: boolean;
 }
 
-export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
+export function VehicleDocuments({ vehicleId, readOnly = false }: VehicleDocumentsProps) {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { user } = useAuth();
@@ -142,9 +144,9 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<VehicleDocument | null>(null);
-  const canRequestRenewal = ["admin", "workshop_manager", "secretary", "logistics"].includes(user?.role || "");
+  const canRequestRenewal = !readOnly && ["admin", "workshop_manager", "secretary", "logistics"].includes(user?.role || "");
   // Même garde que DELETE /api/documents/:id (isWorkshopManager).
-  const canDeleteDocument = ["admin", "workshop_manager"].includes(user?.role || "");
+  const canDeleteDocument = !readOnly && ["admin", "workshop_manager"].includes(user?.role || "");
 
   // Formulaire d'upload
   const [uploadForm, setUploadForm] = useState({
@@ -477,6 +479,7 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
             Gérez les documents administratifs et techniques du véhicule
           </CardDescription>
         </div>
+        {!readOnly && (
         <Dialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}>
           <DialogTrigger asChild>
             <Button size="sm">
@@ -610,6 +613,7 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
             </form>
           </DialogContent>
         </Dialog>
+        )}
       </CardHeader>
       
       <CardContent>
@@ -626,13 +630,15 @@ export function VehicleDocuments({ vehicleId }: VehicleDocumentsProps) {
           <div className="text-center py-6 text-muted-foreground">
             <File className="h-12 w-12 mx-auto mb-2 opacity-30" />
             <p>Aucun document n'a été téléchargé pour ce véhicule.</p>
-            <Button 
-              variant="link" 
-              onClick={() => setIsUploadDialogOpen(true)}
-              className="mt-2"
-            >
-              Ajouter votre premier document
-            </Button>
+            {!readOnly && (
+              <Button
+                variant="link"
+                onClick={() => setIsUploadDialogOpen(true)}
+                className="mt-2"
+              >
+                Ajouter votre premier document
+              </Button>
+            )}
           </div>
         ) : (
           <PremiumDataTable
