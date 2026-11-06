@@ -14,8 +14,8 @@ function drizzleNames(): string[] {
   for (const table of [treasuryAccounts, treasuryEntries, paymentInstruments]) {
     const { checks, columns, uniqueConstraints } = getTableConfig(table);
     names.push(...checks.map((c) => c.name));
-    names.push(...uniqueConstraints.map((u) => u.getName()));
-    for (const column of columns) if (column.isUnique) names.push(column.uniqueName!);
+    names.push(...uniqueConstraints.flatMap((u) => { const n = u.getName(); return n ? [n] : []; }));
+    for (const column of columns) if (column.isUnique && column.uniqueName) names.push(column.uniqueName);
   }
   return names.sort();
 }

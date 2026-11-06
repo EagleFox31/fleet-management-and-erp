@@ -23,6 +23,7 @@ function row(invoiceId: number, overrides: Partial<InvoiceAwaitingPayment> = {})
     withholdingFrozen: false,
     depositedAt: null,
     daysSinceDeposit: null,
+    balanceDue: 97800,
     ...overrides,
   };
 }

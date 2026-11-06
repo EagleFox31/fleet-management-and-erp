@@ -67,7 +67,7 @@ async function verdicts(expiry: string) {
   seed(expiry);
   const today = new Date();
   return {
-    eligibility: getMissionEligibility({ insuranceExpiry: utcDate(expiry) }, utcDate(TODAY, 10)).blockers.some((b) => b.code === "insurance"),
+    eligibility: getMissionEligibility({ status: "operational", insuranceExpiry: utcDate(expiry) }, utcDate(TODAY, 10)).blockers.some((b) => b.code === "insurance"),
     status: (await assuranceStatus()) === "expired",
     stats: (await service.getDocumentStats()).expiredAssurance === 1,
     list: (await service.getExpiredDocuments()).length === 1,
@@ -103,7 +103,7 @@ describe("jour J : éligibilité mission (règle de référence)", () => {
     [0, false, "le jour de l'échéance (dernier jour de validité)"],
     [-1, true, "le lendemain de l'échéance (échéance hier)"],
   ])("échéance dans %i jour(s) -> bloquant=%s (%s)", (days, blocked) => {
-    const result = getMissionEligibility({ insuranceExpiry: utcDate(offset(days)) }, utcDate(TODAY, 10));
+    const result = getMissionEligibility({ status: "operational", insuranceExpiry: utcDate(offset(days)) }, utcDate(TODAY, 10));
     expect(result.blockers.some((b) => b.code === "insurance")).toBe(blocked);
   });
 });
@@ -190,7 +190,7 @@ describe.each(["Africa/Douala", "UTC"])("D4 : date UTC partout (machine en %s)",
     vi.setSystemTime(new Date(instant));
     const now = new Date();
     return [
-      getMissionEligibility({ insuranceExpiry: "2026-11-04" }, now).blockers.some((b) => b.code === "insurance"),
+      getMissionEligibility({ status: "operational", insuranceExpiry: "2026-11-04" }, now).blockers.some((b) => b.code === "insurance"),
       (await assuranceStatus()) === "expired",
       (await service.getDocumentStats()).expiredAssurance === 1,
       (await service.getExpiredDocuments()).length === 1,

@@ -14,7 +14,7 @@ import * as schema from "../../../shared/schema";
  * Le premier `push` (base neuve) passe, les suivants plantent ou réécrivent l'index.
  * Incident du 2026-11-03 sur ux_part_specifications_part_name (part_id, lower(specification_name)).
  */
-const tables = Object.values(schema).filter((value): value is PgTable => value instanceof PgTable);
+const tables = Object.values(schema as Record<string, unknown>).filter((value): value is PgTable => value instanceof PgTable);
 
 const offenders = tables.flatMap((table) => {
   const { name, indexes } = getTableConfig(table);

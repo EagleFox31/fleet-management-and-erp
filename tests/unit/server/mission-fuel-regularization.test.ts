@@ -87,7 +87,7 @@ describe("rejeu d'un plein : même soumission ou 409", () => {
     expect(isSameFuelSubmission(moved, sent)).toBe(true);
   });
 
-  it.each([
+  it.each<[Parameters<typeof buildFuelConsumptionNotes>[0]]>([
     [{ destination: "Kribi", clientName: "ACME" }],
     [{ isPreDeparture: true, destination: "Kribi" }],
     [{ notes: "a | Destination: piège", destination: "Kribi" }],

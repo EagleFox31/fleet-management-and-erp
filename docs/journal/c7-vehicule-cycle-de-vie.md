@@ -743,3 +743,9 @@ WHERE po.status IN ('delivered', 'completed')
     - voie qualité ouverte à toute transition : 1 échec ;
     - garde d'idempotence de `setVehicleToMaintenance` retirée : 1 échec (double trace) ;
   - suites complètes vertes : tsc 0, 3 127 tests unitaires, 3 128 tests de contrat.
+## 2026-11-06 — Typecheck des tests : lot 1, `tests/unit` (87 → 53)
+
+- **Quoi** : les 34 erreurs TypeScript figées de `tests/unit` (18 fichiers) sont corrigées, et `tests/typecheck-baseline.json` ne contient plus aucune entrée `tests/unit`. Un seul changement produit : dans `shared/errors.ts`, les champs `expected`, `received` et `validation` de `ZodIssueLike` passent en `unknown`.
+- **Comment** : types réels plutôt que des contournements (aucun `any`, `@ts-ignore` ni `@ts-expect-error` ajouté). `describeIssue` ne fait que des comparaisons strictes sur ces trois champs, donc son comportement ne change pas. Il accepte désormais un `ZodIssue` réel, dont `validation` peut être un objet (`{ includes }`).
+- **Pourquoi** : consigne de 0a, une PR par lot, et la base ne fait que baisser. Une erreur figée masque une dérive de type réelle ; ici, `ZodIssueLike` mentait sur la forme d'un `ZodIssue`.
+- **Preuve** : `tsc` 0 ; `check:tests` à 53 figées, sans aucune erreur nouvelle ; unitaires 298 fichiers (3 126 tests verts).

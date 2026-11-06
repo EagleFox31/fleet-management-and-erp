@@ -18,7 +18,7 @@ describe("use-toast reducer", () => {
   });
 
   it("le nombre de toasts visibles reste borné, les plus anciens sortent", () => {
-    let state = { toasts: [] as ReturnType<typeof toast>[] };
+    let state: ReturnType<typeof reducer> = { toasts: [] };
     for (const id of ["a", "b", "c", "d"]) {
       state = reducer(state, { type: "ADD_TOAST", toast: toast(id) });
     }

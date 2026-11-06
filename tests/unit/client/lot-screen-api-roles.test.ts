@@ -31,7 +31,7 @@ import * as sharedRoles from "@shared/constants/roles";
  *   `server/routes.ts` n'est pas couverte.
  */
 
-type Api = { file: string; method?: "get" | "post" | "patch"; path: string };
+type Api = { file: string; method?: "get" | "post" | "patch" | "put" | "delete"; path: string };
 /**
  * Action d'écriture d'un écran ouvert en lecture à plus de rôles qu'il n'en écrit.
  * `roles` : constante partagée attendue sur la route ; `gate` : fonction de

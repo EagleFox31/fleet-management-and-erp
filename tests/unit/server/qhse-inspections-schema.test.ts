@@ -77,7 +77,7 @@ describe("lot Q1 : contrôles inopinés QHSE, init-database et migration jumelle
     const inspections = getTableConfig(qhseInspections);
     const declared = [
       ...criteria.checks.map((c) => c.name),
-      ...criteria.uniqueConstraints.map((u) => u.name),
+      ...criteria.uniqueConstraints.flatMap((u) => (u.name ? [u.name] : [])),
       ...inspections.checks.map((c) => c.name),
     ].sort();
     expect(declared).toEqual([

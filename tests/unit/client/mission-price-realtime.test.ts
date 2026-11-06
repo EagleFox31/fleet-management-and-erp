@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
+import type { QueryClient } from "@tanstack/react-query";
 
 const { client } = vi.hoisted(() => ({ client: { current: null as unknown as import("@tanstack/react-query").QueryClient } }));
 
@@ -12,7 +13,7 @@ import { missionPricePath } from "@shared/contracts/mission-price";
 import { handleDomainUpdate } from "@/hooks/useRealTimeSync";
 
 describe("prix convenu : couche 3 sur mission_updated", () => {
-  let spy: ReturnType<typeof vi.spyOn>;
+  let spy: MockInstance<QueryClient["invalidateQueries"]>;
   beforeEach(() => {
     spy = vi.spyOn(client.current, "invalidateQueries");
   });

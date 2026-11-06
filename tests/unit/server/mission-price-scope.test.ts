@@ -19,7 +19,7 @@ describe("redactMissionPrice", () => {
     expect(out[0].mission.agreedPrice).toBeNull();
     expect(out[1].payload.mission.tariffGridId).toBeNull();
     expect(out[0].vehicle).toEqual({ id: 2 });
-    expect(input[0].mission.agreedPrice).toBe("125000");
+    expect(input[0]?.mission?.agreedPrice).toBe("125000");
   });
   it("une dateinstance reste intacte", () => {
     const d = new Date();
