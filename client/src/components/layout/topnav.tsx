@@ -56,6 +56,7 @@ export const Topnav: React.FC<TopnavProps> = ({ className, onMenuClick }) => {
       "/management/dashboard": ["Direction", "Tableau de bord"],
       "/alerts": ["Alertes"],
       "/admin/users": ["Administration", "Utilisateurs"],
+      "/admin/retired-vehicles": ["Administration", "Véhicules retirés"],
       "/workflows": ["Administration", "Workflows"],
       "/settings": ["Administration", "Paramètres"],
       "/technicians": ["Techniciens"],
