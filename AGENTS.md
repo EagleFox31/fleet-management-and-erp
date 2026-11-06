@@ -382,6 +382,10 @@ Notes :
   Voir `docs/analysis/MATRICE_ROLES_GAP.md`.
 - Environ 1 000 `console.*` restent côté serveur : les migrer vers `moduleLogger`
   quand on touche un fichier, ne jamais les supprimer (§10).
+- Coût carburant estimé compté comme revenu : `server/services/operations-service.ts` (l. 251, 296, 318) somme `estimatedFuelCost` dans `totalRevenue`, puis la marge en dépend. Aucune garde. Ne pas ajouter de marge ou de revenu nouveau sur ce champ avant correction.
+- Clôture automatique de la commande : `autoCloseDeliveredOrderIfFinanceDone`, `server/services/three-way-matching-service.ts` (l. 122-128). L'`UPDATE` du statut `completed` filtre sur l'identifiant seul, sans condition de statut ni verrou. Entrée gelée (1) de `tests/unit/server/status-update-cas-hygiene.test.ts`. Ne pas en ajouter d'autre.
+- Montants en texte libre dans l'audit d'OT : `/api/work-orders/:id/audit-trail` est exempté de `tests/unit/server/work-order-cost-mask-coverage.test.ts` (l. 27). Le masquage par clé ne couvre pas les libellés. Ne pas étendre cette exemption sans son lot dédié.
+- Tests contrat intermittents `tests/contract/finance-withholdings.contract.test.ts` et `tests/contract/qhse-inspections.contract.test.ts` : non reproduits, instrumentés (corps de réponse). Ne pas relever le timeout ni les marquer `skip` sans diagnostic du corps de réponse.
 
 ---
 

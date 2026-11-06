@@ -21,3 +21,21 @@ Format : `docs/journal/README.md`.
   - Attendu : 2 récidives et 4 nouvelles entrées trouvées ; les trois fichiers listés existent.
 - **RAIDER** : Failure memory couverte (leçons, classification, prévention vérifiée ou marquée manquante). Ne s'applique pas : code, tests, CI (docs seulement).
 - **Reste / risques** : préventions manquantes à produire par fleet-testeur (prix unitaire des pièces, texte libre de l'audit d'OT, assertions de statut, console des montants, cas `disputed`). Le correctif Q22 et Q23 n'est pas fusionné. `AGENTS.md` §9 n'est pas modifié : les dettes sont dans `LESSONS_LEARNED.md`, à reporter dans §9 par un agent autorisé à écrire ce fichier.
+
+## 2026-11-06T02:32:07+01:00 — Verrous du règlement fournisseur : récidive, dettes à jour
+
+- **Agent** : mémoire d'échecs · **Branche** : `docs/lecon-verrous`
+- **Statut** : fait
+- **Quoi** : `docs/analysis/LESSONS_LEARNED.md` enregistre la récidive de l'ordre des verrous (PR #545, rejet et rapprochement d'un règlement fournisseur) et la récidive de l'attente à délai fixe dans un test de concurrence. Deux dettes du 2026-11-06 sont marquées soldées (#545, #543). `AGENTS.md` §9 reporte les dettes ouvertes.
+- **Comment** :
+  - Récidive ajoutée à l'entrée « Verrous des missions » (2026-11-05), en point de liste, et à l'entrée « Fausse alerte double entrée en stock » (2026-11-04), en sous-section. Pas de nouvelle entrée : même erreur déjà documentée.
+  - Dettes de la section « Dettes ouvertes » : `disputed` → `paid` (#545) et `console.log` des rotations (#543) marqués soldés avec leur preuve sur `origin/main`.
+  - `AGENTS.md` §9 : quatre dettes ouvertes, chacune avec son fichier de référence (`estimatedFuelCost`, clôture automatique de commande, texte libre de l'audit d'OT, tests contrat intermittents).
+  - Chaque préventions citée a été vérifiée sur `origin/main` (existence du fichier, `pg_stat_activity` et `pg_blocking_pids` présents dans les tests cités). Les préventions absentes sont écrites « prévention manquante » avec l'agent à qui les confier.
+- **Pourquoi** : PR #545 a corrigé l'interblocage 40P01 entre rejet et rapprochement. La règle d'ordre était connue (entrée du 2026-11-05) mais n'avait pas de garde : une récidive exige un contrôle plus fort. Les dettes soldées ne doivent pas rester listées comme ouvertes.
+- **Comment tester (QA)** :
+  - Prérequis : dépôt à jour sur `docs/lecon-verrous`.
+  - Étapes : 1. `grep -n "Récidive (2026-11-06, PR #545)" docs/analysis/LESSONS_LEARNED.md` ; 2. `grep -n "Soldée par #545" docs/analysis/LESSONS_LEARNED.md` ; 3. `grep -n "estimatedFuelCost\|autoCloseDeliveredOrderIfFinanceDone\|audit-trail\|finance-withholdings" AGENTS.md` ; 4. `ls tests/contract/supplier-settlement-disputed.contract.test.ts tests/contract/mission-planning-stale-read.contract.test.ts tests/unit/server/status-update-cas-hygiene.test.ts`.
+  - Attendu : 2 récidives trouvées, 2 soldées trouvées, quatre lignes de §9 trouvées ; les trois fichiers existent.
+- **RAIDER** : Failure memory couverte (récidive sur entrées existantes, classification, prévention vérifiée ou marquée manquante). Ne s'applique pas : code, tests, CI (docs seulement). Passation non écrite : worktree dédié, pas de `PASSATION.md` dans ce dépôt.
+- **Reste / risques** : préventions manquantes à confier à fleet-testeur (garde sur les verrous posés par déclencheur, garde sur les tests de concurrence sans observation d'attente, garde sur les montants dans les logs, répétition ciblée des contrats intermittents, calcul `estimatedFuelCost`). Le lot Q22 n'est pas fusionné.
