@@ -448,6 +448,19 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
 **Pourquoi** `testTimeout` n'est pas relevé : rien ne prouve qu'un timeout soit en cause. Le relever masquerait une lenteur réelle sans la nommer.
 
 **Leçon.** Un test signalé instable se remonte avec le texte de l'assertion, pas en résumé. Toute assertion de statut sur un appel HTTP porte le corps de la réponse en message (`expect(r.status, JSON.stringify(r.body))`), sinon l'échec intermittent reste indiagnosticable.
+
+## 2026-11-06 — Bouchons createStubRouter dans le balayage de la garde véhicule retiré
+
+- **Quoi** :
+  - les écritures déclarées en données par `createStubRouter([...])` entrent dans `scanWriteRoutes`. Un bouchon d'écriture non monté apparaît dans `scanUnreachedWriteRoutes` ;
+  - `POST /api/part-requirements/:id/receive` (bouchon 501) entre dans `RETIRED_VEHICLE_WRITE_ROUTES` (lookup `partRequirement`). `TABLE_FLOOR` passe à 46.
+- **Pourquoi** : un bouchon n'utilise pas `router.post(`, donc le balayage ne le voyait pas. Il aurait été remplacé par sa vraie logique sans garde L3. Il est plus sûr de poser la garde maintenant : l'implémentation en hérite sans y penser.
+- **Comment** : on lit les objets `{ method, path }` du fichier de bouchon, et on prend le préfixe du montage unique de ce fichier dans `index.ts`. La règle n'est pas propre à ce bouchon : tout bouchon d'écriture dont le chemin correspond à `WORK_ORDER_PATH`, ou qui nomme un marqueur de véhicule, tombe sous la règle générale (table ou `NOT_GUARDED`).
+- **Preuve** :
+  - le garde-fou balaie 7 bouchons d'écriture ;
+  - mutant : l'entrée `receive` retirée de la table fait échouer la couverture et le plancher ;
+  - le contrat rend 409 `VEHICLE_RETIRED` sur `receive` pour l'OT d'un véhicule retiré, sans écriture, avant le 501 du bouchon.
+- **Effet de bord accepté** : pour le personnel, sur véhicule retiré, le 409 passe avant le 404 du drapeau `part-requirement-receive`. C'est le même ordre que celui de la garde face aux 403 (§11 : le personnel voit tous les véhicules).
 - **CI rouge sur #542 (contract shard 2/4)** : l'`afterAll` du contrat L3b supprimait les OT avant les `parts_stock_movements` acceptés par les témoins (clé étrangère sans cascade).
   - En local, l'erreur était affichée, mais mon filtre de sortie (`Error:`, `×`) ne la retenait pas : l'erreur pg commence par `error:` en minuscules, et un échec d'`afterAll` ne marque aucun test en `×`. 8 OT de test sont restés dans la base locale. Ils sont purgés.
   - **Correctif** : supprimer les mouvements par OT et par pièce avant les OT.

@@ -60,6 +60,8 @@ export const RETIRED_VEHICLE_WRITE_ROUTES: readonly RetiredVehicleWriteRoute[] =
     vehicle: [{ lookup: "partRequirement", param: "id" }, { body: "vehicleId" }, { lookup: "workOrder", body: "workOrderId" }],
   },
   { route: "DELETE /api/part-requirements/:id", vehicle: [{ lookup: "partRequirement", param: "id" }] },
+  // Bouchon (501) : la garde est posée avant l'implémentation, qui en hérite sans y penser.
+  { route: "POST /api/part-requirements/:id/receive", vehicle: [{ lookup: "partRequirement", param: "id" }] },
   // Mouvement de stock imputé à un OT (L3b) : sans `workOrderId`, mouvement magasin, la garde laisse passer.
   { route: "POST /api/warehouse/stock-movement", vehicle: [{ lookup: "workOrder", body: "workOrderId" }] },
   // Carburant
