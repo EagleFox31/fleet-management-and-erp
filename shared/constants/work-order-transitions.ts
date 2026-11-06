@@ -26,8 +26,23 @@ export type WorkOrderTransitionCheck =
   | { allowed: true }
   | { allowed: false; status: 403 | 409; message: string };
 
-export function checkWorkOrderTransition(from: string, to: string, role: string | undefined): WorkOrderTransitionCheck {
+/**
+ * Origine de la transition. `quality_check` : seul le refus du contrôle qualité rouvre un OT
+ * terminé (`completed` -> `in_progress`, D-17, jamais `pending`) ; rien d'autre ne passe par là.
+ */
+export type WorkOrderTransitionVia = "quality_check";
+
+export function checkWorkOrderTransition(
+  from: string,
+  to: string,
+  role: string | undefined,
+  via?: WorkOrderTransitionVia,
+): WorkOrderTransitionCheck {
   if (from === to) return { allowed: true };
+  if (via === "quality_check") {
+    if (from === "completed" && to === "in_progress") return { allowed: true };
+    return { allowed: false, status: 409, message: "Le contrôle qualité ne s'applique qu'à un ordre de travail terminé." };
+  }
   if (from === "completed") {
     return {
       allowed: false,

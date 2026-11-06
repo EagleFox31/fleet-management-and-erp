@@ -1,6 +1,10 @@
 import { and, eq } from "drizzle-orm";
 import { workOrders, type InsertWorkOrder, type WorkOrder } from "@shared/schema";
-import { checkWorkOrderTransition, type WorkOrderStatus } from "@shared/constants/work-order-transitions";
+import {
+  checkWorkOrderTransition,
+  type WorkOrderStatus,
+  type WorkOrderTransitionVia,
+} from "@shared/constants/work-order-transitions";
 import { db, type DbTransaction } from "../db";
 import { AppError } from "../lib/app-error";
 import { storage } from "../storage";
@@ -30,6 +34,11 @@ export type WorkOrderStatusTransition = {
    */
   role?: string;
   /**
+   * Origine de la transition, passée à `checkWorkOrderTransition` : `quality_check` est la seule
+   * voie qui rouvre un OT terminé (refus du contrôle qualité).
+   */
+  via?: WorkOrderTransitionVia;
+  /**
    * Champs écrits dans la même instruction que le statut, donc sous le même compare-and-set :
    * rien n'est écrit si la ligne n'a plus le statut lu. Le statut n'en fait jamais partie, ni
    * dans le type ni à l'exécution. Le service n'élargit pas ce que l'appelant écrit : il pose
@@ -50,9 +59,9 @@ export type WorkOrderStatusTransition = {
 
 /**
  * Écriture du statut d'un OT par les routes (modification générique, technicien) ;
- * `storage.updateWorkOrder` refuse le statut. Restent des écritures directes, gelées dans
- * `status-update-cas-hygiene.test.ts` : passage en attente de pièces
- * (`work-order-part-request.ts`) et refus qualité (`quality-check.routes.ts`).
+ * contrôle qualité ; `storage.updateWorkOrder` refuse le statut. Reste une écriture directe,
+ * gelée dans `status-update-cas-hygiene.test.ts` : passage en attente de pièces
+ * (`work-order-part-request.ts`).
  *
  * 1. La règle `checkWorkOrderTransition` est appliquée ici, avec le rôle de l'auteur : une
  *    transition interdite (OT terminé, annulé, saut non prévu, annulation par un technicien)
@@ -65,8 +74,8 @@ export type WorkOrderStatusTransition = {
  * Les trames temps réel et les invalidations restent chez l'appelant (AGENTS.md §2).
  */
 export async function transitionWorkOrderStatus(transition: WorkOrderStatusTransition): Promise<WorkOrder | null> {
-  const { workOrderId, from, to, updatedBy, onStale = "throw", fields, technicianId, onTransition, role } = transition;
-  const check = checkWorkOrderTransition(from, to, role);
+  const { workOrderId, from, to, updatedBy, onStale = "throw", fields, technicianId, onTransition, role, via } = transition;
+  const check = checkWorkOrderTransition(from, to, role, via);
   if (!check.allowed) throw new AppError(check.status, check.message);
 
   // Le type exclut déjà `status` : on le retire aussi à l'exécution, pour un appelant non typé.

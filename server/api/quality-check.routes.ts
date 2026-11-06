@@ -7,6 +7,7 @@ import { AppError } from "../lib/app-error";
 import { requireFeature } from "../lib/feature-flags";
 import { moduleLogger } from "../lib/logger";
 import { authenticate, isWorkshopManager } from "../middleware/auth";
+import { transitionWorkOrderStatus } from "../services/work-order-status-transition";
 
 const log = moduleLogger("quality-check");
 
@@ -33,16 +34,24 @@ const postQualityCheck: RequestHandler = async (req, res, next) => {
       throw new AppError(409, "Le contrôle qualité ne s'applique qu'à un ordre de travail terminé.", { cause: `statut ${current.status}` });
     }
 
+    // Refus : `completed` -> `in_progress` par la transition commune (compare-and-set sur le statut,
+    // effets sur le parc). Validation : l'OT reste terminé, sous la même condition. Dans les deux cas
+    // le contrôle est écrit dans la même transaction : rien n'est écrit si l'OT a changé entre-temps.
     const qcAt = new Date();
     try {
-      await db.transaction(async (tx) => {
-        await tx
-          .update(workOrderQuality)
-          .set({ qcStatus: body.result, qcBy: userId, qcAt, qcReason: body.reason?.length ? body.reason : null })
-          .where(eq(workOrderQuality.id, id));
-        if (body.result === "failed") {
-          await tx.update(workOrders).set({ status: "in_progress", updatedBy: userId, updatedAt: qcAt }).where(eq(workOrders.id, id));
-        }
+      await transitionWorkOrderStatus({
+        workOrderId: id,
+        from: "completed",
+        to: body.result === "failed" ? "in_progress" : "completed",
+        via: "quality_check",
+        role: req.user!.role,
+        updatedBy: userId,
+        onTransition: async (tx) => {
+          await tx
+            .update(workOrderQuality)
+            .set({ qcStatus: body.result, qcBy: userId, qcAt, qcReason: body.reason?.length ? body.reason : null })
+            .where(eq(workOrderQuality.id, id));
+        },
       });
     } catch (error) {
       if (isExclusionViolation(error)) {
