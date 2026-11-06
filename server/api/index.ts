@@ -38,6 +38,7 @@ import partsCatalogRoutes from "./parts-catalog.routes";
 import faultCatalogRoutes from "./fault-catalog.routes";
 import tireRotationsRoutes from "./tire-rotations.routes";
 import adminUsersGuardRoutes from "./admin-users-guard.routes";
+import statisticsCostGuardRoutes from "./statistics-cost-guard.routes";
 import lastAdminGuardRoutes from "./last-admin-guard.routes";
 import workflowsRoutes from "./workflows.routes";
 import auditLogsRoutes from "./audit-logs.routes";
@@ -89,6 +90,7 @@ import { LOGIN_BODY_INVALID_MESSAGE, loginRequestSchema } from "@shared/contract
 import { auditWrites } from "../middleware/audit-writes";
 import { AUDIT_CONFIG, CDC_AUDIT_CONFIG } from "../lib/audit-config";
 import { idempotencyGuard } from "../middleware/idempotency-guard";
+import { retiredVehicleWriteGuard } from "../middleware/retired-vehicle-write-guard";
 import { requireFeature } from "../lib/feature-flags";
 import { DbLockoutStore, PASSWORD_KEY_PREFIX, PIN_KEY_PREFIX } from "../services/login-lockout-db-store";
 
@@ -139,6 +141,9 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // Idempotence des ecritures rejouables (CDC #10b) : routes de IDEMPOTENCY_ROUTES, drapeau
   // `offline-writes` (coupe par defaut), apres la session (req.session.userId).
   apiRouter.use(idempotencyGuard());
+  // Vehicule retire (L3) : ecritures rattachees refusees en 409 pour le personnel, table
+  // RETIRED_VEHICLE_WRITE_ROUTES. Montee ici, avant registerRoutes : couvre aussi routes.ts.
+  apiRouter.use(retiredVehicleWriteGuard);
 
   // `/telemetry` recevra les positions des boitiers GPS, qui n'ont pas de compte et
   // s'authentifieront par jeton d'appareil (lot #6). Tant que cette garde n'existe pas, le
@@ -157,6 +162,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // Un admin ne se desactive pas lui-meme (garde, la route reste dans routes.ts).
   apiRouter.use(adminUsersGuardRoutes);
   apiRouter.use(lastAdminGuardRoutes);
+  // Statistiques à montant (coût de maintenance, KPI de flotte) : gardes, les routes restent dans routes.ts.
+  apiRouter.use(statisticsCostGuardRoutes);
   // Brouillon d'acquisition : liste blanche des champs, statut jamais lu du corps.
   // Fichiers téléversés : pièce jointe, nosniff, type en liste blanche (sortis de routes.ts).
   apiRouter.use(uploadedDocumentsRoutes);

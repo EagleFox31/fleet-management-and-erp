@@ -7,6 +7,7 @@ import fs from "fs";
 import path from "path";
 import { db } from "../db";
 import { isAnyUser, isDocumentRenewalWriter } from "../middleware/auth";
+import { assertVehicleWritable } from "../middleware/retired-vehicle-write-guard";
 import { storage } from "../storage";
 import { isIsoCalendarDate } from "@shared/constants/calendar-date";
 import {
@@ -1021,6 +1022,8 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
       }
 
       const payload = parsedPayload.data;
+      // Corps multipart : la garde de montage ne voit pas le véhicule, la poignée le vérifie (409, L3).
+      await assertVehicleWritable(payload.vehicleId);
 
       const [documentRow] = await db
         .select({

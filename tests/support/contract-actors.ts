@@ -31,12 +31,17 @@ export async function startContractActors<A extends string>(actors: Record<A, Te
     cookies.set(actor, res.headers.get("set-cookie")!.split(";")[0]);
   }
 
-  async function call(method: string, path: string, options: { body?: unknown; actor?: A } = {}): Promise<ContractResponse> {
+  async function call(
+    method: string,
+    path: string,
+    options: { body?: unknown; actor?: A; headers?: Record<string, string> } = {},
+  ): Promise<ContractResponse> {
     const response = await fetch(baseUrl + path, {
       method,
       headers: {
         ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
         ...(options.actor ? { Cookie: cookies.get(options.actor)! } : {}),
+        ...options.headers,
       },
       body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
     });

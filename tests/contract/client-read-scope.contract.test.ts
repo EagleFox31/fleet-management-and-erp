@@ -179,7 +179,7 @@ describe("GET /api/statistics/fleet : décompte limité aux véhicules du client
   });
 });
 
-const COST_ONLY_PATHS = new Set(["/api/parts-used"]);
+const COST_ONLY_PATHS = new Set(["/api/parts-used", "/api/statistics/fleet-kpi"]);
 
 const STAFF_ONLY: Array<[string, string]> = [
   ["/api/parts-used", "/api/parts-used"],

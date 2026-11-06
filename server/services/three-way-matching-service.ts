@@ -386,7 +386,7 @@ export class ThreeWayMatchingService {
 
       // Auto-approuver si match parfait
       if (validation.recommendation === 'auto_approve') {
-        await db
+        const [written] = await db
           .update(supplierInvoices)
           .set({
             status: 'approved',
@@ -400,8 +400,15 @@ export class ThreeWayMatchingService {
             hasDiscrepancy: false,
             updatedAt: new Date(),
           })
-          .where(eq(supplierInvoices.id, invoice.id));
+          .where(
+            and(
+              eq(supplierInvoices.id, invoice.id),
+              eq(supplierInvoices.status, 'received'),
+            ),
+          )
+          .returning({ id: supplierInvoices.id });
 
+        if (!written) continue;
         approvedInvoices.push(invoice.id);
       }
     }
@@ -647,7 +654,8 @@ export class ThreeWayMatchingService {
     invoiceId: number,
     validatedBy: number,
     notes?: string
-  ): Promise<SupplierInvoice> {
+  ): Promise<{ invoice: SupplierInvoice; replayed: boolean }> {
+    // Compare-and-set : seule une facture reçue devient validée.
     const [updated] = await db
       .update(supplierInvoices)
       .set({
@@ -657,10 +665,40 @@ export class ThreeWayMatchingService {
         discrepancyNotes: notes,
         updatedAt: new Date(),
       })
-      .where(eq(supplierInvoices.id, invoiceId))
+      .where(
+        and(
+          eq(supplierInvoices.id, invoiceId),
+          eq(supplierInvoices.status, 'received'),
+        ),
+      )
       .returning();
 
-    return updated;
+    if (updated) {
+      return { invoice: updated, replayed: false };
+    }
+
+    const [current] = await db
+      .select()
+      .from(supplierInvoices)
+      .where(eq(supplierInvoices.id, invoiceId))
+      .limit(1);
+
+    if (!current) {
+      throw new AppError(404, "Cette facture n'existe plus.");
+    }
+    if (current.status === 'validated') {
+      return { invoice: current, replayed: true };
+    }
+    if (current.status === 'paid') {
+      throw new AppError(409, "Cette facture est déjà payée : elle ne peut plus être validée.");
+    }
+    if (current.status === 'disputed') {
+      throw new AppError(409, "Cette facture est en litige. Lever le litige avant de la valider.");
+    }
+    if (current.status === 'approved') {
+      throw new AppError(409, "Cette facture est déjà approuvée : elle ne peut plus être validée.");
+    }
+    throw new AppError(409, "Cette facture ne peut pas être validée dans son état actuel.");
   }
 
   /**
@@ -669,7 +707,9 @@ export class ThreeWayMatchingService {
   async approveInvoice(
     invoiceId: number,
     approvedBy: number
-  ): Promise<SupplierInvoice> {
+  ): Promise<{ invoice: SupplierInvoice; replayed: boolean }> {
+    // La condition de statut est dans l'UPDATE : deux approbations simultanées
+    // n'écrivent qu'une fois, et une facture payée ou en litige n'est jamais touchée.
     const [updated] = await db
       .update(supplierInvoices)
       .set({
@@ -678,10 +718,38 @@ export class ThreeWayMatchingService {
         approvedAt: new Date(),
         updatedAt: new Date(),
       })
-      .where(eq(supplierInvoices.id, invoiceId))
+      .where(
+        and(
+          eq(supplierInvoices.id, invoiceId),
+          inArray(supplierInvoices.status, ['received', 'validated']),
+        ),
+      )
       .returning();
 
-    return updated;
+    if (updated) {
+      return { invoice: updated, replayed: false };
+    }
+
+    const [current] = await db
+      .select()
+      .from(supplierInvoices)
+      .where(eq(supplierInvoices.id, invoiceId))
+      .limit(1);
+
+    if (!current) {
+      throw new AppError(404, "Cette facture n'existe plus.");
+    }
+    // Déjà approuvée : un second appel ne réécrit ni l'approbateur ni la date.
+    if (current.status === 'approved') {
+      return { invoice: current, replayed: true };
+    }
+    if (current.status === 'paid') {
+      throw new AppError(409, "Cette facture est déjà payée : elle ne peut plus être approuvée.");
+    }
+    if (current.status === 'disputed') {
+      throw new AppError(409, "Cette facture est en litige. Lever le litige avant d'approuver.");
+    }
+    throw new AppError(409, "Cette facture ne peut pas être approuvée dans son état actuel.");
   }
 
   /**
