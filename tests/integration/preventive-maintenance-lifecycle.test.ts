@@ -273,7 +273,8 @@ describe("P3 recalcul de la prochaine echeance", { timeout: 120000 }, () => {
       const { plan } = await closedPlan("p3-1", { scheduledDate: from });
       const row = await scheduleRow(plan.id);
       expect(row).toBeDefined();
-      expect(row.scheduledDate > from).toBe(true);
+      expect(row.scheduledDate).not.toBeNull();
+      expect(row.scheduledDate !== null && row.scheduledDate > from).toBe(true);
     });
 
     it("cloture en retard : l'echeance suivante part de l'echeance de l'OT, pas de la date de cloture", async () => {
@@ -324,7 +325,7 @@ describe("P3 recalcul de la prochaine echeance", { timeout: 120000 }, () => {
         await db.update(maintenanceSchedules).set({ scheduledDate: over.scheduledDate }).where(eq(maintenanceSchedules.id, plan.id));
         return { plan, wo };
       }
-      const mine = (ids: number[], rows: { scheduleId: number }[]) => rows.filter((r) => ids.includes(r.scheduleId));
+      const mine = <T extends { scheduleId: number }>(ids: number[], rows: T[]) => rows.filter((r) => ids.includes(r.scheduleId));
 
       it("plan : liste les plans bloqués sans rien écrire ; apply avance ; second apply = aucune ligne", async () => {
         const stuck = await stuckPlan("p3-1-stuck", { frequency: "monthly", frequencyValue: 1, scheduledDate: "2026-01-15" });

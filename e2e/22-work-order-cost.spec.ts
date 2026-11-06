@@ -95,7 +95,7 @@ async function seedWorkOrder(opts: {
     .returning();
   woIds.push(wo.id);
   await db.insert(workOrderItems).values([
-    ...opts.hours.map((h, i) => ({ workOrderId: wo.id, customLabel: `TEST travail ${i}`, actualHours: h, status: "done" })),
+    ...opts.hours.map((h, i) => ({ workOrderId: wo.id, customLabel: `TEST travail ${i}`, actualHours: h, status: "done" as const })),
     { workOrderId: wo.id, customLabel: "TEST annulé", actualHours: "10", status: "cancelled" },
   ]);
   await db.insert(partsUsed).values({ workOrderId: wo.id, partId: part.id, quantity: opts.partQty, unitPrice: opts.partPrice });

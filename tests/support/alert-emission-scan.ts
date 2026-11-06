@@ -68,7 +68,7 @@ export function scopeOf(node: ts.Node): { name: string; node: ts.Node } | null {
 function localEmitters(source: ts.SourceFile): Set<string> {
   const names = new Set<string>();
   const visit = (node: ts.Node) => {
-    if ((ts.isFunctionLike(node) && node.body) || ts.isArrowFunction(node)) {
+    if ((ts.isFunctionLike(node) && "body" in node && node.body) || ts.isArrowFunction(node)) {
       const scope = ts.isFunctionDeclaration(node) && node.name ? node.name.text : null;
       const parent = node.parent;
       const name = scope ?? (parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name) ? parent.name.text : null);

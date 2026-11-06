@@ -53,10 +53,10 @@ describe("emitAlerts : un lot en échec ne perd pas toutes les candidates", { ti
 
 describe("emitAlerts : coupe-circuit sur la reprise", () => {
   const candidates = Array.from({ length: 10 }, (_, i) => ({
-    type: "fuel",
+    type: "fuel" as const,
     title: `T${i}`,
     message: "m",
-    priority: "medium",
+    priority: "medium" as const,
     link: `/x/${i}`,
     targetUserIds: [1],
   }));
