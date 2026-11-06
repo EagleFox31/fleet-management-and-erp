@@ -1,7 +1,7 @@
 import { createServer, type Server } from "http";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { db } from "../../server/db";
+import { db, pool } from "../../server/db";
 import {
   alerts,
   partRequirements,
@@ -283,4 +283,46 @@ describe("POST /api/work-orders/:id/awaiting-parts", { timeout: 120000 }, () => 
     expect(state.status).toBe("awaiting_parts");
     expect(state.stock).toBe(3);
   });
+
+  // La route lit l'OT puis écrit : un chef d'atelier qui l'annule entre les deux ne doit pas
+  // être écrasé. Déterministe : une connexion tient le verrou de ligne de l'OT, la requête s'y
+  // bloque après sa lecture, l'OT est annulé, puis le verrou est libéré.
+  it("OT annulé pendant la demande : 409 lisible, l'annulation est conservée", async () => {
+    const { part, workOrder, cookie } = await seed("workshop_manager", 3);
+    const client = await pool.connect();
+    let res: Awaited<ReturnType<typeof call>>;
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT id FROM work_orders WHERE id = $1 FOR UPDATE", [workOrder.id]);
+      const holderPid = (await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid as number;
+      const pending = call("POST", `/api/work-orders/${workOrder.id}/awaiting-parts`, { cookie, body: {} });
+      await waitForBlockedWriter(holderPid);
+      await client.query("UPDATE work_orders SET status = 'cancelled' WHERE id = $1", [workOrder.id]);
+      await client.query("COMMIT");
+      res = await pending;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body.message).toContain("vient de changer");
+    expect((await stateOf(workOrder.id, part.id)).status).toBe("cancelled");
+    expect(eventsOf(workOrder.id)).not.toContain("work_order_updated");
+  });
 });
+
+/** Attend qu'une requête soit bloquée PAR la connexion qui tient le verrou. */
+async function waitForBlockedWriter(holderPid: number) {
+  for (let i = 0; i < 200; i++) {
+    const { rows } = await pool.query(
+      `SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`,
+      [holderPid],
+    );
+    if (rows[0].n > 0) return;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error("la requête ne s'est jamais bloquée sur le verrou de l'OT");
+}

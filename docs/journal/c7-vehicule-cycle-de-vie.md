@@ -524,3 +524,15 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
   - la suite complète de contrats est verte : 251 fichiers, 3 080 tests.
 - **Prévention** : `tests/unit/support/env-restore.test.ts` échoue si un contrat affecte une variable d'environnement absente de `FILE_SCOPED_ENV`.
 - **Leçon** : en `isolate: false`, l'état du processus (env, singletons) passe d'un fichier à l'autre. Une variable que les tests modifient doit être restaurée par le setup commun, pas laissée à la discipline de chaque fichier.
+
+## 2026-11-06 — Transition de statut d'OT dédiée, lot 1 (work-order-parts)
+
+- **Quoi** : `transitionWorkOrderStatus` (`server/services/work-order-status-transition.ts`) devient l'écriture dédiée du statut d'un OT. Les deux appels de `storage.updateWorkOrder` de `work-order-parts.routes.ts` passent par elle : la mise en attente de pièces (`awaiting_parts`) et la reprise après sortie de pièce (`in_progress`).
+- **Comment** :
+  - la fonction applique elle-même `checkWorkOrderTransition` : une transition interdite répond 409 lisible, même appelée directement ;
+  - l'écriture est un compare-and-set (`WHERE id AND status = statut lu`) : une écriture concurrente gagnée répond 409, ou ne fait rien en mode `skip` ;
+  - le mode `skip` sert la reprise après sortie : la pièce est déjà sortie, et un OT annulé entre-temps ne doit ni être rouvert ni faire échouer la sortie ;
+  - les effets sur le parc (véhicule en maintenance ou en service, échéance préventive) sont extraits dans `work-order-status-effects.ts`, que `storage.updateWorkOrder` appelle aussi ;
+  - les trames WebSocket restent chez l'appelant, inchangées.
+- **Pourquoi** : la route lisait l'OT puis écrivait sous `eq(id)` seul. Un chef d'atelier qui annulait l'OT entre les deux voyait son annulation écrasée en « en attente de pièces ». Le contrat de course (verrou de ligne tenu, annulation, libération) répond 200 et écrase sur l'ancien code ; avec le correctif, 409 et l'annulation reste. Le cliquet T4 (`write-routes-frozen.ts`) perd deux routes.
+- **Suite** : lot 2 (statut du technicien), lot 3 (PATCH générique : `updateWorkOrder` refuse `status`).
