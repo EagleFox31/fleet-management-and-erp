@@ -10,7 +10,6 @@ import { isAdminGuardDbRefusal, isCheckViolation } from "./lib/pg-errors";
 import { uploadedFileCandidates } from "./lib/uploaded-file";
 import { deleteFile } from "./middleware/upload";
 import { vehicleStatusService } from "./services/vehicle-status-service";
-import { applyWorkOrderStatusEffects } from "./services/work-order-status-effects";
 import {
   users, vehicles, maintenanceSchedules, workOrders, parts, partsUsed, fuelRecords, alerts,
   vehicleDocuments, statusHistory, faultCatalog, partsStockMovements, partRequirements,
@@ -244,7 +243,8 @@ export interface IStorage {
   getWorkOrdersByOwner(ownerId: number, status?: string, priority?: string, limit?: number, offset?: number): Promise<WorkOrderListResult>;
   getWorkOrdersForTechnician(technicianId: number, status?: string, priority?: string, limit?: number, offset?: number): Promise<WorkOrderListResult>;
   createWorkOrder(workOrder: InsertWorkOrder): Promise<WorkOrder>;
-  updateWorkOrder(id: number, workOrder: Partial<InsertWorkOrder>): Promise<WorkOrder | undefined>;
+  /** Champs d'un OT hors statut : le statut passe par `transitionWorkOrderStatus`. */
+  updateWorkOrder(id: number, workOrder: Omit<Partial<InsertWorkOrder>, "status">): Promise<WorkOrder | undefined>;
   deleteWorkOrder(id: number): Promise<boolean>;
   
   // Parts inventory methods
@@ -304,6 +304,9 @@ export interface IStorage {
   createFaultCatalog(catalog: InsertFaultCatalog): Promise<FaultCatalog>;
   deleteFaultCatalog(id: number): Promise<boolean>;
 }
+
+export const WORK_ORDER_STATUS_VIA_TRANSITION_ERROR =
+  "updateWorkOrder n'écrit pas le statut : passer par transitionWorkOrderStatus.";
 
 export class DatabaseStorage implements IStorage {
   async getStatusHistory(vehicleId: number): Promise<StatusHistory[]> {
@@ -1536,25 +1539,23 @@ export class DatabaseStorage implements IStorage {
       throw new Error('Erreur lors de la création de l\'ordre de travail');
     }
   }
-  async updateWorkOrder(id: number, workOrder: Partial<InsertWorkOrder>): Promise<WorkOrder | undefined> {
+  async updateWorkOrder(id: number, workOrder: Omit<Partial<InsertWorkOrder>, "status">): Promise<WorkOrder | undefined> {
+    // Le statut ne s'écrit que par `transitionWorkOrderStatus` (compare-and-set, règle des
+    // transitions, effets sur le parc). Refusé ici aussi à l'exécution, hors du try : le message
+    // générique du catch ne doit pas masquer une erreur de programmation.
+    if (workOrder && Object.prototype.hasOwnProperty.call(workOrder, "status")) {
+      throw new Error(WORK_ORDER_STATUS_VIA_TRANSITION_ERROR);
+    }
     try {
-      // Récupérer l'ordre de travail actuel pour comparer les statuts
       const currentWorkOrder = await this.getWorkOrder(id);
       if (!currentWorkOrder) {
         throw new Error('Ordre de travail non trouvé');
       }
 
-      const [updatedWorkOrder] = await db
+      await db
         .update(workOrders)
         .set(workOrder)
-        .where(eq(workOrders.id, id))
-        .returning();
-
-      // Effets du changement de statut (véhicule, plan préventif), partagés avec
-      // `transitionWorkOrderStatus`.
-      if (workOrder.status) {
-        await applyWorkOrderStatusEffects(updatedWorkOrder, currentWorkOrder.status);
-      }
+        .where(eq(workOrders.id, id));
 
       // Retour enrichi (technicianName, createdByName…) — le `.returning()` brut
       // laissait la fiche détail sur « Inconnu » après une affectation.

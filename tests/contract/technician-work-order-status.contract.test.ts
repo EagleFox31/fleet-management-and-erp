@@ -203,6 +203,8 @@ describe("PATCH /api/technician/work-orders/:id/status", () => {
     );
 
     expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body.message).toMatch(/réassigné/);
+    expect(res.body.message).not.toMatch(/statut/i);
     const [row] = await db.select().from(workOrders).where(eq(workOrders.id, id));
     expect(row.technicianId).toBe(otherTechnicianId);
     expect(row.status).toBe("in_progress");
