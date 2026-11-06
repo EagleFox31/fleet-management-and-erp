@@ -575,3 +575,13 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
   - Une lecture passait une ligne ouverte de 0 à 2 ; elle ne la modifie plus.
 - **Vérifications** : 9 tests unitaires de `deliveryReceipts`, dont l'invariant « chaque hausse du reçu est créditée, et rien d'autre ». tsc 0 ; unitaires 3 102 ; intégration 10 fichiers, 57 tests ; contrats 36 fichiers, 445 tests.
 - **Leçon** : quand deux effets doivent rester égaux (le marquage et le crédit), ils doivent sortir d'un même calcul. Deux requêtes écrites séparément finissent par diverger.
+
+## 2026-11-06 04:06 — Q25 : une pièce commandée entre en stock une seule fois
+
+- **Quoi** : si une demande est rattachée à une commande non annulée, son PATCH `received` ou `partially_received` renvoie 409 « Réceptionnez cette pièce depuis la commande fournisseur. ». Une demande sans commande, ou dont la commande est annulée, se réceptionne toujours directement.
+- **Comment** :
+  - Avant la transition, `updatePartRequirement` cherche une ligne de commande qui porte `partRequirementId` sur une commande dont le statut n'est pas `cancelled`. S'il en trouve une, il renvoie `status: 409`, et la route transmet ce code.
+  - Côté écran (`inventory/requests.tsx`), une demande liée propose « Suivre commande » et plus « Entrée en stock ».
+- **Pourquoi** : la réception directe créditait le stock, puis la livraison de la commande le créditait une seconde fois par la ligne. Cela faisait 2 pièces reçues pour 4 entrées en stock.
+- **Preuve** : contrat `tests/contract/part-requirement-order-reception.contract.test.ts`, 5 tests. Sur l'ancien code, le parcours « réception directe puis livraison » finit à 9 pièces et 2 mouvements ; avec la règle, il finit à 7 et 1. tsc 0 ; unitaires 3 102 ; intégration 10 fichiers, 57 tests ; contrats 38 fichiers, 456 tests.
+- **Leçon** : quand un même événement physique (l'arrivée de la pièce) peut être saisi par deux écrans, l'un des deux doit le refuser. Sinon, chacun applique son propre effet.
