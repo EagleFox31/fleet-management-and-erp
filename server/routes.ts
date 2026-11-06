@@ -59,6 +59,7 @@ import { isRetiredVehicle, vehicleEditRefusal, vehicleReadableBy } from "./lib/v
 import { redactVehiclePrice } from "./lib/vehicle-price-scope";
 import { PROCUREMENT_ROLES, type AppRole } from "@shared/constants/roles";
 import { prepareColumnUpdate } from "./lib/column-validation";
+import { validateWorkOrderPatch } from "./lib/work-order-patch-policy";
 import { moduleLogger } from "./lib/logger";
 import { broadcastAlertCreated } from "./lib/alert-broadcast";
 import { broadcastFuelRecordChanged, broadcastVehicleTankCapacityChanged } from "./lib/fuel-record-realtime";
@@ -1786,10 +1787,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Ordre de travail non trouvé" });
       }
       
-      const { data: updatedData, errors } = prepareColumnUpdate(workOrders, { ...req.body });
-      if (errors.length > 0) {
-        return next(new AppError(400, "Certaines informations de l'ordre de travail sont invalides.", { fieldErrors: errors }));
-      }
+      // Liste blanche par rôle, technicien limité à ses OT, `updatedBy` posé sur l'auteur.
+      const updatedData = validateWorkOrderPatch({ user: req.user, workOrder, body: req.body });
 
       // Transitions de statut (shared/constants/work-order-transitions.ts) :
       // vérifiées avant toute écriture.
@@ -1828,6 +1827,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
               to: requestedStatus as WorkOrderStatus,
               role: req.user?.role,
               fields: otherFields,
+              // Technicien : l'OT doit lui être encore assigné au moment de l'écriture.
+              technicianId: req.user?.role === "technician" ? req.user.id : undefined,
             })
           : await storage.updateWorkOrder(id, otherFields);
 

@@ -324,6 +324,11 @@ export default function WorkOrderDetails({
   const printBlockedReason = laborRateError
     ? "Taux horaire indisponible : impression impossible pour l'instant, rechargez la page."
     : "Chargement du taux horaire…";
+  // Démarrer / terminer : un technicien seulement sur un OT qui lui est assigné (le serveur
+  // refuse sinon, `server/lib/work-order-patch-policy.ts`).
+  const canDriveWorkOrder =
+    canProcessWorkOrder &&
+    !(user?.role === 'technician' && Number(workOrder?.technicianId) !== Number(user?.id));
   // Saisie a posteriori permise sur un OT terminé; un OT annulé est figé.
   // Un technicien ne saisit que sur ses OT, et un OT clos est figé : même règle que le serveur.
   const canEditWorkItems =
@@ -1179,7 +1184,7 @@ export default function WorkOrderDetails({
               <ArrowLeft className="h-4 w-4 mr-1" /> {user?.role === "technician" ? "Mes interventions" : "Ordres de travail"}
             </Button>
             <div className="flex flex-wrap gap-1.5 sm:gap-2">
-              {canProcessWorkOrder && workOrder.status === "pending" && (
+              {canDriveWorkOrder && workOrder.status === "pending" && (
                 <Button
                   size="sm"
                   onClick={() => setShowStartConfirm(true)}
@@ -1191,7 +1196,7 @@ export default function WorkOrderDetails({
                   Commencer
                 </Button>
               )}
-              {canProcessWorkOrder && workOrder.status === "in_progress" && (
+              {canDriveWorkOrder && workOrder.status === "in_progress" && (
                 <Button
                   size="sm"
                   onClick={() => setShowCompleteConfirm(true)}
