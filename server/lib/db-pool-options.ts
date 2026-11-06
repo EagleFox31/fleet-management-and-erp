@@ -10,19 +10,25 @@
  */
 export const DEFAULT_DB_CONNECT_TIMEOUT_MS = 10_000;
 
+/** Plus grand délai que `setTimeout` respecte ; au-delà, Node le ramène à 1 ms (tout échouerait). */
+export const MAX_DB_CONNECT_TIMEOUT_MS = 2 ** 31 - 1;
+
 export type DbEnv = Readonly<Record<string, string | undefined>>;
 
 /**
- * `DATABASE_CONNECT_TIMEOUT_MS` : entier >= 0, en millisecondes ; 0 = sans plafond.
+ * `DATABASE_CONNECT_TIMEOUT_MS` : entier de 0 à 2^31 - 1, en millisecondes ; 0 = sans plafond.
  * Absente ou vide : défaut. Toute autre valeur arrête le démarrage plutôt que d'être ignorée.
  */
 export function dbConnectTimeoutMs(env: DbEnv = process.env): number {
   const raw = env.DATABASE_CONNECT_TIMEOUT_MS?.trim();
   if (!raw) return DEFAULT_DB_CONNECT_TIMEOUT_MS;
-  if (!/^\d+$/.test(raw)) {
-    throw new Error(`DATABASE_CONNECT_TIMEOUT_MS invalide (« ${raw} ») : entier en millisecondes attendu, 0 pour aucun plafond.`);
+  const value = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
+  if (!(value <= MAX_DB_CONNECT_TIMEOUT_MS)) {
+    throw new Error(
+      `DATABASE_CONNECT_TIMEOUT_MS invalide (« ${raw} ») : entier en millisecondes de 0 à ${MAX_DB_CONNECT_TIMEOUT_MS} attendu, 0 pour aucun plafond.`,
+    );
   }
-  return Number(raw);
+  return value;
 }
 
 export function dbPoolOptions(connectionString: string, env: DbEnv = process.env) {

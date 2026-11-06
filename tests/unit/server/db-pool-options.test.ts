@@ -4,6 +4,7 @@ import ws from "ws";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   DEFAULT_DB_CONNECT_TIMEOUT_MS,
+  MAX_DB_CONNECT_TIMEOUT_MS,
   dbConnectTimeoutMs,
   dbPoolOptions,
 } from "../../../server/lib/db-pool-options";
@@ -29,6 +30,13 @@ describe("dbConnectTimeoutMs", () => {
 
   it.each(["abc", "-1", "1.5", "10s"])("refuse « %s » plutôt que de l'ignorer", (value) => {
     expect(() => dbConnectTimeoutMs({ DATABASE_CONNECT_TIMEOUT_MS: value })).toThrow(/DATABASE_CONNECT_TIMEOUT_MS/);
+  });
+
+  it("accepte la borne haute de setTimeout et refuse au-delà (Node ramènerait le délai à 1 ms)", () => {
+    expect(dbConnectTimeoutMs({ DATABASE_CONNECT_TIMEOUT_MS: String(MAX_DB_CONNECT_TIMEOUT_MS) })).toBe(2 ** 31 - 1);
+    for (const value of [String(2 ** 31), "99999999999999999999"]) {
+      expect(() => dbConnectTimeoutMs({ DATABASE_CONNECT_TIMEOUT_MS: value })).toThrow(/DATABASE_CONNECT_TIMEOUT_MS/);
+    }
   });
 
   it("passe le plafond au pool", () => {
