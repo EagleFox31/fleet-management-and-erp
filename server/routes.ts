@@ -1121,12 +1121,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Numéro d'immatriculation déjà utilisé" });
       }
       
-      // Créer le véhicule
-      const vehicle = await storage.createVehicle(parsedVehicle, req.user?.id);
-      
       // Importer les services nécessaires
       const { VehicleActivationService } = await import('./services/vehicle-activation-service-working');
       const { DocumentManagementService } = await import('./services/document-management-service');
+
+      // Types de document vérifiés AVANT la création : un type inconnu ou inactif répond 400 sans véhicule orphelin.
+      const { resolveActiveVehicleDocumentTypes } = await import('./lib/vehicle-document-type');
+      await resolveActiveVehicleDocumentTypes([
+        ...VehicleActivationService.documentTypeCodes(workflowData?.documents),
+        ...DocumentManagementService.workflowDocumentTypes(workflowData),
+      ]);
+
+      // Créer le véhicule
+      const vehicle = await storage.createVehicle(parsedVehicle, req.user?.id);
       
       // Activer le véhicule avec toutes les données du workflow
       await VehicleActivationService.activateVehicleFromWorkflow(vehicle.id, {
@@ -1166,8 +1173,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           errors: error.errors 
         });
       }
-      console.error("Create vehicle from workflow error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
+      // AppError (400 lisible) telle quelle ; le reste devient une 500 normalisée, journalisée par errorHandler.
+      return next(error);
     }
   });
 

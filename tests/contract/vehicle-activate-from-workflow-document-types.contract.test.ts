@@ -1,0 +1,131 @@
+import { mkdirSync, rmSync, writeFileSync } from "fs";
+import { join } from "path";
+import { eq, inArray } from "drizzle-orm";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { db } from "../../server/db";
+import { UNKNOWN_VEHICLE_DOCUMENT_TYPE_MESSAGE } from "../../server/lib/vehicle-document-type";
+import { vehicleDocuments, vehicleDocumentTypes, vehicles } from "../../shared/schema";
+import { leakText } from "../support/api-error";
+import { startContractSession } from "../support/contract-session";
+import { uniqueTestToken } from "../support/ids";
+
+/**
+ * POST /api/vehicles/activate-from-workflow et le référentiel `vehicle_document_types`.
+ *
+ * Les types de document sont vérifiés AVANT la création du véhicule : un type inconnu ou
+ * inactif répond 400 lisible, sans véhicule orphelin. Avant ce correctif, le véhicule était
+ * créé, puis le refus du type tombait dans un catch qui répondait 500 « Erreur serveur ».
+ */
+
+type Actor = "chef";
+let session: Awaited<ReturnType<typeof startContractSession<Actor>>>;
+const createdVehicleIds: number[] = [];
+const files: string[] = [];
+
+function vehicleData(plate: string) {
+  return { registrationNumber: plate, brand: "TESTMarque", model: "TESTModele", year: 2024, mileage: 0, vehicleType: "porteur", status: "operational" };
+}
+
+/** Fichier réel sous uploads/ : un document dont le fichier manque est ignoré, le test ne prouverait rien. */
+function uploadedFile(label: string): { relative: string; filename: string } {
+  const filename = `${uniqueTestToken(label)}.pdf`;
+  mkdirSync(join(process.cwd(), "uploads"), { recursive: true });
+  const absolute = join(process.cwd(), "uploads", filename);
+  writeFileSync(absolute, "TEST");
+  files.push(absolute);
+  return { relative: `uploads/${filename}`, filename };
+}
+
+async function vehicleByPlate(plate: string) {
+  const rows = await db.select({ id: vehicles.id }).from(vehicles).where(eq(vehicles.registrationNumber, plate));
+  createdVehicleIds.push(...rows.map((row) => row.id));
+  return rows;
+}
+
+beforeAll(async () => {
+  session = await startContractSession<Actor>({ chef: "workshop_manager" });
+});
+
+afterAll(async () => {
+  for (const file of files) rmSync(file, { force: true });
+  // vehicle_documents et status_history suivent le véhicule (ON DELETE CASCADE).
+  if (createdVehicleIds.length > 0) await db.delete(vehicles).where(inArray(vehicles.id, createdVehicleIds));
+  await session?.stop();
+});
+
+describe("POST /api/vehicles/activate-from-workflow : types de document", { timeout: 60000 }, () => {
+  it("type inconnu : 400 lisible, aucun véhicule créé", async () => {
+    const plate = uniqueTestToken("TSTA");
+    const file = uploadedFile("activate-inconnu");
+    const res = await session.call("POST", "/api/vehicles/activate-from-workflow", {
+      body: {
+        vehicleData: vehicleData(plate),
+        workflowData: {
+          documents: [{ name: "TEST inconnu", type: "zz_inconnu", filename: file.filename, filesize: 4, file_type: "application/pdf", file_path: file.relative }],
+        },
+      },
+    });
+    // Lu avant toute assertion : un véhicule orphelin est retrouvé et nettoyé même si le statut échoue.
+    const orphans = await vehicleByPlate(plate);
+
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe(UNKNOWN_VEHICLE_DOCUMENT_TYPE_MESSAGE);
+    expect(leakText(res.body)).not.toMatch(/violates|foreign key|constraint|select |insert |at .+\.ts|Error:/i);
+    expect(orphans).toHaveLength(0);
+  });
+
+  it("type du référentiel désactivé (document d'activation) : 400 lisible, aucun véhicule créé", async () => {
+    const plate = uniqueTestToken("TSTA");
+    const file = uploadedFile("activate-inactif");
+    const [before] = await db.select({ active: vehicleDocumentTypes.active }).from(vehicleDocumentTypes).where(eq(vehicleDocumentTypes.code, "visite_technique"));
+    expect(before).toBeDefined();
+    await db.update(vehicleDocumentTypes).set({ active: false }).where(eq(vehicleDocumentTypes.code, "visite_technique"));
+    try {
+      const res = await session.call("POST", "/api/vehicles/activate-from-workflow", {
+        body: {
+          vehicleData: vehicleData(plate),
+          workflowData: { documents: { visiteTechnique: { name: "TEST visite", filename: file.filename, file_path: file.relative } } },
+        },
+      });
+      const orphans = await vehicleByPlate(plate);
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe(UNKNOWN_VEHICLE_DOCUMENT_TYPE_MESSAGE);
+      expect(orphans).toHaveLength(0);
+    } finally {
+      await db.update(vehicleDocumentTypes).set({ active: before.active }).where(eq(vehicleDocumentTypes.code, "visite_technique"));
+    }
+  });
+
+  it("chemin nominal : alias historique normalisé, véhicule et documents créés", async () => {
+    const plate = uniqueTestToken("TSTA");
+    const insurance = uploadedFile("activate-assurance");
+    const registration = uploadedFile("activate-carte");
+    const res = await session.call("POST", "/api/vehicles/activate-from-workflow", {
+      body: {
+        vehicleData: vehicleData(plate),
+        workflowData: {
+          // Lu par DocumentManagementService (alias « insurance ») ; la carte grise, par VehicleActivationService.
+          documents: [{ name: "TEST assurance", type: "insurance", filename: insurance.filename, filesize: 4, file_type: "application/pdf", file_path: insurance.relative }],
+        },
+      },
+    });
+    expect(res.status).toBe(201);
+    const [created] = await vehicleByPlate(plate);
+    expect(created).toBeDefined();
+    const docs = await db.select({ type: vehicleDocuments.type, filename: vehicleDocuments.filename }).from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, created.id));
+    expect(docs).toEqual([{ type: "assurance", filename: insurance.filename }]);
+
+    const plate2 = uniqueTestToken("TSTA");
+    const res2 = await session.call("POST", "/api/vehicles/activate-from-workflow", {
+      body: {
+        vehicleData: vehicleData(plate2),
+        workflowData: { documents: { carteGrise: { name: "TEST carte", filename: registration.filename, file_path: registration.relative } } },
+      },
+    });
+    expect(res2.status).toBe(201);
+    const [created2] = await vehicleByPlate(plate2);
+    const docs2 = await db.select({ type: vehicleDocuments.type }).from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, created2.id));
+    expect(docs2).toEqual([{ type: "carte_grise" }]);
+  });
+});

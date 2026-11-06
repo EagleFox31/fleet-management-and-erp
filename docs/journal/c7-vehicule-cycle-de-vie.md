@@ -836,3 +836,29 @@ WHERE po.status IN ('delivered', 'completed')
   - désactivation d'un type utilisé refusée : 2 échecs.
 - Idempotence sur Postgres local : deux passes de la migration laissent la contrainte au même `oid` et au même `xmin` (21567 / 254976). Après le mutant FK, le démarrage suivant a reposé la contrainte.
 - Comptes avant et après : 9 documents, 11 types, 0 ligne hors référentiel.
+
+## 2026-11-06 13:12 — Activation depuis le workflow : types de document vérifiés avant la création du véhicule
+
+**Quoi.**
+- `POST /api/vehicles/activate-from-workflow` vérifie les types de document avant `createVehicle`. Un type inconnu ou inactif répond 400 « Type de document inconnu ou inactif. » et ne crée aucun véhicule.
+- Le catch de la route passe l'erreur à `next(error)` : une AppError garde son statut, le reste devient une 500 normalisée et journalisée par `errorHandler`. Avant, tout échec répondait 500 « Erreur serveur ».
+- `VehicleActivationService.processDocuments` et `WorkflowDocumentService.transferDocumentsToVehicle` ne posent plus les codes de la graine sans contrôle. Ils passent par `resolveActiveVehicleDocumentTypes`, avant la première écriture.
+- `DocumentManagementService.saveDocumentsToDatabase` relance une AppError telle quelle. Une autre erreur est enveloppée avec sa `cause`.
+
+**Comment.**
+- Les deux services exposent, sans effet de bord, les types qu'ils écriront : `VehicleActivationService.documentTypeCodes` et `DocumentManagementService.workflowDocumentTypes`.
+- La route les vérifie en un seul appel avant `createVehicle`.
+- La route reste dans `routes.ts`. Seul son corps change, aucune route n'y est ajoutée.
+
+**Pourquoi un contrôle préalable plutôt qu'une transaction.**
+- `storage.createVehicle` et les deux services écrivent sur la connexion globale. Faire passer un `tx` dans toute la chaîne serait un gros diff dans un fichier gelé.
+- Le contrôle préalable ferme le cas réel : un type refusé ne laisse plus de véhicule orphelin.
+- Une course reste possible : un type désactivé entre le contrôle et l'écriture. Dans ce cas, l'activation lève sans écrire de document, et l'erreur est avalée comme avant (« continuant »).
+
+**Preuve.**
+- Nouveau contrat `vehicle-activate-from-workflow-document-types` : 3 tests (type inconnu, type désactivé, chemin nominal).
+- Nouveau test d'intégration : transfert avec un type désactivé.
+- Mutants, détectés :
+  - l'ancienne route donne 500 pour un type inconnu, 201 pour un type désactivé, et laisse 2 véhicules orphelins en base ;
+  - sans contrôle des codes d'activation dans la route : 201, avec un véhicule créé ;
+  - sans contrôle dans le transfert : le transfert réussit au lieu de lever une 400.

@@ -7,6 +7,7 @@ import fs from "fs";
 import { AppError } from "../lib/app-error";
 import { normalizeVehicleDocumentType, type VehicleDocumentTypeCode } from "../../shared/constants/vehicle-document-types";
 import { moduleLogger } from "../lib/logger";
+import { resolveActiveVehicleDocumentTypes } from "../lib/vehicle-document-type";
 import { isInsideDirectory, isSafePathSegment, realPathStaysInside, uploadedFileCandidates } from "../lib/uploaded-file";
 
 const log = moduleLogger("workflow-documents");
@@ -143,6 +144,9 @@ export class WorkflowDocumentService {
       // Récupérer les documents du workflow
       // Seuls les documents pas encore transférés : un rejeu ne duplique rien dans vehicle_documents.
       const documents = (await this.getWorkflowDocuments(sessionId, null, workflowId)).filter((doc) => !doc.isTransferred);
+      // Codes actifs exigés avant toute copie ou écriture : un type désactivé donne un 400 lisible,
+      // sans fichier copié ni document marqué transféré.
+      const types = await resolveActiveVehicleDocumentTypes(documents.map((doc) => toVehicleDocumentType(doc.documentType)));
 
       // Copier les fichiers vers le dossier du véhicule
       // Référence du contrôle réel : la racine possédée, jamais le dossier calculé depuis l'id
@@ -159,7 +163,7 @@ export class WorkflowDocumentService {
       }
       
       const transferredIds: number[] = [];
-      for (const doc of documents) {
+      for (const [index, doc] of documents.entries()) {
         const originalPath = existingUploadedFile(doc.filePath);
         // Le nom d'origine vient du client : sans répertoire, il reste dans le dossier du véhicule.
         // Aléa dans le nom : deux pièces de même type et de même nom ne s'écrasent pas sur le disque.
@@ -192,7 +196,7 @@ export class WorkflowDocumentService {
           await tx.insert(vehicleDocuments).values({
             vehicleId,
             name: doc.originalName,
-            type: toVehicleDocumentType(doc.documentType),
+            type: types[index],
             description: "Document transféré depuis le workflow d'acquisition",
             filename: newFileName,
             filesize: doc.fileSize,

@@ -5,6 +5,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { uploadedFileCandidates } from '../lib/uploaded-file';
 import { resolveActiveVehicleDocumentTypes } from '../lib/vehicle-document-type';
+import { isAppError } from '../lib/app-error';
 
 export interface DocumentData {
   name: string;
@@ -66,7 +67,9 @@ export class DocumentManagementService {
       console.log(`✅ Tous les documents sauvegardés pour le véhicule ${vehicleId}`);
     } catch (error) {
       console.error('Erreur lors de la sauvegarde des documents:', error);
-      throw new Error('Impossible de sauvegarder les documents');
+      // Une AppError (400 lisible) passe telle quelle ; le reste garde sa cause pour le journal.
+      if (isAppError(error)) throw error;
+      throw new Error('Impossible de sauvegarder les documents', { cause: error });
     }
   }
 
@@ -107,6 +110,15 @@ export class DocumentManagementService {
 
     // Sauvegarder les documents
     await this.saveDocumentsToDatabase(vehicleId, documents, uploadedById);
+  }
+
+  /**
+   * Types bruts des documents que processWorkflowDocuments écrira, sans effet : la route les vérifie
+   * avant de créer le véhicule.
+   */
+  static workflowDocumentTypes(workflowData: any): unknown[] {
+    if (!workflowData || typeof workflowData !== 'object') return [];
+    return this.extractDocumentsFromWorkflowData(workflowData).map((doc) => doc?.type);
   }
 
   /**

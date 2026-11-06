@@ -2,6 +2,7 @@ import { db } from '../db';
 import { vehicles, vehicleDocuments, workOrders, statusHistory, activityLogs } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 import type { VehicleDocumentTypeCode } from '@shared/constants/vehicle-document-types';
+import { resolveActiveVehicleDocumentTypes } from '../lib/vehicle-document-type';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -38,7 +39,26 @@ interface WorkflowData {
   vehicleId?: number;
 }
 
+// Codes de la graine du référentiel (vérifiés à la compilation) : vehicle_documents.type a une clé étrangère,
+// et un code peut avoir été désactivé : il est relu actif avant toute écriture.
+const ACTIVATION_DOCUMENT_TYPES: readonly { key: string; type: VehicleDocumentTypeCode; expiryField: string | null }[] = [
+  { key: 'carteGrise', type: 'carte_grise', expiryField: 'licensePlateExpiry' },
+  { key: 'assurance', type: 'assurance', expiryField: 'insuranceExpiry' },
+  { key: 'visiteTechnique', type: 'visite_technique', expiryField: 'technicalInspectionDate' },
+  { key: 'facturAchat', type: 'autre', expiryField: null }
+];
+
 export class VehicleActivationService {
+  /**
+   * Types que l'activation écrira pour ces documents, sans effet : la route les vérifie
+   * avant de créer le véhicule.
+   */
+  static documentTypeCodes(documents: WorkflowData['documents'] | null | undefined): VehicleDocumentTypeCode[] {
+    if (!documents || typeof documents !== 'object') return [];
+    const present = documents as Record<string, unknown>;
+    return ACTIVATION_DOCUMENT_TYPES.filter((d) => present[d.key]).map((d) => d.type);
+  }
+
   /**
    * Active un véhicule depuis un workflow terminé
    */
@@ -110,13 +130,10 @@ export class VehicleActivationService {
   private static async processDocuments(vehicleId: number, documents: any, workflowData: WorkflowData) {
     console.log('📂 Début du traitement des documents pour véhicule', vehicleId);
     
-    // Codes de la graine du référentiel (vérifiés à la compilation) : vehicle_documents.type a une clé étrangère.
-    const documentTypes: { key: string; type: VehicleDocumentTypeCode; expiryField: string | null }[] = [
-      { key: 'carteGrise', type: 'carte_grise', expiryField: 'licensePlateExpiry' },
-      { key: 'assurance', type: 'assurance', expiryField: 'insuranceExpiry' },
-      { key: 'visiteTechnique', type: 'visite_technique', expiryField: 'technicalInspectionDate' },
-      { key: 'facturAchat', type: 'autre', expiryField: null }
-    ];
+    // Codes actifs exigés avant la première écriture, jamais une violation de clé étrangère. La route les a
+    // vérifiés avant de créer le véhicule ; un code désactivé entre-temps lève ici, sans aucun document écrit.
+    const documentTypes = ACTIVATION_DOCUMENT_TYPES.filter((d) => documents[d.key]);
+    await resolveActiveVehicleDocumentTypes(documentTypes.map((d) => d.type));
 
     let documentsProcessed = 0;
 
