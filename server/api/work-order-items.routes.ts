@@ -4,9 +4,11 @@ import { assertWorkOrderReadable } from "../lib/work-order-scope";
 import { moduleLogger } from "../lib/logger";
 
 const log = moduleLogger("work-order-items");
+const failWith = makeFailWith(log);
 import { storage } from "../storage";
-import { AppError, isAppError } from "../lib/app-error";
+import { AppError } from "../lib/app-error";
 import { parseRouteId } from "../lib/route-id";
+import { makeFailWith } from "../lib/route-helpers";
 import { workOrderItemsService } from "../services/work-order-items-service";
 import { workOrderStaffScope } from "../lib/work-order-realtime-scope";
 
@@ -68,9 +70,7 @@ workOrderItemsRoutes.get("/:workOrderId/items", isAnyUser, async (req, res, next
     await assertWorkOrderReadable(req.user, workOrderId);
     return res.status(200).json(await workOrderItemsService.getItemsForWorkOrder(workOrderId));
   } catch (error) {
-    if (isAppError(error)) return next(error);
-    log.error({ err: error, requestId: req.requestId }, "Get work order items error");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return failWith(error, req, next, "Get work order items error");
   }
 });
 
@@ -97,9 +97,7 @@ workOrderItemsRoutes.post("/:workOrderId/items", isTechnician, async (req, res, 
 
     return res.status(201).json(resultat.data);
   } catch (error) {
-    if (isAppError(error)) return next(error);
-    log.error({ err: error, requestId: req.requestId }, "Create work order item error");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return failWith(error, req, next, "Create work order item error");
   }
 });
 
@@ -136,9 +134,7 @@ workOrderItemDetailRoutes.patch("/:id", async (req, res, next) => {
 
     return res.status(200).json(resultat.data);
   } catch (error) {
-    if (isAppError(error)) return next(error);
-    log.error({ err: error, requestId: req.requestId }, "Update work order item error");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return failWith(error, req, next, "Update work order item error");
   }
 });
 
@@ -171,9 +167,7 @@ workOrderItemDetailRoutes.delete("/:id", async (req, res, next) => {
 
     return res.status(200).json(resultat.data);
   } catch (error) {
-    if (isAppError(error)) return next(error);
-    log.error({ err: error, requestId: req.requestId }, "Delete work order item error");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return failWith(error, req, next, "Delete work order item error");
   }
 });
 
@@ -182,20 +176,19 @@ workOrderItemDetailRoutes.delete("/:id", async (req, res, next) => {
 export const laborCatalogRoutes = Router();
 
 // Barème interne (heures standard, taux) : personnel seulement ; un client ne le lit pas.
-laborCatalogRoutes.get("/", isStaff, async (req, res) => {
+laborCatalogRoutes.get("/", isStaff, async (req, res, next) => {
   try {
     const includeInactive = req.query.includeInactive === "1";
     return res.status(200).json(await workOrderItemsService.getLaborCatalog(includeInactive));
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Get labor catalog error");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return failWith(error, req, next, "Get labor catalog error");
   }
 });
 
 /** Écriture du référentiel : la garde `isWorkshopManager` est posée au montage. */
 export const laborCatalogWriteRoutes = Router();
 
-laborCatalogWriteRoutes.post("/", async (req, res) => {
+laborCatalogWriteRoutes.post("/", async (req, res, next) => {
   try {
     const resultat = await workOrderItemsService.createLaborCatalogEntry(req.body ?? {}, req.user?.id);
     if (!resultat.success) {
@@ -204,8 +197,7 @@ laborCatalogWriteRoutes.post("/", async (req, res) => {
 
     return res.status(201).json(resultat.data);
   } catch (error) {
-    console.error("Create labor catalog entry error:", error);
-    return res.status(500).json({ message: "Erreur serveur" });
+    return failWith(error, req, next, "Create labor catalog entry error");
   }
 });
 

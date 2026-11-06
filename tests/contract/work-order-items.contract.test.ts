@@ -1,10 +1,12 @@
 import { createServer, type Server } from "http";
 import { eq, inArray } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
 import { WORK_ORDER_ASSIGNEE_ERROR } from "../../server/services/work-order-assignee";
 import { users, workOrderItems, workOrders } from "../../shared/schema";
+import { workOrderItemsService } from "../../server/services/work-order-items-service";
 import { getContractApp } from "../support/app";
+import { apiErrorProblems, leakText, TECHNICAL } from "../support/api-error";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD } from "../support/factories";
 
@@ -262,5 +264,38 @@ describe("lignes de travail d'un OT", { timeout: 180000 }, () => {
     // Désaffecter reste possible.
     const unassign = await call("PATCH", `/api/work-order-items/${itemId}`, { cookie, body: { technicianId: null } });
     expect(unassign.status).toBe(200);
+  });
+
+  it("panne du service : 500 générique avec référence, sans détail technique", async () => {
+    const manager = await createTestUser({ role: "workshop_manager" });
+    ids.userIds.push(manager.id);
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    const [wo] = await db
+      .insert(workOrders)
+      .values({ vehicleId: vehicle.id, title: "TEST lignes panne", status: "in_progress" })
+      .returning();
+    workOrderIds.push(wo.id);
+    const cookie = await login(manager.username);
+    const created = await call("POST", `/api/work-orders/${wo.id}/items`, {
+      cookie,
+      body: { customLabel: "Ligne panne", actualHours: 1 },
+    });
+    expect(created.status).toBe(201);
+    const itemId = created.body.items[0].id;
+
+    const SERVICE_ERROR = 'relation "work_order_items" does not exist';
+    const cases = [
+      { method: "createItem", verb: "POST", path: `/api/work-orders/${wo.id}/items`, body: { customLabel: "X", actualHours: 1 } },
+      { method: "updateItem", verb: "PATCH", path: `/api/work-order-items/${itemId}`, body: { actualHours: 2 } },
+    ] as const;
+    for (const c of cases) {
+      const spy = vi.spyOn(workOrderItemsService, c.method).mockRejectedValueOnce(new Error(SERVICE_ERROR));
+      const res = await call(c.verb, c.path, { cookie, body: c.body });
+      spy.mockRestore();
+      expect(apiErrorProblems(res.status, res.body, 500, undefined, res.headers.get("x-request-id"))).toEqual([]);
+      expect(leakText(res.body)).not.toContain(SERVICE_ERROR);
+      expect(leakText(res.body)).not.toMatch(TECHNICAL);
+    }
   });
 });

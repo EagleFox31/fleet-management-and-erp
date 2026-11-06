@@ -758,3 +758,13 @@ WHERE po.status IN ('delivered', 'completed')
 - **Preuve** :
   - contrat `work-order-items` : nouveau cas couvrant le chauffeur, le compte supprimé, le chef d'atelier accepté, le PATCH refusé (sans écriture) et la désaffectation ;
   - mutant (service d'origine) : le cas échoue (201 au lieu de 400).
+
+## 2026-11-06 — Lignes d'OT et barème : erreurs par le chemin commun
+
+- **Quoi** : dans `server/api/work-order-items.routes.ts`, les six `catch` qui renvoyaient `res.status(500).json({ message: "Erreur serveur" })` passent par `makeFailWith(log)`. Le `console.error` de la création de poste du barème est migré.
+- **Comment** : `failWith(error, req, next, "<événement>")`. Une `AppError` ou une `ZodError` va directement au gestionnaire central ; le reste devient une 500 générique, journalisée une seule fois par `errorHandler`, avec `routeModule` et l'événement de la route.
+- **Pourquoi** : backlog de 0a. Constat : le corps de réponse portait déjà le `requestId`, parce que `errorResponseGuard` normalise toute réponse ≥ 400. Le gain est ailleurs : un seul chemin d'erreur, la cause gardée dans le log unique, et plus de `console.*`.
+- **Preuve** :
+  - nouveau contrat « panne du service » : POST et PATCH répondent en 500 normalisée, avec une référence égale à `X-Request-Id` et sans le message SQL ;
+  - `labor-catalog` et `work-order-items` verts (14 tests) ;
+  - le mutant (routes d'origine) passe aussi : ce test fige le contrat, il ne détecte pas l'ancien code, qui était déjà conforme côté client.
