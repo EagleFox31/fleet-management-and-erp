@@ -27,11 +27,20 @@ describe("budget de mission (L1f) : actions visibles selon le rôle et les statu
     expect(missionBudgetActions("management", { status: "disbursed" }, "delivered")).toEqual(none);
   });
 
-  it("mission terminée ou annulée : plus aucune action, même pour l'administrateur", () => {
+  it("mission terminée ou annulée : plus aucune action sur le budget, même pour l'administrateur", () => {
     for (const status of ["completed", "cancelled"]) {
       expect(missionBudgetActions("admin", null, status), status).toEqual(none);
-      expect(missionBudgetActions("admin", { status: "disbursed" }, status), status).toEqual(none);
+      expect(missionBudgetActions("admin", { status: "requested" }, status), status).toEqual(none);
+      expect(missionBudgetActions("admin", { status: "approved" }, status), status).toEqual(none);
     }
+  });
+
+  it("dépenses (R1) : ouvertes sur mission terminée pour qui décaisse ; jamais sur mission annulée", () => {
+    for (const role of ["admin", "secretary", "logistics"]) {
+      expect(missionBudgetActions(role, { status: "disbursed" }, "completed"), role).toEqual({ ...none, expenses: true });
+      expect(missionBudgetActions(role, { status: "disbursed" }, "cancelled"), role).toEqual(none);
+    }
+    expect(missionBudgetActions("management", { status: "disbursed" }, "completed"), "qui approuve ne justifie pas").toEqual(none);
   });
 
   it("reste d'une ligne : 0 si la ligne est absente ou les dépenses pas encore lues", () => {
