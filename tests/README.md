@@ -74,6 +74,17 @@ Repousser le schéma à chaque changement de branche. Supprimer la base en fin d
 
 - `DATABASE_WS_PROXY` (sans protocole) bascule `server/db.ts` sur le proxy en clair ; absent = Neon, inchangé.
 - **Piège : `read ECONNRESET` au bout de 30 s sous rafale.** Le relais de ports de Docker Desktop (Windows) accepte parfois une connexion vers `localhost:<port wsproxy>` sans la transmettre au conteneur, puis la coupe au bout de 30 s. Le proxy ne voit rien passer, Postgres non plus. Ce cas est rare au repos, plus fréquent pendant qu'une autre session lance une campagne de contrats sur la même machine, le relais étant partagé par tous les conteneurs. Symptôme : un 503 de la garde de connexion (`login-lockout`) ou une 5xx sur la première requête qui ouvre une connexion. Avec le plafond `DATABASE_CONNECT_TIMEOUT_MS` (10 s par défaut), l'échec arrive en 10 s au lieu de 30. Il n'est pas masqué : relancer le fichier seul, et ne pas le classer comme une régression du code tant qu'il passe isolément. Reproduction sans l'application : boucle de connexions `Client` neon en rafale vers le même port (2 échecs sur 1 844, tous à 30 s). Voir `docs/analysis/LESSONS_LEARNED.md`, entrée du 2026-11-06 sur ce sujet.
+- **Piège : timeouts de connexion sous rafale en local, ne pas relever le plafond.**
+  - **Symptôme** : `timeout exceeded when trying to connect` (attente d'une place dans le pool) ou `Connection terminated due to connection timeout` (ouverture), sur les tests qui ouvrent beaucoup de connexions à la fois : `backup-production`, `login-lockout-db-store` (20 réservations en parallèle), `management-dashboard-service`.
+  - **Mesure** (2026-11-06, wsproxy fm-cpw) : sur 20 connexions simultanées, 16 ou 17 s'ouvrent en moins de 0,8 s ; les 3 ou 4 autres restent muettes jusqu'à la coupure du relais à 30 s. Aucune valeur de plafond ne sauve une connexion muette :
+
+    | `DATABASE_CONNECT_TIMEOUT_MS` | 3 fichiers ci-dessus, 3 passages | Effet |
+    |---|---|---|
+    | 10000 (défaut) | 3/3 verts | échec net en 10 s si une connexion est muette |
+    | 30000 | 2 verts, 1 rouge `Test timed out in 30000ms` (40,8 s) | le plafond tombe en même temps que le `timeout: 30_000` du test, qui expire avant lui |
+    | 0 | vert (1 passage) | attente jusqu'à la coupure du relais à 30 s |
+
+  - **Conduite** : garder le défaut de 10 s. Ne pas le relever, cela ne fait que retarder l'échec. Relancer le fichier. Si l'échec se reproduit sur main pur et qu'une sonde de rafale (20 `pool.connect()` simultanés vers le wsproxy, `connectionTimeoutMillis: 0`, durée de chacun) montre des connexions coupées à 30 s, la cause est le relais, pas le code. La CI Linux, sans Docker Desktop, fait foi. Ne pas réduire la rafale dans ces tests : elle vérifie la concurrence (verrous consultatifs).
 - L'hôte `postgres` de l'URL est résolu par wsproxy dans le réseau Compose, pas par Node : ne pas le remplacer par `localhost`.
 - Les scripts `test:integration` et `test:contract` ne chargent pas `.env` : tout passe par l'environnement du shell.
 - Le `tmpfs` du conteneur repart vide à chaque `up` : les tables sont recréées par `test:db:schema`

@@ -2521,3 +2521,30 @@ soumission sans doublon.
   - Campagnes sur Postgres local : unitaires 301/301, intégration 73/73 et 1/1, contrats 254/254, work-order-items 10/10 en boucle (13 à 18 s, aucun 503).
 - **RAIDER** : R/A (plafond configurable par variable d'environnement, sans hypothèse d'hébergeur) ; D (comportement de la garde inchangé, contrats verts) ; Failure memory (`LESSONS_LEARNED.md`, `tests/README.md`).
 - **Reste / risques** : le plafond borne aussi l'attente d'une place dans le pool (max 10 par défaut, inchangé) : sous saturation de plus de 10 s, la requête répond par un 5xx générique avec sa référence. Prod sur GO de l'utilisatrice.
+
+## 2026-11-06T13:12:00+01:00 — Pools Postgres : erreur d'une connexion au repos journalisée, sans arrêt du processus
+
+- **Agent** : de (fleet-testeur) · **Branche** : `fix/db-pool-error-listener` · **Commit** : voir `git log`
+- **Statut** : fait (PR brouillon)
+- **Quoi** : `server/db.ts` n'écoutait pas `error` sur `pool` ni `listenerPool`. Une connexion inactive qui casse (redémarrage de la base, coupure réseau) levait l'erreur et arrêtait le serveur. Relevé par la revue de sécurité de #582.
+- **Comment** : `server/lib/db-pool-errors.ts` (`logPoolErrors`) journalise par `moduleLogger("db")` avec `{ err, pool }`. pg-pool a déjà retiré la connexion fautive, la suivante est neuve.
+- **Comment tester (QA)** : `tests/unit/server/db-pool-errors.test.ts` :
+  - témoin : sans écouteur, l'émission lève ;
+  - l'écouteur journalise sans lever ;
+  - le vrai `server/db` porte un écouteur sur chaque pool. Ce test est rouge sans le branchement dans `db.ts`.
+  - Campagnes : unitaires 302/302, tsc 0, check:tests 0. Intégration 71/74 : les 3 échecs (timeouts de connexion sous rafale) se reproduisent à l'identique sur main pur, ils viennent du relais Docker et non de ce lot.
+- **RAIDER** : R (un seul module pour les deux pools) ; D (aucun changement de comportement hors panne) ; E (log structuré, pas de `console.*`). Ne s'applique pas : I, Retroactive (pas d'état).
+- **Reste / risques** : aucun ; une connexion en cours de requête renvoie toujours son erreur à l'appelant (inchangé).
+
+## 2026-11-06T13:33:00+01:00 — Test du plafond de connexion : garde de version du driver
+
+- **Agent** : de (fleet-testeur) · **Branche** : `test/neon-version-guard` · **Commit** : voir `git log`
+- **Statut** : fait (PR brouillon)
+- **Quoi** : `tests/unit/server/db-pool-options.test.ts` atteignait son délai de 10 s sur un worktree relié par jonction au `node_modules` partagé, resté en neon 0.10.4. Sur cet ancien driver, la connexion reste en suspens : le test était correct, mais l'échec ne donnait pas la cause. Pas de réseau en jeu : l'hôte « db » n'est qu'un paramètre envoyé au serveur TCP local du test.
+- **Comment** : une garde compare la version installée à la plage de `package.json` (lue, pas recopiée). Elle échoue tout de suite avec « node_modules obsolète : npm ci », dans un test dédié et dans le `beforeAll` du test du pair muet, qui est alors sauté.
+- **Comment tester (QA)** :
+  - 10/10 verts lancé seul (tests en 340 à 390 ms) ;
+  - rouge en 0,85 s avec ce message sur un worktree temporaire relié au `node_modules` en 0.10.4 (avant : délai de 10 s) ;
+  - unitaires 302/302, tsc 0, check:tests 0.
+- **RAIDER** : A (version lue dans `package.json`, paquet résolu par Node) ; D (assertions du test inchangées) ; E (erreur actionnable). Ne s'applique pas : I, Retroactive (aucun état).
+- **Reste / risques** : le `npm ci` du `node_modules` partagé reste à planifier (décision 0a, moment calme).
