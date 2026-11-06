@@ -39,16 +39,21 @@ describe("GET /api/feature-flags et squelettes", { timeout: 120000 }, () => {
     expect(login.status).toBe(200);
     const cookie = login.headers.get("set-cookie")!.split(";")[0];
 
-    const flags = await call("GET", "/api/feature-flags", cookie);
-    expect(flags.status).toBe(200);
-    expect(featureFlagsResponseSchema.safeParse(flags.body).success).toBe(true);
+    // Drapeau coupé explicitement : le test ne dépend ni de l'environnement ni du fichier précédent.
+    const previousFlags = process.env.FEATURE_FLAGS;
+    process.env.FEATURE_FLAGS = "incidents=off";
+    try {
+      const flags = await call("GET", "/api/feature-flags", cookie);
+      expect(flags.status, JSON.stringify(flags.body)).toBe(200);
+      expect(featureFlagsResponseSchema.safeParse(flags.body).success).toBe(true);
+      expect((flags.body as Record<string, boolean>).incidents).toBe(false);
 
-    const off = await call("GET", "/api/incidents", cookie);
-    if ((flags.body as Record<string, boolean>).incidents === false) {
-      expect(off.status).toBe(404);
+      const off = await call("GET", "/api/incidents", cookie);
+      expect(off.status, JSON.stringify(off.body)).toBe(404);
       expect(off.body).toMatchObject({ code: "NOT_FOUND" });
-    } else {
-      expect(off.status).toBe(501);
+    } finally {
+      if (previousFlags === undefined) delete process.env.FEATURE_FLAGS;
+      else process.env.FEATURE_FLAGS = previousFlags;
     }
   });
 });

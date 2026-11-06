@@ -520,3 +520,19 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
 - **Gelés** : 14 appels dans 8 fichiers. Ce sont des paiements, recharges et consommations carburant, le prix convenu de mission, des statistiques en `console.log`. Le compte par fichier ne fait que baisser.
 - **Pourquoi** : les journaux sont lus bien au-delà des rôles finance. L'identifiant de l'objet suffit à retrouver le montant en base.
 - **Reste** : décider si les journaux d'audit métier (paiement enregistré, prix convenu modifié) gardent le montant. C'est à trancher par 0a ; d'ici là, ils sont gelés.
+## 2026-11-06 — `feature-flags.contract` rouge en suite complète : fuite de `FEATURE_FLAGS` entre fichiers
+
+- **Symptôme** : le test est vert seul et rouge en suite complète avec « expected 200 to be 501 ».
+- **Reproduction** : lancer `id-range-query-body.contract.test.ts` puis `feature-flags.contract.test.ts` dans la même commande.
+- **Cause racine, en deux défauts cumulés** :
+  1. **Fuite d'environnement.** Onze fichiers de contrat fixent `process.env.FEATURE_FLAGS` au chargement du module, sans le rendre. C'est le cas de `id-range-query-body` (`incidents=on`), mais aussi de `treasury`, `tariff-grid`, `fuel-anomalies`, etc. Avec `isolate: false`, la valeur reste pour les fichiers suivants : l'ordre d'exécution décide alors de l'état des drapeaux.
+  2. **Test périmé.** Le test lisait le drapeau effectif puis attendait 501 (« squelette ») si `incidents` était actif. La route est désormais implémentée : avec le drapeau actif, elle répond 200. Le test était vert seulement parce que le défaut est `off`.
+- **Correctif** :
+  - `tests/support/env-restore.ts` : `FILE_SCOPED_ENV`, `snapshotEnv`, `restoreEnv`. `setup-contract.ts` capture ces variables avant le premier fichier et les restaure dans son `afterAll`, donc à la fin de chaque fichier.
+  - `feature-flags.contract` force `incidents=off` (dans un `try/finally`) et vérifie que le drapeau est à `false` puis que la route répond 404. La branche 501 est supprimée.
+- **Preuve** :
+  - la paire de reproduction est verte avec le correctif complet ;
+  - elle est aussi verte avec la seule restauration du setup et le test d'origine : le setup est bien rejoué à chaque fichier ;
+  - la suite complète de contrats est verte : 251 fichiers, 3 080 tests.
+- **Prévention** : `tests/unit/support/env-restore.test.ts` échoue si un contrat affecte une variable d'environnement absente de `FILE_SCOPED_ENV`.
+- **Leçon** : en `isolate: false`, l'état du processus (env, singletons) passe d'un fichier à l'autre. Une variable que les tests modifient doit être restaurée par le setup commun, pas laissée à la discipline de chaque fichier.
