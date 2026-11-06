@@ -3332,3 +3332,17 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
 - **Résolution** : #570 passe les tests par `transitionWorkOrderStatus` (`tests/support/work-order-status.ts`), sans relâcher la garde ; suite d'intégration complète relancée (73 fichiers).
 - **Prévention** : `tsconfig.tests.json` (tests/ et e2e/) et `npm run check:tests`, lancé dans le job `typecheck` de la CI. Les 87 erreurs existantes sont figées par fichier dans `tests/typecheck-baseline.json` ; toute erreur nouvelle échoue, la base ne fait que baisser (`--update`). Test : `tests/unit/scripts/tests-typecheck-ratchet.test.ts`.
 - **Leçon généralisée** : un changement de signature se vérifie par le compilateur sur tous ses appelants, tests compris, et par la suite entière du niveau touché, jamais par le seul fichier modifié.
+
+## 2026-11-06 — 503 intermittent sur la garde de connexion : relais Docker Desktop et connexion Postgres sans plafond
+
+- **Contexte** : `tests/contract/work-order-items.contract.test.ts` (trois connexions simultanées) échouait par intermittence en 503 au bout de 30 s. Constaté par c7 sur main 65fcddb6 ; reproduit par de sur fm-cpw (6 échecs sur 7 entre 12:00 et 12:06, pendant une campagne de contrats de c7, puis 0 sur 20).
+- **Cause racine** :
+  1. Environnement : le relais de ports de Docker Desktop a accepté la socket vers le wsproxy sans la transmettre, puis l'a coupée à 30 s (`read ECONNRESET`). Le proxy n'a rien reçu, Postgres n'a rien journalisé. Reproduit sans l'application : 2 connexions sur 1 844 coupées, à 30 009 et 30 013 ms. Ce n'était ni une contention sur le verrou consultatif du lockout ni un pool saturé : le pool n'avait aucune demande en attente.
+  2. Produit : aucun plafond sur l'ouverture d'une connexion. Le driver neon (`connectionTimeoutMillis = 0`) attend sans limite un pair qui accepte la socket puis se tait ; seul le relais a fini par couper à 30 s. En production, un tel blocage vers Neon tiendrait un login sans fin. De plus, en 0.10.4, poser un plafond faisait planter le processus : `TypeError: Cannot set property message of #<ErrorEvent>`, levée dans `_connectionCallback` et non rattrapée.
+- **Classification** : environnement de test (relais partagé), plus une robustesse manquante dans le produit (attente illimitée). Le 503 lui-même est le comportement voulu : la garde est fermée sur panne.
+- **Résolution** : neon passe de 0.10.4 à 1.2.0, qui rejette proprement au plafond. `DATABASE_CONNECT_TIMEOUT_MS` (10 s par défaut, 0 = sans plafond, valeur invalide = arrêt au démarrage) s'applique à `pool` et `listenerPool` (`server/lib/db-pool-options.ts`). Pas de retry : la garde reste fermée sur panne (décision de 0a).
+- **Prévention** :
+  - `tests/unit/server/db-pool-options.test.ts` : serveur TCP muet ; `pool.connect()` doit échouer au plafond, sans planter ni garder de connexion. Le test échoue avec neon 0.10.4 (TypeError non rattrapée) et resterait en attente sans plafond.
+  - `tests/README.md`, section Postgres local : piège « `read ECONNRESET` au bout de 30 s sous rafale ».
+- **Leçon généralisée** : toute attente réseau du produit a un plafond explicite et configurable. Avant d'en poser un sur un driver, vérifier son chemin d'échec contre un pair muet : un délai mal géré peut transformer une lenteur en plantage. Pour un échec intermittent à durée fixe, chercher d'abord quel composant coupe à cette durée, côté proxy et côté base, avant de soupçonner les verrous applicatifs.
+

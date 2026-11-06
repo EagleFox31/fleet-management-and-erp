@@ -1,6 +1,6 @@
 import { createServer, type Server } from "http";
 import { inArray } from "drizzle-orm";
-import type { PoolClient } from "pg";
+import type { PoolClient } from "@neondatabase/serverless";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { db, pool } from "../../server/db";
 import { initializeDatabase, QHSE_INSPECTIONS_SQL, reportCdcConstraintGaps } from "../../server/init-database";

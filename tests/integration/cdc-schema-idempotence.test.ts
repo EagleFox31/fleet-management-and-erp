@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { PoolClient } from "pg";
+import type { PoolClient } from "@neondatabase/serverless";
 import { pool } from "../../server/db";
 import { CDC_SCHEMA_STATEMENTS, initializeDatabase, reportCdcConstraintGaps } from "../../server/init-database";
 

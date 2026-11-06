@@ -4,6 +4,7 @@ import ws from "ws";
 import * as schema from "@shared/schema";
 import { guardDatabaseConnection } from "./lib/production-db-guard";
 import { resolveListenerConnectionString } from "./lib/listener-connection";
+import { dbPoolOptions } from "./lib/db-pool-options";
 
 neonConfig.webSocketConstructor = ws;
 
@@ -32,8 +33,8 @@ guardDatabaseConnection("db");
 // Garde #298 : en test, refuse une variable de connexion directe visant une autre base.
 const listenerConnectionString = resolveListenerConnectionString();
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-export const listenerPool = new Pool({ connectionString: listenerConnectionString });
+export const pool = new Pool(dbPoolOptions(process.env.DATABASE_URL));
+export const listenerPool = new Pool(dbPoolOptions(listenerConnectionString));
 export const db = drizzle(pool, { schema });
 
 /** Transaction Drizzle, et « base ou transaction » pour les écritures composables. */
