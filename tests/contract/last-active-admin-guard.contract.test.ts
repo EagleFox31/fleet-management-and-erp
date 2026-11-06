@@ -8,6 +8,7 @@ import { users } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, TEST_USER_PASSWORD } from "../support/factories";
+import { backendPid, waitForBlockedBy } from "../support/lock-wait";
 
 /**
  * Garde du dernier administrateur actif : PATCH /api/users/:id (rôle), DELETE /api/users/:id et
@@ -163,6 +164,7 @@ describe("LAG3 : deux admins se retirent mutuellement en même temps", { timeout
 
   // Connexion du test qui tient elle-même le verrou de la garde pour forcer l'entrelacement.
   let lockHolder: PoolClient | undefined;
+  let lockHolderPid = 0;
   const LOCK = "SELECT pg_advisory_lock(hashtext('fleetmaster_last_admin'))";
   const UNLOCK = "SELECT pg_advisory_unlock(hashtext('fleetmaster_last_admin'))";
   async function takeLock() {
@@ -170,6 +172,7 @@ describe("LAG3 : deux admins se retirent mutuellement en même temps", { timeout
     lockHolder?.release(true);
     lockHolder = await pool.connect();
     await lockHolder.query(LOCK);
+    lockHolderPid = await backendPid(lockHolder);
   }
   async function dropLock() {
     const holder = lockHolder;
@@ -224,7 +227,7 @@ describe("LAG3 : deux admins se retirent mutuellement en même temps", { timeout
       answered = true;
       return r;
     });
-    await sleep(800);
+    await waitForBlockedBy(lockHolderPid, "suppression du second admin");
     expect(answered).toBe(false);
     expect((await rowOf(b.id)).deletedAt).toBeNull();
     await dropLock();
@@ -243,7 +246,7 @@ describe("LAG3 : deux admins se retirent mutuellement en même temps", { timeout
     const req = httpRequest({ host: "127.0.0.1", port, path: `/api/users/${b.id}`, method: "DELETE", headers: { Cookie: a.cookie } });
     req.on("error", () => undefined);
     req.end();
-    await sleep(600); // la requête attend le verrou côté serveur
+    await waitForBlockedBy(lockHolderPid, "suppression interrompue"); // la requête attend le verrou côté serveur
     req.destroy();
     await sleep(300);
     await dropLock();

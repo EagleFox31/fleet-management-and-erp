@@ -34,7 +34,6 @@ const FROZEN: Record<string, number> = {
   "server/services/client-billing-service.ts": 1,
   // `.set(updateData)`, visible depuis la résolution des variables.
   "server/services/technician-work-orders-service.ts": 1,
-  "server/services/three-way-matching-service.ts": 1,
   "server/services/vehicle-status-service.ts": 3,
   // `.set(maj)`, visible depuis la résolution des variables.
   "server/services/work-order-items-service.ts": 1,
