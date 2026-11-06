@@ -853,12 +853,24 @@ WHERE po.status IN ('delivered', 'completed')
 **Pourquoi un contrôle préalable plutôt qu'une transaction.**
 - `storage.createVehicle` et les deux services écrivent sur la connexion globale. Faire passer un `tx` dans toute la chaîne serait un gros diff dans un fichier gelé.
 - Le contrôle préalable ferme le cas réel : un type refusé ne laisse plus de véhicule orphelin.
-- Une course reste possible : un type désactivé entre le contrôle et l'écriture. Dans ce cas, l'activation lève sans écrire de document, et l'erreur est avalée comme avant (« continuant »).
+- Une course reste possible : un type désactivé entre le contrôle et l'écriture.
+  - Voie activation (`VehicleActivationService.processDocuments`) : l'activation lève sans écrire de document, et l'erreur est avalée comme avant (« continuant »). La réponse est 201, le véhicule existe sans ce document.
+  - Voie `DocumentManagementService.processWorkflowDocuments` (après `activateVehicleFromWorkflow` dans la route) : la 400 remonte APRÈS `createVehicle`. Le véhicule existe, et un rejeu répond « Numéro d'immatriculation déjà utilisé ». Seule une transaction sur toute la chaîne fermerait ce cas.
+
+**Réserves de sécurité traitées dans la même PR.**
+- **`workflowData` absent ou mal formé** : un corps `{ vehicleData }` seul créait le véhicule, puis `extractDocumentsFromWorkflowData(undefined)` levait une TypeError (500, véhicule orphelin) ; un `filesize` non numérique faisait de même. Correctif : `server/lib/activation-workflow-data.ts` (Zod, clés inconnues acceptées), vérifié avant `createVehicle`. La ZodError passe par `next`, qui rend la 400 normalisée avec `errors`.
+  - Ce que le schéma contrôle : `sessionId`, `documents` (liste ou objet par clé), `filesize`, `file_type`, `expiry_date`, ainsi que les documents rangés à la racine.
+  - Le corps réel du client (`client/src/pages/workflows/vehicle-acquisition.tsx`) envoie tout l'état du workflow, avec des `File` sérialisés en `{}` et un `sessionId` éventuellement vide. Il passe : un contrat le fige.
+- **Chemin hors de `uploads/`** : `processDocuments` testait l'existence du fichier par `path.join(cwd, file_path)`, si bien qu'un chemin remontant hors de `uploads/` était enregistré dans `vehicle_documents.filePath`. Correctif : `uploadedFileCandidates`. `DocumentManagementService.verifyFileExists` passait déjà par lui.
+- **Journaux** : les `console.*` de `document-management-service.ts` sont migrés vers `moduleLogger`, ceux de `processDocuments` aussi. Ils ne contiennent plus que des identifiants et des compteurs, jamais le contenu de `workflowData`, un nom ou un chemin.
 
 **Preuve.**
-- Nouveau contrat `vehicle-activate-from-workflow-document-types` : 3 tests (type inconnu, type désactivé, chemin nominal).
+- Nouveau contrat `vehicle-activate-from-workflow-document-types` : 8 tests (type inconnu, type désactivé, chemin nominal, `workflowData` absent, `filesize` non numérique, corps réel du client, `file_path` hors de `uploads/` par les deux voies).
 - Nouveau test d'intégration : transfert avec un type désactivé.
 - Mutants, détectés :
   - l'ancienne route donne 500 pour un type inconnu, 201 pour un type désactivé, et laisse 2 véhicules orphelins en base ;
   - sans contrôle des codes d'activation dans la route : 201, avec un véhicule créé ;
-  - sans contrôle dans le transfert : le transfert réussit au lieu de lever une 400.
+  - sans contrôle dans le transfert : le transfert réussit au lieu de lever une 400 ;
+  - sans schéma `workflowData` : 500 pour le corps sans `workflowData` et pour `filesize: "abc"` ;
+  - contrôle de fichier d'activation sans `uploadedFileCandidates` : `uploads/../package.json` est rattaché au véhicule ;
+  - `verifyFileExists` sans `uploadedFileCandidates` : idem pour la voie liste.

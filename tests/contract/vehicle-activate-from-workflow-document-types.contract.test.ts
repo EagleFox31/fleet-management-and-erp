@@ -129,3 +129,69 @@ describe("POST /api/vehicles/activate-from-workflow : types de document", { time
     expect(docs2).toEqual([{ type: "carte_grise" }]);
   });
 });
+
+describe("POST /api/vehicles/activate-from-workflow : workflowData vérifié avant la création", { timeout: 60000 }, () => {
+  async function activate(plate: string, workflowData: unknown) {
+    const res = await session.call("POST", "/api/vehicles/activate-from-workflow", {
+      body: workflowData === undefined ? { vehicleData: vehicleData(plate) } : { vehicleData: vehicleData(plate), workflowData },
+    });
+    // Lu avant toute assertion : un véhicule orphelin est retrouvé et nettoyé même si le statut échoue.
+    return { res, rows: await vehicleByPlate(plate) };
+  }
+
+  it("corps sans workflowData : 400 normalisée avec erreurs de champ, aucun véhicule créé", async () => {
+    const { res, rows } = await activate(uniqueTestToken("TSTA"), undefined);
+    expect(res.status).toBe(400);
+    expect(Array.isArray(res.body.errors) && res.body.errors.length).toBeGreaterThan(0);
+    expect(leakText(res.body)).not.toMatch(/TypeError|Cannot read|undefined \(reading|at .+\.ts/i);
+    expect(rows).toHaveLength(0);
+  });
+
+  it("filesize non numérique : 400, aucun véhicule créé", async () => {
+    const file = uploadedFile("activate-taille");
+    const { res, rows } = await activate(uniqueTestToken("TSTA"), {
+      documents: [{ name: "TEST taille", type: "assurance", filename: file.filename, filesize: "abc", file_type: "application/pdf", file_path: file.relative }],
+    });
+    expect(res.status).toBe(400);
+    expect(res.body.errors?.[0]?.field).toMatch(/^documents/);
+    expect(rows).toHaveLength(0);
+  });
+
+  it("corps réel du client (tout l'état du workflow, fichiers sérialisés vides) : 201", async () => {
+    const plate = uniqueTestToken("TSTA");
+    const { res, rows } = await activate(plate, {
+      ...vehicleData(plate),
+      vin: "",
+      purchaseDate: "",
+      licensePlateExpiry: "",
+      insuranceExpiry: "",
+      technicalInspectionDate: "",
+      notes: "",
+      vinValidated: false,
+      vinValidationResult: null,
+      sessionId: "",
+      documents: { carteGrise: {}, assurance: {}, visiteTechnique: null, facturAchat: {} },
+      documentsUploaded: true,
+      maintenanceScheduled: false,
+      firstMaintenanceDate: "",
+      maintenanceType: "preventive",
+      nextMaintenanceDate: "",
+      nextMaintenanceMileage: 0,
+      activated: false,
+    });
+    expect(res.status).toBe(201);
+    expect(rows).toHaveLength(1);
+  });
+
+  it.each([
+    ["document d'activation (documents.carteGrise)", (p: string) => ({ documents: { carteGrise: { name: "TEST evasion", filename: "package.json", file_path: p } } })],
+    ["document de liste (documents[])", (p: string) => ({ documents: [{ name: "TEST evasion", type: "assurance", filename: "package.json", filesize: 1, file_type: "application/json", file_path: p }] })],
+  ])("%s avec file_path hors de uploads/ : véhicule créé, aucun document rattaché", async (_label, body) => {
+    // Remonte hors de uploads/ vers un fichier qui existe (package.json du dépôt) : sans le contrôle, il serait rattaché.
+    const { res, rows } = await activate(uniqueTestToken("TSTA"), body("uploads/../package.json"));
+    expect(res.status).toBe(201);
+    expect(rows).toHaveLength(1);
+    const docs = await db.select({ filePath: vehicleDocuments.filePath }).from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, rows[0].id));
+    expect(docs).toEqual([]);
+  });
+});
