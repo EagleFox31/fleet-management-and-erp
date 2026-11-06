@@ -1,5 +1,7 @@
 import { Router, type RequestHandler } from "express";
 import { z } from "zod";
+import { and, eq, lte, sql } from "drizzle-orm";
+import { vehicles } from "@shared/schema";
 import {
   TECHNICIAN_TARGET_STATUSES,
   canTechnicianTransition,
@@ -8,11 +10,15 @@ import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { authenticate, authorize } from "../middleware/auth";
 import { alertService } from "../services/alert-service";
+import { transitionWorkOrderStatus } from "../services/work-order-status-transition";
 import { storage } from "../storage";
 import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 import { idSchema } from "@shared/contracts/common";
 
 const log = moduleLogger("technician-work-orders");
+
+const MILEAGE_CHANGED_ERROR =
+  "Le kilométrage du véhicule vient d'être relevé plus haut. Rechargez l'ordre de travail avant de réessayer.";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "en attente",
@@ -88,13 +94,35 @@ const patchTechnicianWorkOrderStatus: RequestHandler = async (req, res, next) =>
       }
     }
 
-    const updateData: { status: string; diagnosis?: string; startDate?: Date; endDate?: Date } = { status: body.status };
-    if (body.notes) updateData.diagnosis = body.notes;
-    if (body.status === "in_progress" && !workOrder.startDate) updateData.startDate = new Date();
-    if (body.status === "completed") updateData.endDate = new Date();
+    const fields: { diagnosis?: string; startDate?: Date; endDate?: Date } = {};
+    if (body.notes) fields.diagnosis = body.notes;
+    if (body.status === "in_progress" && !workOrder.startDate) fields.startDate = new Date();
+    if (body.status === "completed") fields.endDate = new Date();
+    const updateData = { status: body.status, ...fields };
 
-    const updatedOrder = await storage.updateWorkOrder(workOrderId, updateData as never);
-    if (mileageToWrite) await storage.updateVehicle(workOrder.vehicleId, mileageToWrite);
+    // Compare-and-set sur le statut lu et sur l'assignation : un OT annulé, remis en attente ou
+    // réassigné entre la lecture et l'écriture répond 409, sans diagnostic ni kilométrage écrits.
+    // Le kilométrage est écrit dans la même transaction, et seulement vers le haut : un relevé
+    // plus élevé enregistré entre-temps fait échouer le tout, statut compris.
+    const mileageTarget = mileageToWrite?.mileage;
+    const updatedOrder = await transitionWorkOrderStatus({
+      workOrderId,
+      from: workOrder.status,
+      to: body.status,
+      updatedBy: userId,
+      technicianId: userId,
+      fields,
+      onTransition: mileageTarget !== undefined
+        ? async (tx) => {
+            const [raised] = await tx
+              .update(vehicles)
+              .set({ mileage: mileageTarget, lastMileage: sql`${vehicles.mileage}` })
+              .where(and(eq(vehicles.id, workOrder.vehicleId), lte(vehicles.mileage, mileageTarget)))
+              .returning({ id: vehicles.id });
+            if (!raised) throw new AppError(409, MILEAGE_CHANGED_ERROR);
+          }
+        : undefined,
+    });
 
     // Avancement vers l'encadrement : le chef d'atelier est prévenu du démarrage ou de la fin,
     // comme pour PATCH /api/work-orders/:id. Une alerte non envoyée ne fait pas échouer le geste.

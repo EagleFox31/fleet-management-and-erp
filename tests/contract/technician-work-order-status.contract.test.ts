@@ -1,10 +1,11 @@
 import { createServer, type Server } from "http";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { db } from "../../server/db";
+import { db, pool } from "../../server/db";
 import { parts, partsUsed, vehicles, workOrders } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
+import { waitForBlockedWriter } from "../support/row-lock";
 import { createTestPart, createTestUser, createTestVehicle, TEST_USER_PASSWORD } from "../support/factories";
 
 /**
@@ -155,4 +156,101 @@ describe("PATCH /api/technician/work-orders/:id/status", () => {
     expect(row.startDate).not.toBeNull();
     expect(await mileageOfVehicle()).toBe(100250);
   }, 30000); // démarrer l'OT déclenche l'automatisation du statut véhicule : plusieurs allers-retours Neon
+
+  // La route lit l'OT puis écrit : un chef d'atelier qui l'annule entre les deux ne doit pas être
+  // écrasé. Déterministe : une connexion tient le verrou de ligne de l'OT, la requête s'y bloque
+  // après sa lecture, l'OT est annulé, puis le verrou est libéré.
+  it("OT annulé pendant la mise à jour : 409 lisible, ni statut, ni diagnostic, ni kilométrage écrits", async () => {
+    const id = await newWorkOrder("in_progress");
+    const mileageBefore = await mileageOfVehicle();
+    const client = await pool.connect();
+    let res: Awaited<ReturnType<typeof call>>;
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT id FROM work_orders WHERE id = $1 FOR UPDATE", [id]);
+      const holderPid = (await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid as number;
+      const pending = call("PATCH", `/api/technician/work-orders/${id}/status`, {
+        status: "completed",
+        notes: "Diagnostic écrit trop tard",
+        mileageUpdate: Number(mileageBefore) + 500,
+      });
+      await waitForBlockedWriter(holderPid, "l'OT");
+      await client.query("UPDATE work_orders SET status = 'cancelled' WHERE id = $1", [id]);
+      await client.query("COMMIT");
+      res = await pending;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body.message).toContain("vient de changer");
+    const [row] = await db.select().from(workOrders).where(eq(workOrders.id, id));
+    expect(row.status).toBe("cancelled");
+    expect(row.diagnosis).not.toBe("Diagnostic écrit trop tard");
+    expect(row.endDate).toBeNull();
+    expect(await mileageOfVehicle()).toBe(mileageBefore);
+  }, 30000);
+
+  it("OT réassigné pendant la mise à jour : 409, le diagnostic n'arrive pas sur l'OT d'un autre", async () => {
+    const id = await newWorkOrder("in_progress");
+    const res = await whileWorkOrderLocked(
+      id,
+      () => call("PATCH", `/api/technician/work-orders/${id}/status`, { status: "completed", notes: "Diagnostic hors assignation" }),
+      (client) => client.query("UPDATE work_orders SET technician_id = $1 WHERE id = $2", [otherTechnicianId, id]),
+    );
+
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    const [row] = await db.select().from(workOrders).where(eq(workOrders.id, id));
+    expect(row.technicianId).toBe(otherTechnicianId);
+    expect(row.status).toBe("in_progress");
+    expect(row.diagnosis).not.toBe("Diagnostic hors assignation");
+    expect(row.endDate).toBeNull();
+  }, 30000);
+
+  it("kilométrage relevé plus haut pendant la mise à jour : 409, ni statut ni kilométrage écrits", async () => {
+    const id = await newWorkOrder("in_progress");
+    const current = Number(await mileageOfVehicle());
+    const higher = current + 5000;
+    const res = await whileWorkOrderLocked(
+      id,
+      () => call("PATCH", `/api/technician/work-orders/${id}/status`, { status: "completed", mileageUpdate: current + 100 }),
+      (client) => client.query("UPDATE vehicles SET mileage = $1 WHERE id = $2", [higher, vehicleId]),
+    );
+
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body.message).toMatch(/kilométrage/i);
+    expect(await mileageOfVehicle()).toBe(higher);
+    expect(await statusOf(id)).toBe("in_progress");
+  }, 30000);
 });
+
+/**
+ * Joue `request` pendant qu'une autre connexion tient le verrou de ligne de l'OT : la requête se
+ * bloque après sa lecture, `meanwhile` modifie la base dans la transaction qui tient le verrou,
+ * puis le verrou est libéré.
+ */
+async function whileWorkOrderLocked(
+  workOrderId: number,
+  request: () => Promise<Awaited<ReturnType<typeof call>>>,
+  meanwhile: (client: Awaited<ReturnType<typeof pool.connect>>) => Promise<unknown>,
+) {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT id FROM work_orders WHERE id = $1 FOR UPDATE", [workOrderId]);
+    const holderPid = (await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid as number;
+    const pending = request();
+    await waitForBlockedWriter(holderPid, "l'OT");
+    await meanwhile(client);
+    await client.query("COMMIT");
+    return await pending;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
