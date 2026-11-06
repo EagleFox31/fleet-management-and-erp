@@ -176,7 +176,7 @@ const getLineStatusDisplay = (lineStatus: string, orderStatus: string) => {
       // Depuis la réception globale alignée sur le crédit, ce cas ne vient que d'une commande ancienne.
       return {
         label: "Ligne restée ouverte",
-        help: "À la réception globale, seules les lignes encore ouvertes sont alignées et entrées en stock. Cette ligne est restée en attente : elle n'est pas entrée en stock.",
+        help: "À la réception globale, seules les lignes encore ouvertes sont alignées et entrées en stock. Cette ligne est restée en attente : sa réception n'a pas été enregistrée sur cette ligne.",
       };
     }
   }
