@@ -360,8 +360,10 @@ export async function settleMissionBudget(id: number, userId: number): Promise<{
     const [row] = await tx
       .update(missionBudgets)
       .set({ settledAt: now, settledBy: userId, updatedBy: userId, updatedAt: now })
-      .where(eq(missionBudgets.id, id))
+      .where(and(eq(missionBudgets.id, id), isNull(missionBudgets.settledAt)))
       .returning();
+    // Seconde barrière derrière le verrou : un budget déjà soldé n'est jamais réécrit.
+    if (!row) throw new AppError(409, "Ce budget est déjà soldé.");
     return { row, changed: true, reversed };
   });
   const budget = toMissionBudget(result.row);
