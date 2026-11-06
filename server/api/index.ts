@@ -81,6 +81,7 @@ import importsRoutes from "./imports.routes";
 import technicianWorkOrdersRoutes from "./technician-work-orders.routes";
 import userStockPermissionRoutes from "./user-stock-permission.routes";
 import { workOrderBookingGuard } from "../middleware/booking-guard";
+import { workOrderCostMask } from "../lib/work-order-cost-mask";
 import vehicleDocumentsRoutes from "./vehicle-documents.routes";
 import uploadedDocumentsRoutes from "./uploaded-documents.routes";
 import { loginLockoutGuard } from "../middleware/login-lockout-guard";
@@ -112,6 +113,10 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // Apply session middleware FIRST, before any routes are mounted
   // This ensures req.session.userId is available in all sub-routes
   apiRouter.use(sessionMiddleware);
+
+  // Coûts d'OT : retirés des lectures GET /api/work-orders/* pour les rôles hors
+  // WORK_ORDER_COST_READ_ROLES. Monté avant tout routeur (vehicle-history, routes.ts compris).
+  apiRouter.use("/work-orders", workOrderCostMask);
 
   // Gardes de connexion (T-12, T-48) : montes ici car /api est servi AVANT registerRoutes
   // (server/app.ts), donc avant les handlers de login de server/routes.ts. Le corps est deja
