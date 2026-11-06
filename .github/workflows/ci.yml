@@ -53,6 +53,7 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npm run check
+      - run: npm run check:tests
 
   unit:
     needs: impact

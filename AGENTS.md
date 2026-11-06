@@ -276,6 +276,7 @@ de rôles locale : ajouter un rôle dans `shared/schema.ts` suffit, sauf libell�
 
 ```bash
 npm run check              # TypeScript
+npm run check:tests        # TypeScript de tests/ et e2e/, sous cliquet (tests/typecheck-baseline.json)
 npm test                   # Vitest unitaires (pas de DB)
 npm run test:integration   # Vitest services + DATABASE_URL_TEST
 npm run test:contract      # Vitest HTTP in-process + DATABASE_URL_TEST
