@@ -400,3 +400,17 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
 - **Pourquoi** : 3,8 s de tests pour une limite de 5 s. Cinq cas relançaient `scanFiles` (analyse TypeScript de chaque fichier serveur), à environ 700 ms par passe.
 - **Comment** : `occurrences()` mémoïse le balayage et rend une copie à chaque appel, pour qu'aucun cas ne modifie le résultat d'un autre. Aucune règle ni limite changée.
 - **Preuve** : deux mesures locales. Tests du fichier : 3,84 s, puis 1,46 s et 1,58 s. Le cas le plus long, qui porte le balayage, passe à 1,3 s ; avant, chacun des cinq cas prenait de 650 à 850 ms. 30 cas verts.
+
+## 2026-11-06T01:56:00+01:00 — L3b : écritures atteintes par un OT, routeurs hors balayage
+
+- **Quoi** :
+  - `POST /api/warehouse/stock-movement` entre dans `RETIRED_VEHICLE_WRITE_ROUTES` (lookup `workOrder` sur `body.workOrderId`). Un mouvement imputé à l'OT d'un véhicule retiré recevait jusqu'ici un 201 et déplaçait du stock ; sans `workOrderId`, le mouvement magasin passe toujours ;
+  - le garde-fou `retired-vehicle-writes-hygiene` détecte aussi `workOrderId` / `work_order_id` dans la poignée et les chemins d'objets d'OT (`/work-orders/:p`, `/work-order-items/:p`, `/parts-used/:p`, `/part-requirements/:p`). C'était le seul trou du cas (a) : toutes les autres écritures d'OT étaient déjà dans la table ;
+  - cas (b) : aucun sous-routeur monté en cascade aujourd'hui. Deux tests l'empêchent d'apparaître sans être vu : aucun montage de routeur hors `server/api/index.ts` et `server/app.ts`, aucune écriture de `server/api/` hors d'un routeur monté. Les deux routes déclarées directement sur `apiRouter` (connexion) entrent dans le balayage.
+- **Pourquoi** : la garde L3 ne voyait que les écritures qui nomment le véhicule. Une écriture qui l'atteint par un OT ou qui vit dans un routeur non monté par `index.ts` échappait au marqueur sans qu'aucun test ne le signale.
+- **Comment** : `scanWriteRoutes` garde sa forme et sa sortie. Elle s'appuie sur `walkWriteRoutes`, qui rend aussi les écritures non atteintes (`scanUnreachedWriteRoutes`). `scanNestedRouterMounts` et le motif `ROUTER_MOUNT` sont exportés depuis `tests/support/route-guard-scan.ts`. `TABLE_FLOOR` passe à 45.
+- **Preuve** :
+  - le contrat `vehicle-retired-work-order-writes` rend 409 `VEHICLE_RETIRED` sans écriture sur `POST /work-orders/:id/parts` et sur `stock-movement`, plus deux variantes de chemin (barre finale, casse). L'empreinte contrôlée couvre les demandes, les pièces posées, les mouvements et la quantité. Des témoins sur OT actif et sans OT sont acceptés ;
+  - mutant n° 1, l'entrée `stock-movement` retirée de la table : le garde-fou échoue (route non couverte, plancher) et le contrat aussi (deux 409 attendus) ;
+  - mutant n° 2, un fichier `server/api` qui monte un sous-routeur et déclare une écriture non montée : les deux nouveaux tests échouent.
+- **Leçon** : un garde-fou par balayage doit tester son propre périmètre, c'est-à-dire ce qu'il ne lit pas, et pas seulement les routes qu'il lit. Sinon un montage hors du chemin balayé le rend aveugle sans qu'aucun test ne passe au rouge.
