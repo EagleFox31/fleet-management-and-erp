@@ -478,3 +478,32 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
   - test unitaire `tests/unit/support/expect-status.test.ts` : le message porte le corps et le libellé, le corps cyclique ou long est géré ;
   - les deux contrats sont verts (34 tests), avec le même nombre d'assertions.
 - **Suite possible** : 138 autres contrats écrivent `JSON.stringify(r.body)` à la main, et d'autres n'ont pas de message. Un cliquet sur `expect(x.status).toBe(` sans message reste à décider.
+## 2026-11-06 — Rapprochement de règlement : une facture en litige ne passe plus à `paid`
+
+- **Quoi** : `reconcileInvoiceSettlement` refuse en 409 le rapprochement d'un règlement sur une facture `disputed` (« Cette facture est en litige. Lever le litige avant de rapprocher un règlement. »). Rien n'est écrit : le règlement reste `recorded`, la facture reste en litige.
+- **Pourquoi** : `syncInvoiceFromReconciledSettlements` écrivait le statut par un `UPDATE ... WHERE id = ?` sans condition, et sans verrou. Le déclencheur `recalc_supplier_invoice_financials` conservait bien `disputed`, mais la synchro TypeScript l'écrasait juste après par `paid`. Un litige posé entre la lecture et l'écriture était perdu de la même façon.
+- **Comment** :
+  - une seule transaction : la facture est verrouillée (`FOR UPDATE`) avant le règlement, dans le même ordre que la saisie (`recordInvoiceSettlement`). Le rejet ne verrouille que le règlement, donc il n'y a pas de cycle de verrous ;
+  - la synchro relit la facture dans la transaction, puisque le déclencheur l'a déjà recalculée. Elle écrit ensuite par compare-and-set sur le statut relu, avec `status <> 'disputed'`, et rend un 409 si aucune ligne n'est touchée ;
+  - la clôture automatique de la commande passe après la validation de la transaction, comme avant.
+- **Preuve** : `tests/contract/supplier-settlement-disputed.contract.test.ts` couvre quatre cas :
+  - un témoin soldé ;
+  - un litige posé avant le rapprochement ;
+  - un rejeu après mise en litige ;
+  - un litige posé pendant le rapprochement : une transaction tient le verrou, le rapprochement l'attend puis échoue sans écrire.
+  
+  Sur l'ancien code, les trois cas de litige échouent et le témoin passe. Les 12 fichiers de contrat `supplier-settlement*` et `supplier-invoice*` sont verts.
+- **Leçon** : avant d'écrire un compare-and-set sur une table, chercher ses déclencheurs (`pg_trigger`). Un déclencheur qui récrit la ligne dans la même transaction rend fausse la valeur lue avant lui. Il faut relire après l'écriture qui le déclenche.
+
+## 2026-11-06 — Relecture sécurité de #545 : cycle de verrous entre le rejet et le rapprochement
+
+- **Quoi** : `rejectInvoiceSettlement` verrouille la facture (`FOR UPDATE`) avant l'`UPDATE` du règlement.
+- **Pourquoi** : sans ce verrou, le rejet prenait le règlement, puis la facture par le déclencheur `trg_supplier_invoice_settlements_recalc`. Le rapprochement, lui, prend la facture puis le règlement. Un rejet et un rapprochement simultanés finissaient en interblocage (40P01, puis un 409 générique). L'entrée précédente affirmait que « le rejet ne verrouille que le règlement » : c'est faux, le déclencheur verrouille aussi la facture.
+- **Comment** :
+  - même ordre partout : la facture, puis le règlement ;
+  - la synchro ne reprend plus le verrou et ne refait plus le contrôle du litige : l'appelant les fait. Le compare-and-set reste le filet ;
+  - le cas « litige pendant » attend dans `pg_stat_activity` une session bloquée sur un verrou de `supplier_invoices`, au lieu d'une minuterie.
+- **Preuve** :
+  - le contrat « rejet et rapprochement simultanés » fait 5 essais, chacun attendant un 200, un 409 métier et un état final cohérent ;
+  - mutant (le verrou du rejet retiré) : 3 essais sur 5 échouent, sur deux lancements.
+- **Leçon** : l'ordre des verrous d'une transaction compte aussi les verrous pris par les déclencheurs. Avant d'affirmer qu'il n'y a pas de cycle, lire les déclencheurs de chaque table écrite, pas seulement le code TypeScript.
