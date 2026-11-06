@@ -41,14 +41,13 @@ const FROZEN_OPAQUE: Record<string, number> = {
   "server/api/clients.routes.ts": 1,
   "server/api/document-renewal-centers.routes.ts": 1,
   "server/api/fault-catalog.routes.ts": 1,
-  "server/services/documentStorage.ts": 1,
   "server/services/parts-service.ts": 1,
   "server/services/qhse-inspection-service.ts": 1,
   "server/services/supplier-management-service.ts": 1,
   "server/services/tariff-grid-service.ts": 1,
   "server/services/tires-service-simplified.ts": 1,
   // Méthodes génériques `update<Entité>(id, data)`.
-  "server/storage.ts": 6,
+  "server/storage.ts": 5,
 };
 
 const repoDir = fileURLToPath(new URL("../../..", import.meta.url));
