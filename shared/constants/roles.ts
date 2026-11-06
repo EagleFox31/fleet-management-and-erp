@@ -350,6 +350,13 @@ export const MISSION_EVENT_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role)
 export const PART_CATALOG_EVENT_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "driver");
 
 /**
+ * Lecteurs de la valuation du stock (valeur d'inventaire pièces et pneus, valeur par fournisseur,
+ * historique de valeur, coût estimé de réapprovisionnement) : le même personnel que celui qui reçoit
+ * les événements du catalogue pièces, sans le chauffeur ni le client (AGENTS.md §11).
+ */
+export const STOCK_VALUATION_READ_ROLES: readonly AppRole[] = PART_CATALOG_EVENT_ROLES;
+
+/**
  * Coûts, rapprochement par client et statistiques d'exploitation (`/api/operations`) : le
  * personnel sauf le chauffeur, même pour sa propre mission (amortissement tiré du prix d'achat,
  * agrégats de toute la flotte). Décision du 3 novembre 2026.

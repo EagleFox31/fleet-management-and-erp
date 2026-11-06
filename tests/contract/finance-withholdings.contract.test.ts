@@ -6,6 +6,7 @@ import { isoDateInZone } from "../../shared/contracts/kpi-period";
 import { FINANCE_WITHHOLDINGS_PATH, financeWithholdingsResponseSchema } from "../../shared/contracts/finance-withholdings";
 import { apiErrorProblems } from "../support/api-error";
 import { startContractSession } from "../support/contract-session";
+import { expectStatus } from "../support/expect-status";
 import { createTestClient, createTestClientInvoice } from "../support/factories";
 
 /**
@@ -92,23 +93,23 @@ afterAll(async () => {
 
 describe("droits", () => {
   it("sans session : 401", async () => {
-    expect((await session.call("GET", path(MAY), { actor: null })).status).toBe(401);
+    expectStatus(await session.call("GET", path(MAY), { actor: null }), 401);
   });
 
   it.each(["warehouse", "technician", "driver", "client"] as const)("%s : 403", async (actor) => {
-    expect((await session.call("GET", path(MAY), { actor })).status).toBe(403);
+    expectStatus(await session.call("GET", path(MAY), { actor }), 403);
   });
 
   it.each(["admin", "management", "secretary", "logistics"] as const)("%s : 200 au contrat", async (actor) => {
     const r = await session.call("GET", path(MAY), { actor });
-    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expectStatus(r, 200);
     financeWithholdingsResponseSchema.parse(r.body);
   });
 
   it("drapeau finance coupé : 404", async () => {
     process.env.FEATURE_FLAGS = "finance=off";
     try {
-      expect((await session.call("GET", path(MAY), { actor: "admin" })).status).toBe(404);
+      expectStatus(await session.call("GET", path(MAY), { actor: "admin" }), 404);
     } finally {
       process.env.FEATURE_FLAGS = "finance=on";
     }
@@ -137,17 +138,17 @@ describe("paramètres", () => {
   it("sans période : du premier du mois à aujourd'hui, à Africa/Douala", async () => {
     const today = isoDateInZone(new Date());
     const r = await session.call("GET", path(), { actor: "secretary" });
-    expect(r.status).toBe(200);
+    expectStatus(r, 200);
     expect(r.body).toMatchObject({ from: `${today.slice(0, 8)}01`, to: today, clientId: null });
   });
 
   it("36 mois exactement : accepté", async () => {
-    expect((await session.call("GET", path("from=2001-01-01&to=2003-12-31"), { actor: "admin" })).status).toBe(200);
+    expectStatus(await session.call("GET", path("from=2001-01-01&to=2003-12-31"), { actor: "admin" }), 200);
   });
 
   it("clientId vide : sans filtre", async () => {
     const r = await session.call("GET", path(`${MAY}&clientId=`), { actor: "admin" });
-    expect(r.status).toBe(200);
+    expectStatus(r, 200);
     expect(r.body.clientId).toBeNull();
     expect(r.body.items.filter((i: { invoiceId: number }) => Object.values(inv).includes(i.invoiceId))).toHaveLength(3);
   });

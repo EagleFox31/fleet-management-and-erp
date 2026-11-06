@@ -39,6 +39,7 @@ import faultCatalogRoutes from "./fault-catalog.routes";
 import tireRotationsRoutes from "./tire-rotations.routes";
 import adminUsersGuardRoutes from "./admin-users-guard.routes";
 import statisticsCostGuardRoutes from "./statistics-cost-guard.routes";
+import stockValuationGuardRoutes from "./stock-valuation-guard.routes";
 import lastAdminGuardRoutes from "./last-admin-guard.routes";
 import workflowsRoutes from "./workflows.routes";
 import auditLogsRoutes from "./audit-logs.routes";
@@ -81,6 +82,7 @@ import technicianWorkOrdersRoutes from "./technician-work-orders.routes";
 import userStockPermissionRoutes from "./user-stock-permission.routes";
 import { workOrderBookingGuard } from "../middleware/booking-guard";
 import { workOrderCostMask } from "../lib/work-order-cost-mask";
+import { partPriceMask } from "../lib/part-price-scope";
 import vehicleDocumentsRoutes from "./vehicle-documents.routes";
 import uploadedDocumentsRoutes from "./uploaded-documents.routes";
 import { loginLockoutGuard } from "../middleware/login-lockout-guard";
@@ -116,6 +118,10 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // Coûts d'OT : retirés des lectures GET /api/work-orders/* pour les rôles hors
   // WORK_ORDER_COST_READ_ROLES. Monté avant tout routeur (vehicle-history, routes.ts compris).
   apiRouter.use("/work-orders", workOrderCostMask);
+  // Prix des pièces : retirés des lectures GET /api/parts/* hors STOCK_VALUATION_READ_ROLES (chauffeur).
+  apiRouter.use("/parts", partPriceMask);
+  // Demandes de pièce : prix unitaire et coût estimé (quantité × prix), même périmètre.
+  apiRouter.use("/part-requirements", partPriceMask);
 
   // Gardes de connexion (T-12, T-48) : montes ici car /api est servi AVANT registerRoutes
   // (server/app.ts), donc avant les handlers de login de server/routes.ts. Le corps est deja
@@ -169,6 +175,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(lastAdminGuardRoutes);
   // Statistiques à montant (coût de maintenance, KPI de flotte) : gardes, les routes restent dans routes.ts.
   apiRouter.use(statisticsCostGuardRoutes);
+  // Valuation du stock (/api/parts/statistics) : garde, la route reste dans routes.ts.
+  apiRouter.use(stockValuationGuardRoutes);
   // Brouillon d'acquisition : liste blanche des champs, statut jamais lu du corps.
   // Fichiers téléversés : pièce jointe, nosniff, type en liste blanche (sortis de routes.ts).
   apiRouter.use(uploadedDocumentsRoutes);

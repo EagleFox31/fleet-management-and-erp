@@ -34,10 +34,10 @@ import {
   MISSION_OPERATIONS_READ_ROLES,
   TARIFF_GRID_READ_ROLES,
   PENDING_INVOICE_ROLES,
-  STAFF_ROLES,
   TIME_TRACKING_READ_ROLES,
   TIRE_MOVEMENT_ROLES,
   VEHICLE_COST_ROLES,
+  WORK_ORDER_COST_READ_ROLES,
   type AppRole,
 } from "@shared/constants/roles";
 import type { FeatureKey } from "@shared/feature-flags";
@@ -105,7 +105,7 @@ export const LOT_SCREENS: readonly LotScreen[] = [
   {
     id: "wo-history", path: "/maintenance/work-orders/:id/history", title: "Historique de l'ordre de travail", task: "T-51",
     feature: "work-order-audit-trail", description: "Chronologie des changements d'un ordre de travail.",
-    roles: STAFF_ROLES,
+    roles: WORK_ORDER_COST_READ_ROLES,
   },
   {
     id: "wo-quality-check", path: "/maintenance/work-orders/:id/quality-check", title: "Contrôle qualité", task: "T-51",

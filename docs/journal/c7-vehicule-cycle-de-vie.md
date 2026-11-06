@@ -401,6 +401,23 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
 - **Comment** : `occurrences()` mémoïse le balayage et rend une copie à chaque appel, pour qu'aucun cas ne modifie le résultat d'un autre. Aucune règle ni limite changée.
 - **Preuve** : deux mesures locales. Tests du fichier : 3,84 s, puis 1,46 s et 1,58 s. Le cas le plus long, qui porte le balayage, passe à 1,3 s ; avant, chacun des cinq cas prenait de 650 à 850 ms. 30 cas verts.
 
+## 2026-11-06T01:56:00+01:00 — L3b : écritures atteintes par un OT, routeurs hors balayage
+
+- **Quoi** :
+  - `POST /api/warehouse/stock-movement` entre dans `RETIRED_VEHICLE_WRITE_ROUTES` (lookup `workOrder` sur `body.workOrderId`). Un mouvement imputé à l'OT d'un véhicule retiré recevait jusqu'ici un 201 et déplaçait du stock ; sans `workOrderId`, le mouvement magasin passe toujours ;
+  - le garde-fou `retired-vehicle-writes-hygiene` détecte aussi `workOrderId` / `work_order_id` dans la poignée et les chemins d'objets d'OT (`/work-orders/:p`, `/work-order-items/:p`, `/parts-used/:p`, `/part-requirements/:p`). C'était le seul trou du cas (a) : toutes les autres écritures d'OT étaient déjà dans la table ;
+  - cas (b) : aucun sous-routeur monté en cascade aujourd'hui. Deux tests l'empêchent d'apparaître sans être vu : aucun montage de routeur hors `server/api/index.ts` et `server/app.ts`, aucune écriture de `server/api/` hors d'un routeur monté. Les deux routes déclarées directement sur `apiRouter` (connexion) entrent dans le balayage.
+- **Pourquoi** : la garde L3 ne voyait que les écritures qui nomment le véhicule. Une écriture qui l'atteint par un OT ou qui vit dans un routeur non monté par `index.ts` échappait au marqueur sans qu'aucun test ne le signale.
+- **Comment** : `scanWriteRoutes` garde sa forme et sa sortie. Elle s'appuie sur `walkWriteRoutes`, qui rend aussi les écritures non atteintes (`scanUnreachedWriteRoutes`). `scanNestedRouterMounts` et le motif `ROUTER_MOUNT` sont exportés depuis `tests/support/route-guard-scan.ts`. `TABLE_FLOOR` passe à 45.
+- **Preuve** :
+  - le contrat `vehicle-retired-work-order-writes` rend 409 `VEHICLE_RETIRED` sans écriture sur `POST /work-orders/:id/parts` et sur `stock-movement`, plus deux variantes de chemin (barre finale, casse). L'empreinte contrôlée couvre les demandes, les pièces posées, les mouvements et la quantité. Des témoins sur OT actif et sans OT sont acceptés ;
+  - mutant n° 1, l'entrée `stock-movement` retirée de la table : le garde-fou échoue (route non couverte, plancher) et le contrat aussi (deux 409 attendus) ;
+  - mutant n° 2, un fichier `server/api` qui monte un sous-routeur et déclare une écriture non montée : les deux nouveaux tests échouent.
+- **Leçon** : un garde-fou par balayage doit tester son propre périmètre, c'est-à-dire ce qu'il ne lit pas, et pas seulement les routes qu'il lit. Sinon un montage hors du chemin balayé le rend aveugle sans qu'aucun test ne passe au rouge.
+- **Réserve sécurité, décision 0a (2026-11-06)** :
+  - `PATCH /api/purchase-orders/:id/status` (livraison) fait passer à reçue les demandes rattachées à l'OT d'un véhicule retiré et crédite le stock. 0a la laisse passer : la marchandise arrive de toute façon, et la refuser fausserait le stock. Elle est dans `NOT_GUARDED` avec cette raison.
+  - Le garde-fou voit désormais cette route. Il cherche `partRequirementId` dans la poignée et les appels `.updateOrderStatus(` (`WORK_ORDER_SERVICE_CALL`), parce que la poignée délègue au service sans nommer la demande.
+  - La vérification d'abord, l'écriture ensuite, hors transaction (TOCTOU) : c'est le modèle L3, et 0a l'accepte, puisqu'un retrait exige des OT clos.
 ## 2026-11-06T01:41:09+01:00 — Tests contrat signalés instables : finance-withholdings, qhse-inspections
 
 **Quoi.** Deux fichiers ont été signalés rouges, uniquement dans la suite contrat complète :
@@ -431,3 +448,62 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
 **Pourquoi** `testTimeout` n'est pas relevé : rien ne prouve qu'un timeout soit en cause. Le relever masquerait une lenteur réelle sans la nommer.
 
 **Leçon.** Un test signalé instable se remonte avec le texte de l'assertion, pas en résumé. Toute assertion de statut sur un appel HTTP porte le corps de la réponse en message (`expect(r.status, JSON.stringify(r.body))`), sinon l'échec intermittent reste indiagnosticable.
+
+## 2026-11-06 — Bouchons createStubRouter dans le balayage de la garde véhicule retiré
+
+- **Quoi** :
+  - les écritures déclarées en données par `createStubRouter([...])` entrent dans `scanWriteRoutes`. Un bouchon d'écriture non monté apparaît dans `scanUnreachedWriteRoutes` ;
+  - `POST /api/part-requirements/:id/receive` (bouchon 501) entre dans `RETIRED_VEHICLE_WRITE_ROUTES` (lookup `partRequirement`). `TABLE_FLOOR` passe à 46.
+- **Pourquoi** : un bouchon n'utilise pas `router.post(`, donc le balayage ne le voyait pas. Il aurait été remplacé par sa vraie logique sans garde L3. Il est plus sûr de poser la garde maintenant : l'implémentation en hérite sans y penser.
+- **Comment** : on lit les objets `{ method, path }` du fichier de bouchon, et on prend le préfixe du montage unique de ce fichier dans `index.ts`. La règle n'est pas propre à ce bouchon : tout bouchon d'écriture dont le chemin correspond à `WORK_ORDER_PATH`, ou qui nomme un marqueur de véhicule, tombe sous la règle générale (table ou `NOT_GUARDED`).
+- **Preuve** :
+  - le garde-fou balaie 7 bouchons d'écriture ;
+  - mutant : l'entrée `receive` retirée de la table fait échouer la couverture et le plancher ;
+  - le contrat rend 409 `VEHICLE_RETIRED` sur `receive` pour l'OT d'un véhicule retiré, sans écriture, avant le 501 du bouchon.
+- **Effet de bord accepté** : pour le personnel, sur véhicule retiré, le 409 passe avant le 404 du drapeau `part-requirement-receive`. C'est le même ordre que celui de la garde face aux 403 (§11 : le personnel voit tous les véhicules).
+- **CI rouge sur #542 (contract shard 2/4)** : l'`afterAll` du contrat L3b supprimait les OT avant les `parts_stock_movements` acceptés par les témoins (clé étrangère sans cascade).
+  - En local, l'erreur était affichée, mais mon filtre de sortie (`Error:`, `×`) ne la retenait pas : l'erreur pg commence par `error:` en minuscules, et un échec d'`afterAll` ne marque aucun test en `×`. 8 OT de test sont restés dans la base locale. Ils sont purgés.
+  - **Correctif** : supprimer les mouvements par OT et par pièce avant les OT.
+  - **Prévention** : filtrer la sortie de vitest sur `Errors|Test Files|Tests ` (sans tenir compte de la casse), qui compte les erreurs de hooks, et vérifier les restes de test en base après le premier lancement.
+
+## 2026-11-06 — Assertion de statut partagée : `expectStatus`
+
+- **Quoi** :
+  - `tests/support/expect-status.ts` : `expectStatus(response, attendu, libellé?)` vérifie le statut avec le corps de la réponse en message (tronqué à 2 000 caractères, sans jamais lever) et rend la réponse ;
+  - les contrats `finance-withholdings` (7 assertions) et `qhse-inspections` (47) l'utilisent ;
+  - la connexion de `startContractSession` porte aussi le corps.
+- **Pourquoi** : ce sont les deux contrats signalés instables. Une assertion `expect(r.status).toBe(200)` qui échoue ne dit ni le code d'erreur ni le message, donc l'échec intermittent reste impossible à diagnostiquer (voir l'entrée sur le contrat instable).
+- **Comment** : remplacement mécanique par expression régulière des formes `expect((await …).status).toBe(N)`, `expect(r.status).toBe(N)` et `expect(r.status, JSON.stringify(r.body)).toBe(N)`. L'unique assertion sur plusieurs lignes est faite à la main.
+- **Preuve** :
+  - test unitaire `tests/unit/support/expect-status.test.ts` : le message porte le corps et le libellé, le corps cyclique ou long est géré ;
+  - les deux contrats sont verts (34 tests), avec le même nombre d'assertions.
+- **Suite possible** : 138 autres contrats écrivent `JSON.stringify(r.body)` à la main, et d'autres n'ont pas de message. Un cliquet sur `expect(x.status).toBe(` sans message reste à décider.
+## 2026-11-06 — Rapprochement de règlement : une facture en litige ne passe plus à `paid`
+
+- **Quoi** : `reconcileInvoiceSettlement` refuse en 409 le rapprochement d'un règlement sur une facture `disputed` (« Cette facture est en litige. Lever le litige avant de rapprocher un règlement. »). Rien n'est écrit : le règlement reste `recorded`, la facture reste en litige.
+- **Pourquoi** : `syncInvoiceFromReconciledSettlements` écrivait le statut par un `UPDATE ... WHERE id = ?` sans condition, et sans verrou. Le déclencheur `recalc_supplier_invoice_financials` conservait bien `disputed`, mais la synchro TypeScript l'écrasait juste après par `paid`. Un litige posé entre la lecture et l'écriture était perdu de la même façon.
+- **Comment** :
+  - une seule transaction : la facture est verrouillée (`FOR UPDATE`) avant le règlement, dans le même ordre que la saisie (`recordInvoiceSettlement`). Le rejet ne verrouille que le règlement, donc il n'y a pas de cycle de verrous ;
+  - la synchro relit la facture dans la transaction, puisque le déclencheur l'a déjà recalculée. Elle écrit ensuite par compare-and-set sur le statut relu, avec `status <> 'disputed'`, et rend un 409 si aucune ligne n'est touchée ;
+  - la clôture automatique de la commande passe après la validation de la transaction, comme avant.
+- **Preuve** : `tests/contract/supplier-settlement-disputed.contract.test.ts` couvre quatre cas :
+  - un témoin soldé ;
+  - un litige posé avant le rapprochement ;
+  - un rejeu après mise en litige ;
+  - un litige posé pendant le rapprochement : une transaction tient le verrou, le rapprochement l'attend puis échoue sans écrire.
+  
+  Sur l'ancien code, les trois cas de litige échouent et le témoin passe. Les 12 fichiers de contrat `supplier-settlement*` et `supplier-invoice*` sont verts.
+- **Leçon** : avant d'écrire un compare-and-set sur une table, chercher ses déclencheurs (`pg_trigger`). Un déclencheur qui récrit la ligne dans la même transaction rend fausse la valeur lue avant lui. Il faut relire après l'écriture qui le déclenche.
+
+## 2026-11-06 — Relecture sécurité de #545 : cycle de verrous entre le rejet et le rapprochement
+
+- **Quoi** : `rejectInvoiceSettlement` verrouille la facture (`FOR UPDATE`) avant l'`UPDATE` du règlement.
+- **Pourquoi** : sans ce verrou, le rejet prenait le règlement, puis la facture par le déclencheur `trg_supplier_invoice_settlements_recalc`. Le rapprochement, lui, prend la facture puis le règlement. Un rejet et un rapprochement simultanés finissaient en interblocage (40P01, puis un 409 générique). L'entrée précédente affirmait que « le rejet ne verrouille que le règlement » : c'est faux, le déclencheur verrouille aussi la facture.
+- **Comment** :
+  - même ordre partout : la facture, puis le règlement ;
+  - la synchro ne reprend plus le verrou et ne refait plus le contrôle du litige : l'appelant les fait. Le compare-and-set reste le filet ;
+  - le cas « litige pendant » attend dans `pg_stat_activity` une session bloquée sur un verrou de `supplier_invoices`, au lieu d'une minuterie.
+- **Preuve** :
+  - le contrat « rejet et rapprochement simultanés » fait 5 essais, chacun attendant un 200, un 409 métier et un état final cohérent ;
+  - mutant (le verrou du rejet retiré) : 3 essais sur 5 échouent, sur deux lancements.
+- **Leçon** : l'ordre des verrous d'une transaction compte aussi les verrous pris par les déclencheurs. Avant d'affirmer qu'il n'y a pas de cycle, lire les déclencheurs de chaque table écrite, pas seulement le code TypeScript.

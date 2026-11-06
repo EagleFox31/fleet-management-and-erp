@@ -2271,6 +2271,27 @@ Un écran de compteur ou de statistique s'inscrit dans un groupe de `realtime-sa
 - Pour restreindre la lecture d'une colonne, recenser par grep les lectures de la table, pas les routes. Une jointure ou un `select()` vide expose toutes les colonnes.
 - Une valeur calculée à partir d'une donnée restreinte suit la même restriction, si le calcul est réversible.
 
+### Récidive (2026-11-06) : règle de coût posée sur une route, routes sœurs restées ouvertes
+
+- **Contexte** : la règle de cette entrée a été appliquée route par route, et la même donnée restait lisible ailleurs.
+  - #535 : `GET /api/statistics/maintenance-cost/:period` servait le coût de maintenance au chauffeur ; corrigé par une garde chaînée (`server/api/maintenance-cost-guard.routes.ts`).
+  - #539 : la valorisation du stock était lisible par le chauffeur, sur `/api/parts/statistics` et `/api/warehouse/statistics` ; corrigée par `STOCK_VALUATION_READ_ROLES` et `server/api/stock-valuation-guard.routes.ts`.
+  - #534 : `/api/operations/missions` renvoyait le budget de mission complet alors que `/api/missions` le masquait.
+  - Q23 (en cours, non fusionné) : le prix unitaire des pièces reste lisible dans la liste (`server/services/parts-service.ts`, projection `unitPrice`). Un agrégat masqué peut être recalculé à partir de ce prix.
+- **Cause racine** : la correction a porté sur la route signalée, pas sur la donnée. Les lectures de `missions`, `parts` et `work_orders` n'ont pas été énumérées par grep avant de fermer la première route.
+- **Classification** : projection implicite et contrôle d'accès horizontal, récidive de la classe ci-dessus.
+- **Résolution** : #530 (`server/lib/work-order-cost-mask.ts` sur `/api/work-orders`), #534 (`redactMissionBudget`, `omitMissionBudget`), #535 et #539 (gardes chaînées). Q23 : `redactPartPrice`, absent de `origin/main` au 2026-11-06 (`grep -rn redactPartPrice server shared` vide).
+- **Prévention existante, vérifiée dans `origin/main`** :
+  - `tests/unit/server/vehicle-select-hygiene.test.ts` : gèle les lectures de `vehicles` sans projection explicite. Rien d'équivalent pour `parts` ni pour `missions` hors `mission-select-hygiene`.
+  - `tests/contract/stock-valuation-readers.contract.test.ts` : lecteurs de la valorisation (chauffeur 403, client 403, sans session 401). Il ne couvre pas le prix unitaire de la liste de pièces : **prévention manquante pour Q23**, à produire par fleet-testeur.
+  - `tests/unit/server/work-order-cost-mask-coverage.test.ts` (#530) : énumère les GET `/api/work-orders` et exige un contrat ou une exemption écrite pour chacun. Il ne voit pas les autres tables.
+  - `tests/unit/server/mission-select-hygiene.test.ts` (#534) : liste gelée des `select()`, `.returning()` et trames de `missions`, chaque entrée justifiée. Rouge si une occurrence apparaît ou disparaît.
+  - Rouge avant correctif : #539 indique 3 tests rouges sans la garde et 12 si l'ensemble est élargi au chauffeur ; #535 indique des mutants rouges. #534 ne chiffre pas son rouge dans la PR.
+- **Prévention insuffisante** : chaque garde existante est liée à une route ou à une table déjà corrigée. Une troisième occurrence est apparue par une autre route de la même donnée.
+- **Contrôle renforcé exigé** : avant de fermer une route de coût, inventorier par grep toutes les lectures de la table (`from(<table>)`, `select()`, `getTableColumns`, `.returning()`, `statistics`), puis geler la liste dans un test à la manière de `vehicle-select-hygiene.test.ts`. Prévention de `parts` : **manquante**, à produire par fleet-testeur.
+- **Règle de calcul (#530, #535)** : une moyenne multipliée par un nombre redonne le total masqué. Un champ dérivé d'une donnée réservée suit la même restriction, que l'opération soit réversible ou non ; la règle « valeur calculée » de cette entrée s'applique donc aussi aux moyennes et ratios.
+- **Leçon généralisée** : une restriction de lecture se vérifie sur la donnée, pas sur la route. Pour chaque colonne réservée : toutes les lectures, toutes les écritures qui renvoient la ligne, tous les agrégats et toutes les trames, avec un test qui gèle l'inventaire.
+
 ## 2026-11-04 — Changer le code HTTP d'un catch d'authentification ouvre un oracle d'énumération (#254, #256)
 
 ### Contexte
@@ -2723,6 +2744,14 @@ Course forcée : une connexion tient `SELECT … FOR UPDATE` sur la demande. Le 
 
 ### Leçon généralisée
 Un test de concurrence ne se contente pas de `Promise.all` : il force l'entrelacement qu'il prétend couvrir, par verrou de ligne, barrière ou advisory lock, et il attend un état observable (`pg_stat_activity`) au lieu d'un délai. Avant de conclure à une perte d'intégrité, mesurer l'invariant (stock, mouvements) et pas seulement le compte de succès.
+
+### Récidive (2026-11-06, PR #545)
+- **Constat** : dans `tests/contract/supplier-settlement-disputed.contract.test.ts`, le cas « litige posé pendant le rapprochement » attend le verrou par `waitForInvoiceLockWaiter`, qui interroge `pg_stat_activity` (`wait_event_type = 'Lock'`). Le cas rejet contre rapprochement, lui, lance deux appels par `Promise.all` sans forcer le verrou. La règle reste écrite en prose : aucune garde ne refuse une attente à délai fixe, ni une course non forcée, dans un test de concurrence.
+- **Cause racine** : même famille que ci-dessus. Un test « pendant » qui attend par minuterie ne prouve pas l'attente : la seconde requête peut ne pas être encore bloquée au moment de l'écriture, et le test passe sans tester la course.
+- **Classification** : test de concurrence non déterministe ; prévention en prose seule.
+- **Prévention** : `tests/contract/supplier-settlement-disputed.contract.test.ts` et `tests/contract/mission-planning-stale-read.contract.test.ts` (filtre sur `pg_blocking_pids`), présents sur `origin/main`. **Prévention manquante** pour la règle générale : une garde qui signale tout test de concurrence sans `pg_stat_activity` ni `pg_blocking_pids` (fleet-testeur).
+- **Leçon généralisée** : un test de concurrence attend un état observable de la base, jamais un délai. Quand une règle est déjà écrite dans une entrée, la récidive exige une garde exécutable, pas une seconde mention.
+
 ## 2026-11-04 — Compteur anti-force brute lu puis écrit en deux temps
 
 - **Contexte** : `loginLockoutGuard` protège la connexion par mot de passe (`pwd:`), par PIN (`pin:`) et
@@ -2988,6 +3017,9 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
 - **Prévention vérifiable** : `tests/contract/mission-planning-conflict-write` (rafale PATCH de dates + ajout d'affectation sur le même véhicule : rouge 3/3 sans le verrou de ligne du PATCH), `tests/contract/mission-planning-stale-read` (déterministe : une connexion tient la ligne, la paire est remplacée, le verrou est libéré ; filtre des attentes sur `pg_blocking_pids`), `tests/contract/mission-planning-conflict-status`. Le cas « dates seules sans affectation vivante » est couvert par #346.
 - **Leçon généralisée** : dès qu'une ressource se protège par deux familles de verrous, l'ordre d'acquisition est un contrat unique, écrit à un seul endroit et suivi par tous les appelants ; toute décision prise sur une lecture antérieure se revalide sous le verrou. Un test d'interblocage doit faire partager la même clé aux deux requêtes et, pour la lecture périmée, tenir le verrou depuis le test plutôt que compter sur un rythme.
 
+- **Récidive (2026-11-06, PR #545)** : le règlement fournisseur a repris la même erreur, sur facture et règlement. Le rejet prenait le règlement puis, par le déclencheur `recalc_supplier_invoice_financials` (`server/db/triggers/supplier-invoice-settlements-workflow.sql`), la facture verrouillée après l'`UPDATE` du règlement ; le rapprochement prenait la facture puis le règlement. Un rejet et un rapprochement simultanés pouvaient donc s'interbloquer (40P01, ressorti en 409 générique). Cause racine : l'ordre avait été déclaré sans compter les verrous posés par les déclencheurs. Correctif #545 : facture verrouillée avant le règlement dans le rejet comme dans le rapprochement (`server/services/three-way-matching-service.ts`), écriture de statut en compare-and-set (`status <> 'disputed'`). Prévention présente sur `origin/main` : `tests/contract/supplier-settlement-disputed.contract.test.ts`. Le cas rejet contre rapprochement (5 essais) lance les deux appels par `Promise.all` : il attrape un 409 générique, mais ne force pas l'entrelacement, donc il est probabiliste. Le cas « litige pendant le rapprochement » du même fichier force le verrou et attend `pg_stat_activity`. Le corps de PR #545 annonce les 3 cas de litige rouges sur l'ancien code ; le ratio « 3 fois sur 5 » n'y figure pas et n'est pas repris. **Prévention manquante** pour la règle générale : une garde qui liste les tables écrites par un déclencheur et exige, pour chaque service qui les écrit, un ordre de verrouillage déclaré, plus un test de rejet contre rapprochement qui force le verrou (fleet-testeur).
+- **Leçon généralisée (récidive)** : l'ordre des verrous se lit en comptant les déclencheurs, pas seulement les `UPDATE` du service. Toute transaction qui touche facture et règlement verrouille la facture d'abord. Une règle d'ordre écrite en prose ne suffit pas, et un `Promise.all` ne prouve pas un ordre : il faut forcer le verrou.
+
 ## 2026-11-05 — Une garde refuse ce qu'elle ne sait pas lire
 
 - **Contexte** : la garde `router.param("id")` des missions (cloison chauffeur) contrôlait l'accès seulement si l'identifiant était un entier, et laissait passer le reste sans contrôle ; les handlers relisaient ensuite l'identifiant par une autre fonction de lecture.
@@ -3203,6 +3235,10 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
   - cas déterministe : une connexion tient la ligne mission, l'annulation attend son UPDATE, la clôture passe, le verrou est libéré. Résultat attendu : 409 et aucune ligne `:reverse`. Ce cas est rouge sans le correctif (200, mission réécrite en `cancelled`) ;
   - cas `Promise.all` clôture + annulation : un seul 200, et l'argent suit le statut gagnant.
 - **Leçon généralisée** : une transition qui déclenche un effet (argent, stock) s'écrit par un UPDATE conditionné au statut lu, avec 409 sur 0 ligne, ou sous `SELECT … FOR UPDATE` suivi d'une revérification. L'effet vient après l'écriture et dans la même transaction. Un contrôle de transition fait hors verrou ne protège rien.
+- **Récidive (2026-11-06) : garde de statut contournée par l'étape d'avant** (#533) : `validateInvoice` des factures fournisseur n'avait aucune garde de statut. Une facture `paid` pouvait repasser à `validated`, puis `approved`. La règle ci-dessus visait les transitions qui déplacent de l'argent ; une transition sans effet visible a été écrite sans compare-and-set, et la transition suivante la rendait possible.
+  - Résolution (#533) : `validateInvoice` ne part que de `received` (`server/services/three-way-matching-service.ts`, ligne 671) ; `approveInvoice` ne part que de `received` ou `validated` (ligne 724). 404 et idempotence ajoutés.
+  - Prévention vérifiée : `tests/unit/server/status-update-cas-hygiene.test.ts` (#536, présent dans `origin/main`). Liste gelée à cliquet par fichier (`FROZEN`) : toute écriture de statut sans condition sur le statut de départ fait échouer le test, à la hausse comme à la baisse. Prouvé par mutant (UPDATE inconditionnel dans `server/services/client-billing-service.ts`). #533 indique que sans le filtre de statut, 4 cas passent au rouge. Limite écrite dans le test : `.set(variable)` n'est pas inspecté.
+  - Leçon : le compare-and-set vaut pour toute transition de statut, avec ou sans effet financier. Le critère « effet argent » sert à prioriser la revue, pas à décider où la règle s'applique.
 
 ## 2026-11-05 — Événement temps réel émis sans portée : diffusé à personne (L1 à L1e)
 
@@ -3246,3 +3282,45 @@ L'import valide le PIN comme les routes, il ne se contente pas de le hacher : `r
   - `work-orders`.
 - **Prévention vérifiable** : pour toute donnée rattachée au véhicule, le contrat joue le même acteur sur chaque entrée : chemin, filtre, liste, agrégat et fichier. À prévoir en L1c : un prédicat partagé (`owner_id = ? AND deleted_at IS NULL`), plus un cas « aucune liste ne renvoie l'id retiré ».
 - **Leçon généralisée** : fermer une donnée, c'est fermer toutes ses entrées. Recenser d'abord chaque chemin, filtre, liste et export qui la renvoient, puis prouver la fermeture sur chacun avec le même acteur.
+
+## 2026-11-06 — Masque posé sur un routeur, second routeur qui renvoie la ligne par `returning()` (#534)
+
+- **Contexte** : #534 masque le budget de mission (`estimatedFuelCost`, `workflowData.budgetPlan`) sur `/api/missions`. `/api/operations/*` renvoyait la ligne `missions` entière, et les écritures `insert` / `update` suivies de `.returning()` n'étaient pas masquées.
+- **Cause racine** : le masque était une enveloppe posée sur un routeur, pas une projection de la donnée. Tout autre routeur qui lit la même table, ou toute écriture qui renvoie la ligne, le contourne.
+- **Classification** : projection implicite (même famille que le prix convenu, O3) ; second point d'entrée non recensé.
+- **Résolution** : `redactMissionBudget` sur les réponses (clé présente, valeur `null`, lecteur absent refusé) ; `omitMissionBudget` sur la trame temps réel ; masque étendu aux `returning()` des routes `missions` et `operations`.
+- **Prévention vérifiée** : `tests/unit/server/mission-select-hygiene.test.ts` (#534, présent dans `origin/main`). Il recense toute lecture de `missions` sans projection explicite et tout `.returning()` sans argument qui atteint une réponse HTTP ou une trame. Chaque entrée est gelée avec sa justification (masquée en aval, servie à des lecteurs du budget, ou jamais servie) ; la liste doit rester égale à l'inventaire, donc une occurrence ajoutée ou retirée fait échouer le test. Une même clé ne se déplace pas silencieusement de bloc.
+- **Rouge avant correctif** : non chiffré dans la PR. À vérifier par fleet-testeur en rejouant le test sur le commit précédent #534.
+- **Leçon généralisée** : un masque se pose sur la donnée (une fonction de projection appelée par toutes les lectures, écritures et trames), pas sur un routeur. À défaut, inventorier les `returning()` et les trames de la table avec une liste gelée, comme ici. Ne pas se fier à la seule route déjà corrigée.
+
+## 2026-11-06 — Montants en texte libre dans l'historique d'audit d'un OT, que le masquage par clé laisse passer (Q22, en cours)
+
+- **Contexte** : `GET /api/work-orders/:id/audit-trail` renvoie l'historique d'audit d'un ordre de travail. Le masquage des coûts d'OT (`server/lib/work-order-cost-mask.ts`, #530) agit sur les clés de coût. Revue Q22 : des montants apparaissent dans des libellés d'événements, c'est-à-dire en texte libre.
+- **Cause racine** : le masque regarde le nom de la clé, pas le contenu de la valeur. Une donnée réservée écrite dans une chaîne (message, libellé) échappe à tout masquage par clé.
+- **Classification** : fuite par texte libre. Dette tracée, pas encore corrigée.
+- **Résolution** : lot Q22 en cours, non fusionné à la date de cette entrée.
+- **Prévention** :
+  - existante, partielle : `tests/unit/server/work-order-cost-mask-coverage.test.ts` (#530, présent dans `origin/main`) exempte explicitement `/api/work-orders/:id/audit-trail`, avec la raison « à auditer dans un lot séparé ». L'exemption est la trace de la dette, pas une prévention.
+  - **prévention manquante** pour le contenu textuel : fleet-testeur doit produire un contrat qui écrit un montant dans une action auditée, puis cherche une forme monétaire (décimal, symbole monétaire) dans le corps de `audit-trail`, pour chaque rôle hors rôles coût.
+- **Leçon généralisée** : un masque par clé ne protège jamais une valeur écrite en texte libre. Une donnée réservée n'entre pas dans un libellé. Une exemption de garde doit porter une échéance et un propriétaire, sinon elle devient permanente.
+
+## 2026-11-06 — Test contrat instable signalé en résumé : diagnostic impossible sans le corps de réponse (#540)
+
+- **Contexte** : `finance-withholdings` et `qhse-inspections` ont été signalés rouges, uniquement dans la suite contrat complète. Seul le résumé a été remonté, sans le message d'assertion. Non reproduit : suite complète 245/245 fichiers, les deux fichiers seuls 34/34 (journal c7, entrée du 2026-11-06 01:41).
+- **Cause racine** : les assertions de statut (`expect(res.status).toBe(200)`) ne donnent que le code reçu. Le corps porte la cause (401 de session, 403 ou 404 de drapeau, 500, grille vide). Sans lui, aucune hypothèse ne se distingue des autres.
+- **Classification** : outillage de test, diagnostic insuffisant sur une instabilité non qualifiée.
+- **Résolution** (#540) : les assertions de connexion qhse, de lecture de la grille cabine et de statut 200 de finance-withholdings affichent le corps de la réponse. Le timeout n'est pas relevé, par choix : rien ne prouve qu'il soit en cause.
+- **Prévention** :
+  - existante, limitée : `tests/contract/finance-withholdings.contract.test.ts` et `tests/contract/qhse-inspections.contract.test.ts` (modifiés par #540). Ce sont les deux seuls fichiers couverts.
+  - **prévention manquante** pour la règle générale : aucun helper partagé dans `tests/support/` ni garde sur les assertions de statut. fleet-testeur doit produire une garde qui échoue sur une assertion de statut HTTP sans message de corps.
+- **Leçon généralisée** : une assertion de statut HTTP en contrat porte toujours le corps dans son message. Un test instable signalé se transmet avec son message d'échec complet ; le résumé de suite ne suffit pas à classer la cause.
+
+## 2026-11-06 — Dettes ouvertes relevées dans les PR #525 à #540
+
+Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. Les corriger ne fait pas partie de cette entrée. Propriétaire : à attribuer par l'orchestrateur ; tests : fleet-testeur.
+
+- **Soldée par #545** (vérifié sur `origin/main`, ne plus lire comme ouverte) : facture fournisseur `disputed` passée à `paid` par `syncInvoiceFromReconciledSettlements`, `server/services/three-way-matching-service.ts`. L'écriture de statut exclut désormais `disputed` (compare-and-set), et la liste gelée de `tests/unit/server/status-update-cas-hygiene.test.ts` passe de 2 à 1. Prévention présente : `tests/contract/supplier-settlement-disputed.contract.test.ts`.
+- **Soldée par #543** (vérifié sur `origin/main`) : coûts de pneus écrits sur stdout. Le log des rotations, `server/storage.ts` (lignes 2415-2416), n'émet plus `cost` et passe par `storageLog`. Reste la garde générale sur les montants dans les logs, **prévention manquante** (fleet-testeur).
+- **Coût carburant estimé compté comme revenu** : `server/services/operations-service.ts` (lignes 251, 296 et 318). `estimatedFuelCost` est sommé dans `totalRevenue`, puis la marge est `totalRevenue - totalFuelCost`. **Prévention manquante** : aucune garde identifiée dans cette passe ; fleet-testeur à vérifier le calcul sur un jeu connu.
+- **Tests contrat intermittents `finance-withholdings` et `qhse-inspections`** : non reproduits. Instrumentés par #540 (corps de réponse). Piste ouverte : les cas « 200 au contrat » de finance-withholdings gardent le timeout par défaut de 5 s (journal c7, 2026-11-06 01:41). **Prévention manquante** : répétition ciblée de la suite contrat pour détecter l'instabilité (fleet-testeur).
+- **Leçon généralisée (dettes)** : une dette connue se consigne avec le fichier, la ligne, la prévention actuelle et son absence, pour qu'aucune garde gelée ne soit lue comme une correction.
