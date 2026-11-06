@@ -8,6 +8,7 @@ import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { authenticate, authorize } from "../middleware/auth";
 import { alertService } from "../services/alert-service";
+import { transitionWorkOrderStatus } from "../services/work-order-status-transition";
 import { storage } from "../storage";
 import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 import { idSchema } from "@shared/contracts/common";
@@ -88,12 +89,21 @@ const patchTechnicianWorkOrderStatus: RequestHandler = async (req, res, next) =>
       }
     }
 
-    const updateData: { status: string; diagnosis?: string; startDate?: Date; endDate?: Date } = { status: body.status };
-    if (body.notes) updateData.diagnosis = body.notes;
-    if (body.status === "in_progress" && !workOrder.startDate) updateData.startDate = new Date();
-    if (body.status === "completed") updateData.endDate = new Date();
+    const fields: { diagnosis?: string; startDate?: Date; endDate?: Date } = {};
+    if (body.notes) fields.diagnosis = body.notes;
+    if (body.status === "in_progress" && !workOrder.startDate) fields.startDate = new Date();
+    if (body.status === "completed") fields.endDate = new Date();
+    const updateData = { status: body.status, ...fields };
 
-    const updatedOrder = await storage.updateWorkOrder(workOrderId, updateData as never);
+    // Compare-and-set sur le statut lu : un OT annulé ou remis en attente par le chef d'atelier
+    // entre la lecture et l'écriture répond 409, sans diagnostic ni kilométrage écrits.
+    const updatedOrder = await transitionWorkOrderStatus({
+      workOrderId,
+      from: workOrder.status,
+      to: body.status,
+      updatedBy: userId,
+      fields,
+    });
     if (mileageToWrite) await storage.updateVehicle(workOrder.vehicleId, mileageToWrite);
 
     // Avancement vers l'encadrement : le chef d'atelier est prévenu du démarrage ou de la fin,

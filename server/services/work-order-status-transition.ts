@@ -21,6 +21,11 @@ export type WorkOrderStatusTransition = {
    * doit pas faire échouer l'action déjà enregistrée.
    */
   onStale?: "throw" | "skip";
+  /**
+   * Champs écrits dans la même instruction que le statut, donc sous le même compare-and-set :
+   * rien n'est écrit si la ligne n'a plus le statut lu.
+   */
+  fields?: { diagnosis?: string; startDate?: Date; endDate?: Date };
 };
 
 /**
@@ -36,13 +41,20 @@ export type WorkOrderStatusTransition = {
  * Les trames temps réel et les invalidations restent chez l'appelant (AGENTS.md §2).
  */
 export async function transitionWorkOrderStatus(transition: WorkOrderStatusTransition): Promise<WorkOrder | null> {
-  const { workOrderId, from, to, updatedBy, onStale = "throw" } = transition;
+  const { workOrderId, from, to, updatedBy, onStale = "throw", fields } = transition;
   const check = checkWorkOrderTransition(from, to, undefined);
   if (!check.allowed) throw new AppError(check.status, check.message);
 
   const [written] = await db
     .update(workOrders)
-    .set({ status: to, updatedBy: updatedBy ?? undefined, updatedAt: new Date() })
+    .set({
+      status: to,
+      diagnosis: fields?.diagnosis,
+      startDate: fields?.startDate,
+      endDate: fields?.endDate,
+      updatedBy: updatedBy ?? undefined,
+      updatedAt: new Date(),
+    })
     .where(and(eq(workOrders.id, workOrderId), eq(workOrders.status, from as WorkOrderStatus)))
     .returning({ id: workOrders.id, vehicleId: workOrders.vehicleId, status: workOrders.status });
   if (!written) {
