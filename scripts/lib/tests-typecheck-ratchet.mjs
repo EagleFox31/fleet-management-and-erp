@@ -39,6 +39,26 @@ export function compareToBaseline(current, baseline) {
   return { regressions: regressions.sort(byFile), improvements: improvements.sort(byFile) };
 }
 
+/**
+ * Garde anti-relèvement : la base versionnée comparée à celle de la branche de référence
+ * (la cible de la PR). Une entrée nouvelle ou un compte plus haut est un relèvement à la main,
+ * refusé ; une baisse ou une égalité passe. Renvoie les entrées relevées.
+ */
+export function raisedEntries(baseline, reference) {
+  return compareToBaseline(baseline, reference).regressions;
+}
+
+/**
+ * Branche de référence de la garde, sans supposer `main` :
+ * `TESTS_BASELINE_REF` explicite, sinon la cible de la PR (`GITHUB_BASE_REF`), sinon la branche
+ * par défaut du dépôt distant (`originHead`, lu par `git symbolic-ref`). `null` si rien n'est connu.
+ */
+export function resolveReferenceRef(env, originHead) {
+  if (env.TESTS_BASELINE_REF) return env.TESTS_BASELINE_REF;
+  if (env.GITHUB_BASE_REF) return `origin/${env.GITHUB_BASE_REF}`;
+  return originHead || null;
+}
+
 /** Base à écrire après `--update` : jamais au-dessus de l'ancienne, fichiers corrigés retirés. */
 export function lowerBaseline(current, baseline) {
   const next = {};
