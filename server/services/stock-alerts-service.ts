@@ -111,7 +111,7 @@ export class StockAlertsService {
       estimatedCost: estimatedCost
     };
 
-    log.debug(`Found ${alerts.length} reorder alerts, estimated cost: ${estimatedCost} FCFA`);
+    log.debug({ alerts: alerts.length }, "alertes de réapprovisionnement calculées");
     return result;
   }
 

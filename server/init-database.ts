@@ -1518,6 +1518,55 @@ EXCEPTION WHEN lock_not_available THEN
   RAISE WARNING 'contraintes mission_budget_expenses non réconciliées : verrou de table indisponible';
 END $$;`;
 
+/**
+ * Mission soldée (Q18) : qui a soldé et quand. Jumelle de server/db/migrations/20261106_mission_budget_settlement.sql.
+ */
+export const MISSION_BUDGET_SETTLEMENT_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+DO $$
+BEGIN
+  IF to_regclass('mission_budgets') IS NULL THEN
+    RETURN;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = current_schema() AND table_name = 'mission_budgets' AND column_name = 'settled_by') THEN
+    ALTER TABLE mission_budgets ADD COLUMN settled_by integer;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = current_schema() AND table_name = 'mission_budgets' AND column_name = 'settled_at') THEN
+    ALTER TABLE mission_budgets ADD COLUMN settled_at timestamp;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'mission_budgets.settled_by / settled_at non ajoutées : verrou indisponible';
+END $$;
+
+DO $$
+BEGIN
+  IF to_regclass('mission_budgets') IS NULL
+     OR NOT EXISTS (SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = current_schema() AND table_name = 'mission_budgets' AND column_name = 'settled_by') THEN
+    RETURN;
+  END IF;
+  -- Posée NOT VALID puis validée : un settled_by orphelin laisse un WARNING, relu par
+  -- reportCdcConstraintGaps (CDC_RECONCILED_CONSTRAINTS), pas un démarrage bloqué. Nom identique à shared/schema.ts.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budgets'::regclass
+                 AND conname = 'mission_budgets_settled_by_users_id_fk') THEN
+    ALTER TABLE mission_budgets ADD CONSTRAINT mission_budgets_settled_by_users_id_fk
+      FOREIGN KEY (settled_by) REFERENCES users(id) NOT VALID;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_budgets'::regclass
+             AND conname = 'mission_budgets_settled_by_users_id_fk' AND NOT convalidated) THEN
+    BEGIN
+      ALTER TABLE mission_budgets VALIDATE CONSTRAINT mission_budgets_settled_by_users_id_fk;
+    EXCEPTION WHEN foreign_key_violation THEN
+      RAISE WARNING 'mission_budgets_settled_by_users_id_fk laissée NOT VALID : settled_by vers un utilisateur absent';
+    END;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'mission_budgets_settled_by_users_id_fk non posée : verrou indisponible';
+END $$;`;
+
 async function applyWorkOrderVehicleStatusTriggers() {
   await pool.query(WORK_ORDER_VEHICLE_RELEASE_SQL);
   await pool.query(WORK_ORDER_VEHICLE_HOLD_SQL);
@@ -1737,6 +1786,8 @@ export const CDC_RECONCILED_CONSTRAINTS: readonly string[] = [
   'mission_budget_expenses_created_by_users_id_fk',
   'mission_budget_expenses_updated_by_users_id_fk',
   'mission_budget_expenses_deleted_by_users_id_fk',
+  // Posée par MISSION_BUDGET_SETTLEMENT_SQL (lot Q18).
+  'mission_budgets_settled_by_users_id_fk',
   // Posées par TARIFF_GRID_SQL (lot O3).
   'tariff_grid_pricing_unit_check',
   'tariff_grid_unit_price_check',
@@ -2313,6 +2364,8 @@ export async function initializeDatabase() {
     await pool.query(MISSION_BUDGETS_TREASURY_SQL);
     // Dépenses justifiées (L1e) — jumelle de server/db/migrations/20261106_mission_budget_expenses.sql.
     await pool.query(MISSION_BUDGET_EXPENSES_SQL);
+    // Mission soldée (Q18) — jumelle de server/db/migrations/20261106_mission_budget_settlement.sql.
+    await pool.query(MISSION_BUDGET_SETTLEMENT_SQL);
     // Relu après le dernier SQL qui pose une contrainte réconciliée : au premier démarrage, une table
     // pas encore créée serait signalée à tort.
     await reportCdcConstraintGaps(pool);

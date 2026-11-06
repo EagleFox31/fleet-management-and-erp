@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { canReadMissionBudget, formatXaf, missionBudgetActions, remainingOf, toDisburseOf } from "../../../client/src/lib/mission-budget-ui";
 import { ALL_APP_ROLES } from "@shared/constants/roles";
 
-const none = { create: false, edit: false, approve: false, disburse: false, expenses: false };
+const none = { create: false, edit: false, approve: false, disburse: false, expenses: false, settle: false };
 
 describe("budget de mission (L1f) : actions visibles selon le rôle et les statuts", () => {
   it("lecture : logistique, direction, secrétariat, administrateur ; aucun autre rôle", () => {
@@ -37,10 +37,22 @@ describe("budget de mission (L1f) : actions visibles selon le rôle et les statu
 
   it("dépenses (R1) : ouvertes sur mission terminée pour qui décaisse ; jamais sur mission annulée", () => {
     for (const role of ["admin", "secretary", "logistics"]) {
-      expect(missionBudgetActions(role, { status: "disbursed" }, "completed"), role).toEqual({ ...none, expenses: true });
+      expect(missionBudgetActions(role, { status: "disbursed" }, "completed"), role).toEqual({ ...none, expenses: true, settle: role !== "logistics" });
       expect(missionBudgetActions(role, { status: "disbursed" }, "cancelled"), role).toEqual(none);
     }
     expect(missionBudgetActions("management", { status: "disbursed" }, "completed"), "qui approuve ne justifie pas").toEqual(none);
+  });
+
+  it("solde (Q18) : mission terminée, budget décaissé, administrateur et secrétariat ; ensuite dépenses figées", () => {
+    for (const role of ["admin", "secretary"]) {
+      expect(missionBudgetActions(role, { status: "disbursed", settledAt: null }, "completed").settle, role).toBe(true);
+      expect(missionBudgetActions(role, { status: "disbursed" }, "delivered").settle, `${role} : mission livrée, pas terminée`).toBe(false);
+      expect(missionBudgetActions(role, { status: "approved" }, "completed").settle, `${role} : non décaissé`).toBe(false);
+      expect(missionBudgetActions(role, { status: "disbursed", settledAt: "2026-11-06T10:00:00.000Z" }, "completed"), `${role} : déjà soldé`).toEqual(none);
+    }
+    for (const role of ["logistics", "management", "technician", "driver", "client"]) {
+      expect(missionBudgetActions(role, { status: "disbursed" }, "completed").settle, role).toBe(false);
+    }
   });
 
   it("reste d'une ligne : 0 si la ligne est absente ou les dépenses pas encore lues", () => {
