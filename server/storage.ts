@@ -2412,10 +2412,11 @@ export class DatabaseStorage implements IStorage {
         .where(eq(tireRotations.workOrderId, workOrderId))
         .orderBy(tireRotations.rotationDate);
       
-      console.log(`Rotations récupérées pour l'ordre ${workOrderId}:`, rotations);
+      // Identifiants et nombre seulement : les lignes portent le coût de la rotation.
+      storageLog.debug({ workOrderId, count: rotations.length, rotationIds: rotations.map((r) => r.id) }, "Rotations récupérées pour l'ordre");
       return rotations;
     } catch (error) {
-      console.error('Error getting tire rotations for work order:', error);
+      storageLog.error({ err: error, workOrderId }, "Error getting tire rotations for work order");
       return [];
     }
   }

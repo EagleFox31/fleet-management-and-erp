@@ -50,6 +50,9 @@ afterAll(async () => {
   try {
     const woIds = [R.wo, A.wo].filter(Boolean);
     if (woIds.length) {
+      // Les témoins acceptés laissent des mouvements rattachés à l'OT (clé étrangère sans cascade).
+      await db.delete(partsStockMovements).where(inArray(partsStockMovements.workOrderId, woIds));
+      if (partId) await db.delete(partsStockMovements).where(eq(partsStockMovements.partId, partId));
       await db.delete(partsUsed).where(inArray(partsUsed.workOrderId, woIds));
       await db.delete(partRequirements).where(inArray(partRequirements.workOrderId, woIds));
       await db.delete(workOrders).where(inArray(workOrders.id, woIds));
