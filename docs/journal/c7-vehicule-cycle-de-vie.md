@@ -769,3 +769,13 @@ WHERE po.status IN ('delivered', 'completed')
   - `supplier-settlement-proof-lifecycle` créait une facture `pending`, un statut hors du cycle de vie. Elle est maintenant `received`, le statut initial réel.
 - **Écart signalé** : `vehicle_documents.type` déclare un enum TypeScript, alors que la colonne est en texte libre et accepte des alias. Le test passe par `sql`, et l'écart est remonté à 0a.
 - **Preuve** : `tsc` 0 ; `check:tests` à 12 figées ; 15 fichiers de contrat (343 tests) verts sur Postgres local.
+
+## 2026-11-06 — Lignes d'OT et barème : erreurs par le chemin commun
+
+- **Quoi** : dans `server/api/work-order-items.routes.ts`, les six `catch` qui renvoyaient `res.status(500).json({ message: "Erreur serveur" })` passent par `makeFailWith(log)`. Le `console.error` de la création de poste du barème est migré.
+- **Comment** : `failWith(error, req, next, "<événement>")`. Une `AppError` ou une `ZodError` va directement au gestionnaire central ; le reste devient une 500 générique, journalisée une seule fois par `errorHandler`, avec `routeModule` et l'événement de la route.
+- **Pourquoi** : backlog de 0a. Constat : le corps de réponse portait déjà le `requestId`, parce que `errorResponseGuard` normalise toute réponse ≥ 400. Le gain est ailleurs : un seul chemin d'erreur, la cause gardée dans le log unique, et plus de `console.*`.
+- **Preuve** :
+  - nouveau contrat « panne du service » : POST et PATCH répondent en 500 normalisée, avec une référence égale à `X-Request-Id` et sans le message SQL ;
+  - `labor-catalog` et `work-order-items` verts (14 tests) ;
+  - le mutant (routes d'origine) passe aussi : ce test fige le contrat, il ne détecte pas l'ancien code, qui était déjà conforme côté client.
