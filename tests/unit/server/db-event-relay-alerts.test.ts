@@ -24,7 +24,7 @@ const alert = (id: number, userId: number | null): BroadcastableAlert => ({
 function deps(rows: BroadcastableAlert[] | Error) {
   const broadcast = vi.fn();
   const broadcastAlert = vi.fn();
-  const readAlerts = vi.fn(async () => {
+  const readAlerts = vi.fn(async (_ids: number[]) => {
     if (rows instanceof Error) throw rows;
     return rows;
   });

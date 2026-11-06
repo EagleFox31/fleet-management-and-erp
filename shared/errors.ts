@@ -73,12 +73,12 @@ type ZodIssueLike = {
   code?: string;
   message?: string;
   path?: (string | number)[];
-  expected?: string;
-  received?: string;
+  expected?: unknown;
+  received?: unknown;
   minimum?: number | bigint;
   maximum?: number | bigint;
   type?: string;
-  validation?: string;
+  validation?: unknown;
 };
 
 /** Vrai si le message est celui que Zod produit par défaut (en anglais). */

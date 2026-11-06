@@ -122,7 +122,7 @@ describe("journal de trésorerie : mois et export", () => {
   });
 
   it("l'export neutralise une formule et protège les séparateurs", () => {
-    const base = { id: 1, accountId: 1, entryDate: "2026-11-05", pieceRef: null, direction: "out" as const, amount: "5.00", category: "autre" as const, counterpartyLabel: null, transferGroup: null, notes: null, vehicleId: null, missionId: null, clientId: null, supplierId: null, balanceAfter: "95.00" };
+    const base = { id: 1, accountId: 1, entryDate: "2026-11-05", pieceRef: null, direction: "out" as const, amount: "5.00", category: "autre" as const, counterpartyLabel: null, transferGroup: null, notes: null, vehicleId: null, missionId: null, clientId: null, supplierId: null, fuelRecordId: null, supplierSettlementId: null, balanceAfter: "95.00" };
     const csv = ledgerToCsv({
       account: { id: 1, code: "C", label: "Caisse", kind: "cash", bankName: null, openingBalance: "100.00", openingDate: null, isActive: true, currentBalance: "95.00" },
       month: "2026-11",

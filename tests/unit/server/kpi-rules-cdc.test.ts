@@ -181,7 +181,7 @@ describe("coût d'une intervention", () => {
 
   it("ventile par groupe, moyenne arrondie, null si vide", () => {
     const row = (key: string, total: number, isPreventive: boolean) => ({
-      key, label: key.toUpperCase(), isPreventive, labor: total, parts: 0, total, laborMissing: false,
+      key, label: key.toUpperCase(), isPreventive, labor: total, parts: 0, tires: 0, total, laborMissing: false,
     });
     const groups = groupCosts([row("a", 10000, true), row("a", 5000, false), row("b", 2000, false)], (r) => ({ key: r.key, label: r.label }));
     expect(groups).toEqual([

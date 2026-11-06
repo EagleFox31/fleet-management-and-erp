@@ -44,7 +44,7 @@ describe("getQueryFn", () => {
     [["/api/vehicles", 5], "/api/vehicles/5"],
     [["/api/suppliers", 3, "invoices", { status: "paid" }], "/api/suppliers/3/invoices?status=paid"],
   ])("%j appelle %s", async (queryKey, expected) => {
-    const fetchMock = vi.fn(async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => new Response("{}", { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     await getQueryFn({ on401: "throw" })({ queryKey, meta: undefined, signal: new AbortController().signal } as never);
     expect(String(fetchMock.mock.calls[0][0])).toMatch(new RegExp(`${expected.replace(/[.?/]/g, "\\$&")}$`));

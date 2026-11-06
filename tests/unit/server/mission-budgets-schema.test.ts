@@ -64,7 +64,7 @@ describe("L1 : mission_budgets, init-database, migration jumelle et Drizzle", ()
   // même nom par le SQL (création et réconciliation) et relue par reportCdcConstraintGaps.
   it("contraintes : mêmes noms dans Drizzle, dans le SQL et dans CDC_RECONCILED_CONSTRAINTS", () => {
     const config = getTableConfig(missionBudgets);
-    const unique = config.columns.filter((c) => c.isUnique).map((c) => c.uniqueName);
+    const unique = config.columns.filter((c) => c.isUnique).flatMap((c) => (c.uniqueName ? [c.uniqueName] : []));
     const declared = [...config.checks.map((c) => c.name), ...unique].sort();
     expect(declared).toEqual(["mission_budgets_amounts_check", "mission_budgets_mission_id_unique", "mission_budgets_status_check"]);
     const sql = fromMigration();

@@ -134,7 +134,7 @@ describe("formatConsumptionDisplay", () => {
 
 describe("affichage kilométrage", () => {
   it("ne doit pas traiter null comme 0 km", () => {
-    const mileage: number | null = null;
+    const mileage = null as number | null;
     const displayed = mileage == null ? "N/A" : `${mileage.toLocaleString("fr-FR")} km`;
     expect(displayed).toBe("N/A");
   });
