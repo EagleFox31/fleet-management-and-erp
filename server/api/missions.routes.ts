@@ -62,7 +62,7 @@ import {
 } from "../lib/mission-fuel-regularization";
 import type { FuelRecord } from "@shared/schema";
 import { idSchema } from "@shared/contracts/common";
-import { redactMissionPrice } from "../lib/mission-price-scope";
+import { omitMissionBudget, redactMissionBudget, redactMissionPrice } from "../lib/mission-response-scope";
 
 const log = moduleLogger("missions");
 
@@ -234,8 +234,8 @@ export async function broadcastMissionUpdate(
       entity: "mission",
       entityId: missionId,
       payload: {
-        // Trame diffusée à tout le personnel (technicien compris) : jamais de prix convenu.
-        mission: redactMissionPrice(null, mission),
+        // Trame diffusée à tout le personnel (technicien compris) : ni prix convenu, ni montant du budget (Q19).
+        mission: omitMissionBudget(redactMissionPrice(null, mission)),
         missionId,
         ...extraPayload,
       },
@@ -903,7 +903,7 @@ router.get("/", async (req, res) => {
       })
     );
 
-    return res.json(missionsWithAssignments);
+    return res.json(redactMissionBudget(req.user, missionsWithAssignments));
   } catch (error) {
     log.error({ err: error, requestId: req.requestId }, "Get missions error");
     return res.status(500).json({ message: "Erreur serveur" });
@@ -1016,12 +1016,12 @@ router.get("/:id", async (req, res) => {
       assignmentCompletedAt: assignment?.completedAt,
     });
 
-    return res.json({
+    return res.json(redactMissionBudget(req.user, {
       ...mission,
       ...executionDates,
       assignment: assignment || null,
       assignments: visibleAssignments,
-    });
+    }));
   } catch (error) {
     log.error({ err: error, requestId: req.requestId }, "Get mission error");
     return res.status(500).json({ message: "Erreur serveur" });
@@ -1053,7 +1053,7 @@ router.get("/:id/fuel-records", async (req, res) => {
     const fuelData = await fuelCardService.getFuelRecordsByMission(missionId);
     const estimatedBudget = Number(mission.estimatedFuelCost || 0);
 
-    return res.status(200).json({
+    return res.status(200).json(redactMissionBudget(req.user, {
       missionId,
       missionStatus: mission.status,
       records: fuelData.records,
@@ -1071,7 +1071,7 @@ router.get("/:id/fuel-records", async (req, res) => {
       tracking: {
         noRefuelDeclaration: extractMissionNoRefuelDeclaration(mission.workflowData),
       },
-    });
+    }));
   } catch (error) {
     log.error({ err: error, requestId: req.requestId }, "Get mission fuel records error");
     return res.status(500).json({ message: "Erreur serveur" });
@@ -3305,7 +3305,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
           })()
         : [];
 
-    return res.json(redactMissionPrice(req.user, {
+    return res.json(redactMissionBudget(req.user, redactMissionPrice(req.user, {
       ...updatedMission,
       ...extractMissionExecutionDates({
         workflowData: (updatedMission as any)?.workflowData,
@@ -3322,7 +3322,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
             : missionAssignment?.completedAt,
       }),
       warnings,
-    }));
+    })));
   } catch (error) {
     if (error instanceof AppError) return next(error);
     log.error({ err: error, requestId: req.requestId }, "Update mission status error");
