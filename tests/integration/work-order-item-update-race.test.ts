@@ -1,10 +1,6 @@
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
-import {
-  technicianWorkOrdersService,
-  WORK_ORDER_STATUS_CHANGED_ERROR,
-} from "../../server/services/technician-work-orders-service";
 import { workOrderItemsService } from "../../server/services/work-order-items-service";
 import { workOrderItems, workOrders } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -12,10 +8,8 @@ import { createTestUser, createTestVehicle } from "../support/factories";
 import { pidOf, waitForWaitersOn } from "../support/lock-waiters";
 
 /**
- * Transitions concurrentes sur un ordre de travail et ses lignes de travail.
- * - Prise en charge par le technicien pendant une clôture : 409, l'ordre reste clôturé.
- * - Deux mises à jour d'une ligne : la seconde part de l'état écrit par la première
- *   (l'heure de début n'est pas réécrite).
+ * Deux mises à jour concurrentes d'une ligne de travail : la seconde part de l'état écrit par
+ * la première (l'heure de début n'est pas réécrite).
  */
 
 const ids = createIdBag();
@@ -49,25 +43,7 @@ async function pendingWorkOrder() {
   return wo.id;
 }
 
-describe("transitions concurrentes d'un ordre de travail", { timeout: 60000 }, () => {
-  it("prise en charge pendant une clôture : 409, l'ordre reste clôturé", async () => {
-    const workOrderId = await pendingWorkOrder();
-
-    let taking: Promise<unknown> | undefined;
-    await db.transaction(async (tx) => {
-      // La clôture est écrite sans être validée : la prise en charge lit « en attente »,
-      // puis attend le verrou de l'ordre.
-      await tx.update(workOrders).set({ status: "completed" }).where(eq(workOrders.id, workOrderId));
-      taking = technicianWorkOrdersService.takeWorkOrder(workOrderId, technicianId);
-      taking.catch(() => undefined);
-      await waitForWaitersOn(await pidOf(tx), 1);
-    });
-
-    await expect(taking).rejects.toMatchObject({ status: 409, message: WORK_ORDER_STATUS_CHANGED_ERROR });
-    const [after] = await db.select({ status: workOrders.status }).from(workOrders).where(eq(workOrders.id, workOrderId));
-    expect(after.status).toBe("completed");
-  });
-
+describe("mises à jour concurrentes d'une ligne de travail", { timeout: 60000 }, () => {
   it("deux mises à jour d'une ligne : l'heure de début écrite par la première est conservée", async () => {
     const workOrderId = await pendingWorkOrder();
     const [item] = await db

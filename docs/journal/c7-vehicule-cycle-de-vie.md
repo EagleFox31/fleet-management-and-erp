@@ -639,3 +639,10 @@ WHERE po.status IN ('delivered', 'completed')
 - **À savoir** :
   - `updateWorkOrderStatus`, `takeWorkOrder` et `completeWorkOrder` n'ont aucun appelant ;
   - `notes` et `completedDate` étaient passés au `set` sans être des colonnes : Drizzle les ignorait.
+- **Suite, à la demande de 0a** :
+  - `updateWorkOrderStatus`, `takeWorkOrder` et `completeWorkOrder` sont supprimés (aucun appelant, grep et tsc à l'appui), avec leur test de course et les entrées de `broadcast-hygiene` et `work-order-scope-hygiene` ;
+  - `work_order_status_changed` reste émis par le déclencheur `server/db/triggers/work-orders-realtime-triggers.sql`. `realtime-satellites.test.ts` lit maintenant aussi ces fichiers, `event_type := CASE … THEN '…'` compris : sans ce scan, il voyait une entrée morte.
+- **Contrat quality-check bloqué 94 min** :
+  - aucun timeout de test n'est fixé, donc vitest applique son défaut de 5 s : une attente de verrou aurait échoué à 5 s ;
+  - 94 min veulent dire que le minuteur du processus ne tournait pas, donc processus suspendu (veille probable, nuit de 04 h 25 à 06 h 05) ;
+  - campagne rejouée avec un échantillon de `pg_stat_activity` toutes les 15 s : 18 fichiers, 170 tests verts en 65 s, aucune session `idle in transaction`, aucune attente de verrou.

@@ -26,7 +26,6 @@ const EMITTERS: Record<string, { cost: number; staff: number }> = {
   "server/services/incident-service.ts": { cost: 1, staff: 0 },
   "server/services/preventive-maintenance-service.ts": { cost: 1, staff: 0 },
   "server/services/procurement-service.ts": { cost: 0, staff: 2 },
-  "server/services/technician-work-orders-service.ts": { cost: 0, staff: 1 },
   // Un seul appel `broadcast`, dont la portée est un ternaire (coûts pour work_order_*, personnel
   // sinon) : il compte une fois dans chaque colonne. La trame réduite au propriétaire est en `user`.
   "server/lib/db-event-relay.ts": { cost: 1, staff: 1 },
