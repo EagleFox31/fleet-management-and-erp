@@ -708,10 +708,7 @@ export class ProcurementService {
       return { order, createdLines };
     });
 
-    log.info(
-      { orderId: order.id, orderNumber, lines: createdLines.length, totalTTC: Math.round(totalTTC) },
-      "commande créée"
-    );
+    log.info({ orderId: order.id, orderNumber, lines: createdLines.length }, "commande fournisseur créée");
 
     const result = {
       ...order,
