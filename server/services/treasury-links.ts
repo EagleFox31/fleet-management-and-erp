@@ -284,13 +284,18 @@ export async function linkMissionBudgetDisbursement(
 }
 
 /**
- * Mission annulée après décaissement (L1d) : le reliquat non justifié de chaque ligne décaissée revient
+ * Mission annulée après décaissement (L1d), ou soldée une fois terminée (Q18, `reason`) : le reliquat non justifié de chaque ligne décaissée revient
  * au compte d'où il est sorti, par une entrée « in » de clé `<clé>:reverse`. Rejouable : une clé déjà
  * prise n'écrit rien. Sans ligne au journal (décaissement sans compte, ou budget non décaissé) : rien.
  * Comme `reverseFuelLink`, indépendant du drapeau : une sortie déjà écrite se contre-passe toujours.
  * Renvoie le nombre de lignes de contre-passation écrites : 0 sur un rejeu.
  */
-export async function reverseMissionBudgetDisbursements(tx: DbExecutor, budgetIds: number[], userId: number | null): Promise<number> {
+export async function reverseMissionBudgetDisbursements(
+  tx: DbExecutor,
+  budgetIds: number[],
+  userId: number | null,
+  reason: "mission annulée" | "mission soldée" = "mission annulée",
+): Promise<number> {
   if (budgetIds.length === 0) return 0;
   const keys = budgetIds.flatMap((id) => [missionBudgetKey(id, "fdr"), missionBudgetKey(id, "carburant")]);
   const res = await tx.execute(sql`
@@ -314,7 +319,7 @@ export async function reverseMissionBudgetDisbursements(tx: DbExecutor, budgetId
       direction: "in",
       amount,
       entryDate: today(),
-      label: `Contre-passation (mission annulée) : ${line.label}`,
+      label: `Contre-passation (${reason}) : ${line.label}`,
       category: line.category,
       missionId: line.mission_id,
       requestKey: `${line.request_key}:reverse`,

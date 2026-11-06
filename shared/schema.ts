@@ -1412,6 +1412,9 @@ export const missionBudgets = pgTable("mission_budgets", {
   approvedAt: timestamp("approved_at"),
   disbursedBy: integer("disbursed_by").references(() => users.id),
   disbursedAt: timestamp("disbursed_at"),
+  // Q18 : mission soldée, reliquat rendu au compte source ; ses dépenses ne changent plus.
+  settledBy: integer("settled_by").references(() => users.id),
+  settledAt: timestamp("settled_at"),
   createdBy: integer("created_by").references(() => users.id),
   updatedBy: integer("updated_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
