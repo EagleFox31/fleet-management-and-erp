@@ -4,6 +4,7 @@ import { db } from "../../server/db";
 import { storage } from "../../server/storage";
 import { statusHistory, vehicles, workOrders } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
+import { moveWorkOrderTo } from "../support/work-order-status";
 import { createTestVehicle } from "../support/factories";
 
 /**
@@ -40,10 +41,11 @@ describe("statut véhicule : le hors service est préservé", { timeout: 120000 
     ids.vehicleIds.push(v.id);
     const wo = await storage.createWorkOrder({ vehicleId: v.id, title: "TEST réouverture", status: "pending" } as any);
     workOrderIds.push(wo.id);
-    await storage.updateWorkOrder(wo.id, { status: "cancelled" });
+    // Un OT annulé ne se rouvre pas : la réouverture est le refus qualité d'un OT terminé.
+    await moveWorkOrderTo(wo.id, "completed");
     await db.update(vehicles).set({ status: "out_of_service" }).where(eq(vehicles.id, v.id));
     const before = await historyCount(v.id);
-    await storage.updateWorkOrder(wo.id, { status: "in_progress" });
+    await moveWorkOrderTo(wo.id, "in_progress");
     expect(await statusOf(v.id)).toBe("out_of_service");
     expect(await historyCount(v.id)).toBe(before);
   });

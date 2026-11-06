@@ -49,8 +49,10 @@ export type WorkOrderStatusTransition = {
 };
 
 /**
- * Seule écriture du statut d'un OT, modification générique comprise : `storage.updateWorkOrder`
- * refuse le statut.
+ * Écriture du statut d'un OT par les routes (modification générique, technicien) ;
+ * `storage.updateWorkOrder` refuse le statut. Restent des écritures directes, gelées dans
+ * `status-update-cas-hygiene.test.ts` : passage en attente de pièces
+ * (`work-order-part-request.ts`) et refus qualité (`quality-check.routes.ts`).
  *
  * 1. La règle `checkWorkOrderTransition` est appliquée ici, avec le rôle de l'auteur : une
  *    transition interdite (OT terminé, annulé, saut non prévu, annulation par un technicien)
