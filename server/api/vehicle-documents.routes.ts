@@ -218,7 +218,7 @@ router.patch("/documents/:id", isWorkshopManager, async (req, res, next) => {
     const { name, description, expiryDate } = req.body ?? {};
     const previousExpiryDate = document.expiryDate;
 
-    // Le stockage avale l'erreur SQL : une date illisible revenait en 404.
+    // Une date illisible est refusée ici en 400 lisible, avant toute écriture.
     const { data, errors } = prepareColumnUpdate(vehicleDocuments, { name, description, expiryDate });
     if (typeof data.name === "string" && data.name.trim() === "") {
       errors.push({ field: "name", message: "Ce champ est obligatoire." });

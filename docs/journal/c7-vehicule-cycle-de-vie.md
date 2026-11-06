@@ -508,6 +508,18 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
   - mutant (le verrou du rejet retiré) : 3 essais sur 5 échouent, sur deux lancements.
 - **Leçon** : l'ordre des verrous d'une transaction compte aussi les verrous pris par les déclencheurs. Avant d'affirmer qu'il n'y a pas de cycle, lire les déclencheurs de chaque table écrite, pas seulement le code TypeScript.
 
+## 2026-11-06 — Cliquet : pas de montant dans les journaux
+
+- **Quoi** : `tests/unit/server/log-amounts-hygiene.test.ts` balaie les appels `log.*` et `console.*` de `server/` (hors `_archive`). Il échoue sur tout appel dont les arguments portent une valeur monétaire : une clé ou une interpolation nommée prix, coût, montant, solde, TTC ou TVA, ou un `${…} FCFA` / `XAF`.
+- **Comment** :
+  - seul le code des arguments compte (le texte des chaînes est retiré, les `${…}` restent) : le mot dans le message (« fuel balance error ») n'est pas un montant ;
+  - noms exclus : suffixes `Error`, `Changed`, `Id`, `Count`, `Mode`, `Rate`… ;
+  - un segment camelCase entier est exigé : `notValidated` ne contient pas « TVA » (premier essai trop large, 3 faux positifs dans `init-database.ts`) ;
+  - dix cas d'exemple fixent le comportement du détecteur.
+- **Corrigés** (signalés par la relecture sécurité) : `part-requirements-service.ts` (2 `log.debug`) et `stock-alerts-service.ts` (1). Les logs sont conservés, sans montant ; ils journalisent les identifiants.
+- **Gelés** : 14 appels dans 8 fichiers. Ce sont des paiements, recharges et consommations carburant, le prix convenu de mission, des statistiques en `console.log`. Le compte par fichier ne fait que baisser.
+- **Pourquoi** : les journaux sont lus bien au-delà des rôles finance. L'identifiant de l'objet suffit à retrouver le montant en base.
+- **Reste** : décider si les journaux d'audit métier (paiement enregistré, prix convenu modifié) gardent le montant. C'est à trancher par 0a ; d'ici là, ils sont gelés.
 ## 2026-11-06 — `feature-flags.contract` rouge en suite complète : fuite de `FEATURE_FLAGS` entre fichiers
 
 - **Symptôme** : le test est vert seul et rouge en suite complète avec « expected 200 to be 501 ».
@@ -524,3 +536,192 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
   - la suite complète de contrats est verte : 251 fichiers, 3 080 tests.
 - **Prévention** : `tests/unit/support/env-restore.test.ts` échoue si un contrat affecte une variable d'environnement absente de `FILE_SCOPED_ENV`.
 - **Leçon** : en `isolate: false`, l'état du processus (env, singletons) passe d'un fichier à l'autre. Une variable que les tests modifient doit être restaurée par le setup commun, pas laissée à la discipline de chaque fichier.
+
+## 2026-11-06 — Clôture automatique de commande : verrou et CAS, plus de note perdue
+
+- **Contexte** : `autoCloseDeliveredOrderIfFinanceDone` (`three-way-matching-service.ts`) passe la commande de `delivered` à `completed` quand toutes ses factures sont soldées. C'était la dernière écriture de statut de ce fichier sans condition sur l'état lu, gelée dans `status-update-cas-hygiene`.
+- **Défaut** : la commande était lue hors transaction puis réécrite en entier (statut et notes) par un `UPDATE … WHERE id`. Deux factures soldées en même temps, ou une modification des notes pendant la clôture, donnaient deux transitions et des notes réécrites à partir d'une lecture périmée : la note ajoutée entre-temps était effacée.
+- **Correctif** : une transaction qui verrouille la commande (`FOR NO KEY UPDATE`), relit sous ce verrou son statut, ses notes et les factures liées, puis écrit `WHERE id AND status = 'delivered'` avec `returning`. La seconde clôture devient un no-op : pas de deuxième trace, pas de log en double. `no key update` reste compatible avec le `key share` des contrôles de clé étrangère des factures. Aucun déclencheur sur `purchase_orders`. La clôture s'exécute après le commit du rapprochement et ne prend que ce verrou, donc pas de cycle possible. Le `console.log` de la clôture passe par `moduleLogger("three-way-matching")`.
+- **Preuve** :
+  - `tests/integration/purchase-order-auto-close.test.ts` : témoin, une facture non soldée, commande déjà clôturée ou annulée. Cas concurrent : le test tient le verrou de la commande, modifie ses notes, attend dans `pg_stat_activity` deux clôtures bloquées, puis relâche le verrou. Résultat attendu : une transition, une trace, la note conservée ;
+  - mutant (code d'origine) : le cas concurrent échoue, la note ajoutée est perdue. Avant l'ajout de cette note, le test passait aussi sur le code d'origine, parce que l'écrasement par la seconde clôture laissait une seule trace ;
+  - contrats liés (`purchase-order-three-way`, `supplier-settlement*`, `supplier-invoice*`) : 13 fichiers, 125 tests verts. Suite unitaire verte.
+- **Prévention** : l'entrée gelée est retirée de `status-update-cas-hygiene` : toute nouvelle écriture de statut non conditionnée dans ce fichier fait échouer le test.
+- **Leçon** : pour tester un CAS, compter les traces ne suffit pas, car un écrasement en laisse une seule lui aussi. Il faut un observable que seule la mise à jour perdue détruit, par exemple une écriture concurrente qui doit survivre.
+
+## 2026-11-06 — Transition de statut d'OT dédiée, lot 1 (work-order-parts)
+
+- **Quoi** : `transitionWorkOrderStatus` (`server/services/work-order-status-transition.ts`) devient l'écriture dédiée du statut d'un OT. Les deux appels de `storage.updateWorkOrder` de `work-order-parts.routes.ts` passent par elle : la mise en attente de pièces (`awaiting_parts`) et la reprise après sortie de pièce (`in_progress`).
+- **Comment** :
+  - la fonction applique elle-même `checkWorkOrderTransition` : une transition interdite répond 409 lisible, même appelée directement ;
+  - l'écriture est un compare-and-set (`WHERE id AND status = statut lu`) : une écriture concurrente gagnée répond 409, ou ne fait rien en mode `skip` ;
+  - le mode `skip` sert la reprise après sortie : la pièce est déjà sortie, et un OT annulé entre-temps ne doit ni être rouvert ni faire échouer la sortie ;
+  - les effets sur le parc (véhicule en maintenance ou en service, échéance préventive) sont extraits dans `work-order-status-effects.ts`, que `storage.updateWorkOrder` appelle aussi ;
+  - les trames WebSocket restent chez l'appelant, inchangées.
+- **Pourquoi** : la route lisait l'OT puis écrivait sous `eq(id)` seul. Un chef d'atelier qui annulait l'OT entre les deux voyait son annulation écrasée en « en attente de pièces ». Le contrat de course (verrou de ligne tenu, annulation, libération) répond 200 et écrase sur l'ancien code ; avec le correctif, 409 et l'annulation reste. Le cliquet T4 (`write-routes-frozen.ts`) perd deux routes.
+- **Suite** : lot 2 (statut du technicien), lot 3 (PATCH générique : `updateWorkOrder` refuse `status`).
+
+## 2026-11-06 — Sortie de pièce sur un OT annulé pendant la sortie (réserve sécurité #567)
+
+- **Quoi** : la sortie de pièce (`POST /api/work-orders/:id/part-requirements/:id/issue`) verrouille l'OT et revérifie son statut dans la transaction de sortie. Un OT terminé ou annulé entre-temps répond 409 lisible, et rien ne quitte le stock.
+- **Comment** :
+  - dans `onTransition`, avant `addPartToWorkOrder`, `SELECT status FROM work_orders … FOR UPDATE`. Un statut `completed` ou `cancelled` lève une `AppError(409)` ;
+  - l'erreur annule toute la transaction : la demande reste `received`, ni ligne `parts_used` ni mouvement ;
+  - ordre des verrous : la demande (compare-and-set du service), puis l'OT, puis la pièce. La demande de pièce (`work-order-part-request.ts`) prend l'OT puis la pièce, et ne touche aucune demande existante : il n'y a donc pas de cycle.
+- **Pourquoi** : le contrôle « OT terminé ou annulé » de la route lisait le statut sans verrou, et `addPartToWorkOrder` ne le recontrôle pas. Dans la fenêtre, une pièce pouvait donc sortir du stock sur un OT annulé. Le contrat de course (verrou de l'OT tenu, annulation, libération) répond 200 sur 6271754d : la pièce sort et la demande passe `issued`. Avec le correctif, il répond 409, le stock est intact et il n'y a aucun mouvement.
+
+## 2026-11-06 — Journaux de statistiques migrés vers `moduleLogger`, sans montant (décision Q24)
+
+- **Décision 0a (Q24)** : les journaux d'audit métier gardent le montant (paiement client, prix convenu, carburant, dépense de budget). Ils restent gelés dans `log-amounts-hygiene`. Les `console.log` de statistiques sont migrés sans montant.
+- **Quoi** : 6 `console.log` migrés vers `moduleLogger`. Ils journalisent maintenant des comptes et des identifiants, plus de totaux FCFA :
+  - `client-billing-service` : rapport, paiements d'une facture, statistiques ;
+  - `excel-export-service` : export de l'inventaire ;
+  - `procurement-service` : commande créée (avec la ligne « Order object » adjacente, fusionnée) ;
+  - `vat-billing-service` : statistiques TVA mensuelles.
+- **Cliquet** : les comptes gelés baissent. `client-billing-service` passe de 4 à 1, et `excel-export`, `procurement` et `vat-billing` sortent de la liste.
+- **Hors lot** : les 40 autres `console.*` de ces quatre fichiers n'ont pas de montant. Ils seront migrés au fil des modifications (AGENTS.md §9).
+
+## 2026-11-06 03:29 — Transition manuelle de commande fournisseur : verrou, relecture et CAS
+
+- **Quoi** : `updateOrderStatus` (`procurement-service.ts`) lisait la commande, vérifiait la transition, puis écrivait sous `WHERE id` seul. Deux réceptions simultanées (double clic sur « livrée ») passaient toutes deux : deux entrées en stock, deux traces, et la seconde écriture écrasait les notes écrites entre-temps. La clôture manuelle lisait les factures liées sans verrou : un règlement annulé en cours n'était pas vu.
+- **Comment** :
+  - transaction ; commande lue `FOR NO KEY UPDATE`, factures liées `FOR SHARE` (même ordre que la clôture automatique : commande puis factures) ;
+  - statut déjà atteint sous verrou : retour sans écriture ni effet ;
+  - `UPDATE … WHERE id AND status = <statut relu> RETURNING`, 409 lisible si rien n'est écrit ;
+  - effets (lignes livrées, entrée en stock, demandes de pièce, relais finance, notification) réservés à l'appel qui a écrit ;
+  - deux `console.log` migrés vers `log.info`.
+- **Garde-fou** : `status-update-cas-hygiene` résout désormais `.set(variable)` et `.set({ ...variable })` vers le littéral local. Il a révélé deux écritures de statut cachées (`technician-work-orders-service`, `work-order-items-service`), gelées dans `FROZEN`. Les contenus illisibles (paramètre, `req.body`, appel) sont gelés dans `FROZEN_OPAQUE` : 15 écritures, dont 6 dans `storage.ts`. Les deux listes sont à cliquet.
+- **Preuve** : `tests/integration/purchase-order-status-cas.test.ts` (3 tests). Deux réceptions alignées derrière un verrou donnent une trace, un mouvement et un stock de 2. Une clôture pendant qu'une facture repasse non soldée attend, puis répond 409. Témoin et rejeu : une seule trace. Avec l'ancien service, les deux cas concurrents échouent. tsc 0 ; unitaires 3 093 ; contrats achats et factures 27 fichiers, 338 tests.
+- **Pourquoi** : même motif que la clôture automatique (#557, #558). Un statut qui déclenche du stock ne s'écrit qu'une fois.
+
+## 2026-11-06 03:40 — Réception de commande fournisseur : lignes verrouillées, stock dans la transaction
+
+- **Quoi** :
+  - (a) La livraison globale lisait les lignes sans verrou. Si une réception de ligne était en cours, la livraison calculait son crédit sur l'ancienne quantité reçue : pour 2 pièces commandées, le stock montait à 3.
+  - (b) Le marquage des lignes, l'entrée en stock et la mise à jour des demandes de pièce s'exécutaient après le commit du statut. Une panne à ce moment laissait la commande « livrée » sans entrée en stock. Le rejeu tombait alors sur le no-op du statut déjà atteint, et la lecture de la commande « réparait » les lignes sans créditer le stock.
+- **Comment** :
+  - `updateOrderStatus` : lignes lues `FOR UPDATE` sous le verrou de la commande ; le marquage des lignes, `registerPartReception` et la mise à jour des demandes s'exécutent dans la transaction. Relais finance et notifications restent après le commit.
+  - `updateOrderLine` : verrou de la commande, puis de la ligne relue ; le crédit de stock s'exécute dans la transaction. Le CAS sur la quantité reçue reste en filet.
+  - `registerPartReception` et `markOrderLinesAsDelivered` reçoivent l'exécuteur (`DbExecutor`).
+- **Preuve** : 4 nouveaux tests dans `purchase-order-status-cas.test.ts` :
+  - livraison pendant une réception de ligne non validée : stock à 2 ;
+  - ligne et livraison alignées derrière le verrou de la commande : stock à 2 ;
+  - panne injectée sur la livraison : la commande reste « confirmée », sans mouvement, et un nouvel essai crédite 2 ;
+  - panne injectée sur une ligne : la quantité reçue n'est pas enregistrée.
+
+  Avec la version précédente, ces 4 cas échouent ; le deuxième n'échoue que par l'absence d'attente du verrou. tsc 0 ; unitaires 3 093 ; intégration achats et stock 10 fichiers, 54 tests ; contrats 36 fichiers, 445 tests.
+- **Pourquoi** : un effet de stock fait partie de la transition. Validé à part, il peut manquer ou être compté deux fois.
+- **Hors lot, constaté** : les écarts de stock possibles et la lecture de commande qui écrit sont détaillés dans la PR #560.
+
+## 2026-11-06 03:48 — #560, relecture de sécurité : interblocage entre la livraison et le PATCH d'une demande
+
+- **Quoi** : #560 avait placé la livraison dans une transaction qui verrouille, dans l'ordre, la commande, les lignes, la pièce (entrée en stock), puis les demandes liées. Le PATCH « reçue » d'une demande verrouille la demande, puis la pièce (`handlePartDelivery`). Les deux ordres étant inverses, l'exécution simultanée finissait en 40P01.
+- **Cause racine** : l'ordre des verrous était documenté pour la commande, les factures et les lignes, mais n'avait pas été vérifié contre les autres écrivains de la pièce et des demandes.
+- **Correctif** : la livraison met à jour les demandes avant la boucle de stock. L'ordre devient commande, lignes, demandes, pièce, compatible avec le PATCH (demande, puis pièce).
+- **Preuve** : un test d'intégration rejoue le PATCH : il verrouille la demande, attend que la livraison s'y bloque, puis écrit la pièce. Sur 97807a0c, le test lève `deadlock detected` (40P01) ; avec le correctif, il est vert, avec stock 7 et demande reçue. tsc 0 ; unitaires 3 093 ; intégration 10 fichiers, 55 tests ; contrats 36 fichiers, 445 tests.
+- **Leçon** : déplacer un effet dans une transaction change l'ordre de ses verrous. Il faut lister tous les écrivains des tables touchées et aligner l'ordre sur le leur, avec un test qui joue l'autre écrivain.
+
+## 2026-11-06 03:56 — Réception globale : alignement des lignes sur le crédit, lecture sans écriture
+
+- **Quoi** : la livraison d'une commande aligne et crédite les mêmes lignes, pour les mêmes quantités. `getPurchaseOrderById` n'écrit plus.
+- **Comment** : une fonction pure, `deliveryReceipts` (`server/lib/purchase-order-delivery.ts`), calcule pour chaque ligne ouverte (`pending`, `partial`) la quantité reçue après alignement et l'entrée en stock. La transaction de livraison applique ce résultat, ligne par ligne, et `markOrderLinesAsDelivered` est supprimé. Une ligne close (`delivered`, `accepted`, `rejected`) n'est ni alignée ni créditée. La normalisation faite pendant la lecture est retirée.
+- **Pourquoi** : une ligne close avec un reçu inférieur au commandé était créditée de l'écart sans changer son reçu, donc le stock et le reçu divergeaient. De son côté, la lecture alignait les lignes ouvertes d'une commande livrée sans créditer le stock, et elle écrivait pendant un GET.
+- **Preuve** : deux tests d'intégration échouent sur 694555ea et passent avec le correctif.
+  - Une ligne close à 1/2 recevait 1 en stock ; elle n'en reçoit plus.
+  - Une lecture passait une ligne ouverte de 0 à 2 ; elle ne la modifie plus.
+- **Vérifications** : 9 tests unitaires de `deliveryReceipts`, dont l'invariant « chaque hausse du reçu est créditée, et rien d'autre ». tsc 0 ; unitaires 3 102 ; intégration 10 fichiers, 57 tests ; contrats 36 fichiers, 445 tests.
+- **Leçon** : quand deux effets doivent rester égaux (le marquage et le crédit), ils doivent sortir d'un même calcul. Deux requêtes écrites séparément finissent par diverger.
+
+## 2026-11-06 04:06 — Q25 : une pièce commandée entre en stock une seule fois
+
+- **Quoi** : si une demande est rattachée à une commande non annulée, son PATCH `received` ou `partially_received` renvoie 409 « Réceptionnez cette pièce depuis la commande fournisseur. ». Une demande sans commande, ou dont la commande est annulée, se réceptionne toujours directement.
+- **Comment** :
+  - Avant la transition, `updatePartRequirement` cherche une ligne de commande qui porte `partRequirementId` sur une commande dont le statut n'est pas `cancelled`. S'il en trouve une, il renvoie `status: 409`, et la route transmet ce code.
+  - Côté écran (`inventory/requests.tsx`), une demande liée propose « Suivre commande » et plus « Entrée en stock ».
+- **Pourquoi** : la réception directe créditait le stock, puis la livraison de la commande le créditait une seconde fois par la ligne. Cela faisait 2 pièces reçues pour 4 entrées en stock.
+- **Preuve** : contrat `tests/contract/part-requirement-order-reception.contract.test.ts`, 5 tests. Sur l'ancien code, le parcours « réception directe puis livraison » finit à 9 pièces et 2 mouvements ; avec la règle, il finit à 7 et 1. tsc 0 ; unitaires 3 102 ; intégration 10 fichiers, 57 tests ; contrats 38 fichiers, 456 tests.
+- **Leçon** : quand un même événement physique (l'arrivée de la pièce) peut être saisi par deux écrans, l'un des deux doit le refuser. Sinon, chacun applique son propre effet.
+
+## 2026-11-06 04:08 — Commandes anciennes livrées avec des lignes restées ouvertes : comptage en lecture
+
+- **Quoi** : il n'y a pas de migration (DÉCISION 0a). On ne crédite pas le stock en silence. Ce qui est livré :
+  - une requête de comptage, en lecture seule ;
+  - un libellé honnête pour ces lignes dans le détail de commande.
+- **Pourquoi** : avant #561, la lecture d'une commande livrée alignait ses lignes ouvertes sans entrée en stock. Depuis #561, la lecture n'écrit plus et la réception globale n'aligne que ce qu'elle crédite. Une ligne `pending` ou `partial` sur une commande `delivered` ou `completed` ne peut donc venir que d'une commande ancienne. Son écart n'est jamais entré en stock.
+- **Écran** : `client/src/pages/procurement/orders/[id].tsx` affichait « Reçue au magasin » et « Statut ligne aligné automatiquement ». Les deux étaient faux. Le libellé devient « Ligne restée ouverte », avec ce texte d'aide : à la réception globale, seules les lignes encore ouvertes sont alignées et entrées en stock ; cette ligne n'est pas entrée en stock.
+- **Comptage** : la requête ci-dessous ne fait que lire. Elle a été validée sur le Postgres local de test (0 ligne). Elle n'a pas été jouée contre la production : c'est à 0a, ou à l'utilisatrice, de la lancer, puis de décider s'il faut un écran de régularisation.
+
+```sql
+SELECT count(DISTINCT po.id)                                    AS commandes,
+       count(*)                                                 AS lignes_ouvertes,
+       count(*) FILTER (WHERE l.part_id IS NOT NULL)            AS lignes_avec_piece,
+       coalesce(sum(greatest(l.quantity_ordered - coalesce(l.quantity_received, 0), 0))
+                FILTER (WHERE l.part_id IS NOT NULL), 0)        AS pieces_non_entrees
+FROM purchase_orders po
+JOIN purchase_order_lines l ON l.purchase_order_id = po.id
+WHERE po.status IN ('delivered', 'completed')
+  AND coalesce(l.delivery_status, 'pending') IN ('pending', 'partial');
+```
+
+## 2026-11-06 04:16 — Q25 complétée : lien demande-commande vérifié sous verrou, recommande refusée
+
+- **Quoi** : la revue sécurité de #562 a relevé deux trous.
+  1. Le lien était contrôlé hors de la transaction de la demande.
+  2. `createPurchaseOrder` acceptait une demande dans n'importe quel statut et la repassait à `ordered`. Une demande déjà reçue pouvait donc être recommandée, et la livraison recréditait le stock.
+- **Comment** :
+  - Le contrôle du lien se fait maintenant dans la transaction, après le CAS de la demande, qui tient la ligne verrouillée. Une commande validée pendant l'attente du verrou est donc vue.
+  - La création de commande refuse d'abord toute demande non approuvée (409 « Cette demande n'est plus à commander. Rechargez la liste des demandes. »).
+  - Ensuite, une transaction écrit la commande, ses lignes, puis les demandes avec `UPDATE … WHERE status = 'approved' RETURNING`. Si le nombre de lignes renvoyé est inférieur au nombre de demandes, toute la création est annulée.
+  - Les quatre `console.log` de la fonction passent à `moduleLogger`.
+- **Preuve** : un test discriminant par trou. Les trois échouent sur 96f519b4 et passent avec le correctif.
+  - Réception directe pendant le rattachement non validé : sur 96f519b4, `success: true`. Maintenant, 409 et stock intact.
+  - Création pendant que la demande cesse d'être approuvée : sur 96f519b4, la commande est créée. Maintenant, 409 et aucune ligne.
+  - POST d'une commande sur une demande reçue : sur 96f519b4, 201. Maintenant, 409.
+- **Vérifications** : tsc 0 ; unitaires 3 102 ; intégration 11 fichiers, 59 tests ; contrats 38 fichiers, 457 tests.
+- **Leçon** : une règle qui interdit un chemin doit fermer tous les chemins qui mènent au même effet. La réception directe et la recommande produisaient le même double crédit. Le contrôle doit aussi lire sous le même verrou que l'écriture qu'il protège.
+
+## 2026-11-06 06:12 — CAS du statut technicien et des lignes de travail (#564)
+- **Quoi** :
+  - `updateWorkOrderStatus` (technicien) : l'UPDATE porte le statut lu ;
+  - `updateItem` (lignes de travail) : la ligne est lue sous verrou dans une transaction, avec le statut en condition de l'UPDATE ;
+  - deux entrées retirées de la liste gelée `status-update-cas-hygiene`.
+- **Comment** :
+  - transition concurrente sur l'OT : 409, ordre inchangé ;
+  - deux mises à jour d'une ligne s'enchaînent : la seconde part de l'état de la première ;
+  - le contrôle du technicien est fait hors transaction ; le poste est lu par `tx`, pour ne pas prendre une seconde connexion du pool en tenant le verrou.
+- **Pourquoi** :
+  - avant, une prise en charge lue « en attente » écrasait une clôture concurrente ;
+  - une clôture de ligne réécrivait `startedAt`.
+  Les deux tests de course échouent sur l'ancien code.
+- **À savoir** :
+  - `updateWorkOrderStatus`, `takeWorkOrder` et `completeWorkOrder` n'ont aucun appelant ;
+  - `notes` et `completedDate` étaient passés au `set` sans être des colonnes : Drizzle les ignorait.
+- **Suite, à la demande de 0a** :
+  - `updateWorkOrderStatus`, `takeWorkOrder` et `completeWorkOrder` sont supprimés (aucun appelant, grep et tsc à l'appui), avec leur test de course et les entrées de `broadcast-hygiene` et `work-order-scope-hygiene` ;
+  - `work_order_status_changed` reste émis par le déclencheur `server/db/triggers/work-orders-realtime-triggers.sql`. `realtime-satellites.test.ts` lit maintenant aussi ces fichiers, `event_type := CASE … THEN '…'` compris : sans ce scan, il voyait une entrée morte.
+- **Contrat quality-check bloqué 94 min** :
+  - aucun timeout de test n'est fixé, donc vitest applique son défaut de 5 s : une attente de verrou aurait échoué à 5 s ;
+  - 94 min veulent dire que le minuteur du processus ne tournait pas, donc processus suspendu (veille probable, nuit de 04 h 25 à 06 h 05) ;
+  - campagne rejouée avec un échantillon de `pg_stat_activity` toutes les 15 s : 18 fichiers, 170 tests verts en 65 s, aucune session `idle in transaction`, aucune attente de verrou.
+
+## 2026-11-06 — Clôture automatique : factures liées lues `for share`
+
+- **Contexte** : remarque de la relecture sécurité de #557. Sous le verrou de la commande, la clôture lisait les factures liées sans verrou.
+- **Défaut** : une transaction en cours pouvait rendre une facture non soldée, par exemple en annulant un règlement (`paid -> approved`) ou en ouvrant un litige. La clôture lisait encore l'état soldé déjà commité et clôturait la commande. Elle restait alors `completed` avec une facture non soldée.
+- **Correctif** : les factures liées sont lues `for share`, donc la clôture attend l'issue de la transaction puis relit la facture.
+- **Ordre des verrous** : commande d'abord, factures ensuite. Aucun chemin ne verrouille une facture puis la commande :
+  - aucun déclencheur ne touche `purchase_orders` (vérifié dans `pg_trigger` et dans le corps des fonctions de recalcul) ;
+  - la clé de commande d'une facture ne prend que `key share`, qui reste compatible avec `no key update`.
+- **Hors périmètre** : une facture créée pendant la clôture équivaut à une facture créée après. Ce cas relève d'une règle métier (peut-on facturer une commande clôturée ?), pas de la concurrence.
+- **Test** : l'attente ne filtre plus sur `ILIKE '%purchase_orders%'`, que n'importe quelle autre suite pouvait fausser. Elle compte, par `pg_blocking_pids` récursif, les seules sessions bloquées derrière le pid qui tient le verrou.
+- **Preuve** :
+  - nouveau cas « facture repassée non soldée pendant la clôture » : la commande reste `delivered` ;
+  - mutant (#557 sans `for share`) : la clôture n'attend pas et le cas échoue ;
+  - suites liées vertes : 5 tests d'intégration, 16 fichiers et 147 tests de contrats, 293 fichiers unitaires.
+- **Constat transmis à 0a** : la clôture manuelle (`procurement-service.ts`, `update(purchaseOrders).set(updateData)`) lit sans verrou et écrit sans condition sur le statut. Le garde-fou ne la voit pas, parce que `.set(variable)` est une limite connue de `status-update-cas-hygiene`.
+
+## 2026-11-06 — Storage : correction de document lisible (FROZEN_OPAQUE)
+
+- **Quoi** : `storage.updateVehicleDocument` n'écrit plus un objet générique `Partial<InsertVehicleDocument>` mais les seuls champs d'une correction (`name`, `description`, `expiryDate`, `updatedBy`), nommés un à un dans le `.set(…)`. Le `catch` qui avalait l'erreur SQL et renvoyait `undefined` (faux 404) est retiré. `server/services/documentStorage.ts`, sans aucun importeur, est supprimé.
+- **Comment** : type `VehicleDocumentCorrection` (Pick des quatre champs) dans l'interface `IStorage`. L'appelant unique (`PATCH /api/documents/:id`) ne change pas. Nouveau contrat : un corps qui forge `vehicleId`, `filePath`, `type`, `uploadedBy` ou `updatedBy` n'écrit que le nom, et l'auteur reste l'utilisateur de la session.
+- **Pourquoi** : écriture illisible statiquement sous `eq(id)` seul, comptée dans `FROZEN_OPAQUE` (storage.ts et documentStorage.ts). `vehicle_documents` n'a pas de colonne `status` : aucune transition n'est en jeu, il suffit de rendre le contenu écrit lisible. La liste `swallowed-write-catch-hygiene` perd trois entrées. `FROZEN_OPAQUE` n'existe pas encore sur `main` (arrive avec #559) : son abaissement se fera en fusionnant `main` après la pile.

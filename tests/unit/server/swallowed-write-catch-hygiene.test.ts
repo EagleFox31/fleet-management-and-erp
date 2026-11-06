@@ -22,8 +22,6 @@ import { describe, expect, it } from "vitest";
  * rétrécir.
  */
 const KNOWN_SWALLOWING = [
-  "server/services/documentStorage.ts#deleteVehicleDocument",
-  "server/services/documentStorage.ts#updateVehicleDocument",
   "server/services/part-requirements-service.ts#deletePartRequirement",
   "server/services/preventive-maintenance-service.ts#completeMaintenanceAndScheduleNext",
   "server/services/preventive-maintenance-service.ts#createDateBasedWorkOrder",
@@ -37,7 +35,6 @@ const KNOWN_SWALLOWING = [
   "server/storage.ts#deleteVehicle",
   "server/storage.ts#deleteWorkOrder",
   "server/storage.ts#markAlertAsRead",
-  "server/storage.ts#updateVehicleDocument",
 ];
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));

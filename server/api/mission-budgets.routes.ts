@@ -18,6 +18,7 @@ import {
   MISSION_BUDGET_APPROVE_ROLES,
   MISSION_BUDGET_DISBURSE_ROLES,
   MISSION_BUDGET_READ_ROLES,
+  MISSION_BUDGET_SETTLE_ROLES,
   MISSION_BUDGET_WRITE_ROLES,
 } from "@shared/constants/roles";
 import { requireFeature } from "../lib/feature-flags";
@@ -32,6 +33,7 @@ import {
   listMissionBudgetExpenses,
   listMissionBudgets,
   listMissionDestinations,
+  settleMissionBudget,
   transitionMissionBudget,
   updateMissionBudget,
 } from "../services/mission-budgets-service";
@@ -112,6 +114,19 @@ const transition =
     }
   };
 
+/**
+ * Solde d'une mission terminée (Q18) : reliquat rendu au compte source, dépenses figées. Rejouable :
+ * un budget déjà soldé est renvoyé tel quel, sans nouvelle écriture.
+ */
+const settle: RequestHandler = async (req, res, next) => {
+  try {
+    const { budget } = await settleMissionBudget(budgetId(req.params.id), req.user!.id);
+    res.json(missionBudgetSchema.parse(budget));
+  } catch (error) {
+    next(error);
+  }
+};
+
 /** Dépenses justifiées (L1e) : lecture comme le budget ; saisie et suppression par qui décaisse. */
 const expenseId = (raw: string) => parseRouteId(raw, "Identifiant de dépense invalide.");
 
@@ -153,6 +168,7 @@ router.post("/mission-budgets", requireFeature("finance"), authorize([...MISSION
 router.patch("/mission-budgets/:id", requireFeature("finance"), authorize([...MISSION_BUDGET_WRITE_ROLES]), update);
 router.post("/mission-budgets/:id/approve", requireFeature("finance"), authorize([...MISSION_BUDGET_APPROVE_ROLES]), transition("approve"));
 router.post("/mission-budgets/:id/disburse", requireFeature("finance"), authorize([...MISSION_BUDGET_DISBURSE_ROLES]), transition("disburse"));
+router.post("/mission-budgets/:id/settle", requireFeature("finance"), authorize([...MISSION_BUDGET_SETTLE_ROLES]), settle);
 router.get("/mission-budgets/:id/expenses", requireFeature("finance"), authorize([...MISSION_BUDGET_READ_ROLES]), listExpenses);
 router.post("/mission-budgets/:id/expenses", requireFeature("finance"), authorize([...MISSION_BUDGET_DISBURSE_ROLES]), createExpense);
 router.delete("/mission-budgets/:id/expenses/:expenseId", requireFeature("finance"), authorize([...MISSION_BUDGET_DISBURSE_ROLES]), deleteExpense);

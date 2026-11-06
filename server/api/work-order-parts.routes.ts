@@ -18,12 +18,13 @@ import {
   requestPartForWorkOrder,
   type PartRequestResult,
 } from "../services/work-order-part-request";
-import { isAppError } from "../lib/app-error";
+import { transitionWorkOrderStatus } from "../services/work-order-status-transition";
+import { AppError, isAppError } from "../lib/app-error";
 import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 
 const log = moduleLogger("work-order-parts");
-import { partRequirements, parts, users } from "@shared/schema";
+import { partRequirements, parts, users, workOrders } from "@shared/schema";
 import { alertService } from "../services/alert-service";
 import { workOrderCostScope, workOrderStaffScope } from "../lib/work-order-realtime-scope";
 
@@ -151,9 +152,15 @@ router.post("/:workOrderId/awaiting-parts", isTechnician, async (req, res) => {
       return res.status(200).json({ ...result, statusWasChanged: result.workOrderStatusChanged });
     }
 
+    // Compare-and-set sur le statut lu : un OT annulé ou terminé entre-temps répond 409.
     const statusWasChanged = workOrder.status !== "awaiting_parts";
     const updatedWorkOrder = statusWasChanged
-      ? await storage.updateWorkOrder(workOrderId, { status: "awaiting_parts" })
+      ? await transitionWorkOrderStatus({
+          workOrderId,
+          from: workOrder.status,
+          to: "awaiting_parts",
+          updatedBy: user?.id ?? null,
+        })
       : workOrder;
 
     if ((global as any).broadcastUpdate) {
@@ -262,6 +269,9 @@ router.post("/:workOrderId/parts", isTechnician, async (req, res) => {
   }
 });
 
+const WORK_ORDER_CLOSED_DURING_ISSUE_ERROR =
+  "Cet ordre de travail vient d'être terminé ou annulé : la pièce n'est pas sortie du stock.";
+
 router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssuer, async (req, res, next) => {
   try {
     const workOrderId = parseRouteId(req.params.workOrderId, "ID invalide");
@@ -363,6 +373,17 @@ router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssue
         overrideIssueReason,
         onTransition: async (tx) => {
           try {
+            // Le statut lu plus haut n'est pas verrouillé : un OT annulé ou terminé
+            // entre-temps ne doit recevoir aucune pièce. Ordre des verrous : demande
+            // (compare-and-set du service), OT, puis pièce, comme la demande de pièce.
+            const [current] = await tx
+              .select({ status: workOrders.status })
+              .from(workOrders)
+              .where(eq(workOrders.id, workOrderId))
+              .for("update");
+            if (!current || current.status === "completed" || current.status === "cancelled") {
+              throw new AppError(409, WORK_ORDER_CLOSED_DURING_ISSUE_ERROR);
+            }
             partUsed = await storage.addPartToWorkOrder(
               { workOrderId, partId, quantity: quantityNeeded, unitPrice },
               user?.id,
@@ -420,8 +441,16 @@ router.post("/:workOrderId/part-requirements/:requirementId/issue", isStockIssue
       .limit(1);
 
     let updatedWorkOrder: Awaited<ReturnType<typeof storage.getWorkOrder>> | null = null;
+    // Reprise de suite : la pièce est déjà sortie. Si l'OT a quitté « en attente de pièces »
+    // entre-temps (annulé, repris), il n'est pas écrasé et l'action reste réussie.
     if (workOrder.status === "awaiting_parts" && remainingOpen.length === 0) {
-      updatedWorkOrder = await storage.updateWorkOrder(workOrderId, { status: "in_progress" });
+      updatedWorkOrder = await transitionWorkOrderStatus({
+        workOrderId,
+        from: "awaiting_parts",
+        to: "in_progress",
+        updatedBy: user?.id ?? null,
+        onStale: "skip",
+      });
     }
 
     if ((global as any).broadcastUpdate) {

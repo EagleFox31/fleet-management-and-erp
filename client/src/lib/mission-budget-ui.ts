@@ -7,10 +7,12 @@ import {
   MISSION_BUDGET_APPROVE_ROLES,
   MISSION_BUDGET_DISBURSE_ROLES,
   MISSION_BUDGET_READ_ROLES,
+  MISSION_BUDGET_SETTLE_ROLES,
   MISSION_BUDGET_WRITE_ROLES,
 } from "@shared/constants/roles";
 import {
   MISSION_STATUSES_WITHOUT_BUDGET,
+  MISSION_STATUSES_WITHOUT_EXPENSES,
   type DailyNeed,
   type MissionBudget,
   type MissionBudgetExpenses,
@@ -28,26 +30,36 @@ export type MissionBudgetActions = {
   disburse: boolean;
   /** Saisir ou supprimer une dépense justifiée. */
   expenses: boolean;
+  /** Solder une mission terminée : reliquat rendu au compte source (Q18). */
+  settle: boolean;
 };
 
 /**
- * Mission terminée ou annulée : plus aucune action (le serveur répond 409).
+ * Mission terminée ou annulée : plus aucune action sur le budget (le serveur répond 409). Les dépenses
+ * d'une mission terminée restent ouvertes tant que le budget n'est pas soldé (Q18, refus 409 du
+ * serveur ensuite) ; annulée, jamais. Solder : mission terminée, budget décaissé et pas encore soldé.
  * Sans budget : seule la saisie. Ensuite, chaque statut n'ouvre que son étape suivante.
  */
 export function missionBudgetActions(
   role: string | null | undefined,
-  budget: Pick<MissionBudget, "status"> | null,
+  budget: (Pick<MissionBudget, "status"> & Partial<Pick<MissionBudget, "settledAt">>) | null,
   missionStatus: string | null | undefined,
 ): MissionBudgetActions {
   const open = !(MISSION_STATUSES_WITHOUT_BUDGET as readonly string[]).includes(String(missionStatus ?? ""));
   const write = open && has(MISSION_BUDGET_WRITE_ROLES, role);
   const status = budget?.status ?? null;
+  const settled = !!budget?.settledAt;
   return {
     create: write && status === null,
     edit: write && status === "requested",
     approve: open && has(MISSION_BUDGET_APPROVE_ROLES, role) && status === "requested",
     disburse: open && has(MISSION_BUDGET_DISBURSE_ROLES, role) && status === "approved",
-    expenses: open && has(MISSION_BUDGET_DISBURSE_ROLES, role) && status === "disbursed",
+    expenses:
+      !(MISSION_STATUSES_WITHOUT_EXPENSES as readonly string[]).includes(String(missionStatus ?? "")) &&
+      has(MISSION_BUDGET_DISBURSE_ROLES, role) &&
+      status === "disbursed" &&
+      !settled,
+    settle: missionStatus === "completed" && has(MISSION_BUDGET_SETTLE_ROLES, role) && status === "disbursed" && !settled,
   };
 }
 

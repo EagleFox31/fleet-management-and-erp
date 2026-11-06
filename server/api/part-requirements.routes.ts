@@ -162,7 +162,7 @@ router.patch("/:id", isInventoryManager, async (req, res, next) => {
     );
 
     if (!result.success) {
-      return res.status(400).json({ message: result.error });
+      return res.status(result.status ?? 400).json({ message: result.error });
     }
 
     if ((global as any).broadcastUpdate && result.data) {

@@ -26,7 +26,7 @@ function sourceFiles(dir: string): string[] {
  * Événements émis par le serveur : premier argument littéral d'une fonction d'émission
  * (`broadcastUpdate`, `broadcastPurchaseOrderUpdate`, `emitMissionEvent`, `diffuser`…), appel optionnel
  * compris (`broadcast?.("…")`, invisible avant L1f : `mission_budget_updated` échappait au garde-fou), et
- * `'eventType', '…'` des déclencheurs SQL de `init-database.ts`.
+ * `'eventType', '…'` des déclencheurs SQL de `init-database.ts` et de `server/db/triggers/*.sql`.
  */
 function emittedEvents(): Set<string> {
   const names = new Set<string>();
@@ -36,6 +36,18 @@ function emittedEvents(): Set<string> {
     const text = readFileSync(file, "utf8");
     for (const match of text.matchAll(call)) names.add(match[1]);
     for (const match of text.matchAll(sql)) names.add(match[1]);
+  }
+  // Déclencheurs dont le nom d'événement passe par une variable : `event_type := '…'` ou
+  // `event_type := CASE WHEN … THEN '…' ELSE '…' END`. Seule source de `work_order_status_changed`.
+  const assigned = /\bevent_type\s*:=\s*(?:'([a-z]+(?:_[a-z]+)+)'|CASE\b([\s\S]*?)\bEND\b)/gi;
+  const branch = /\b(?:THEN|ELSE)\s+'([a-z]+(?:_[a-z]+)+)'/gi;
+  for (const name of readdirSync(join(ROOT, "server/db/triggers")).filter((n) => n.endsWith(".sql"))) {
+    const text = readFileSync(join(ROOT, "server/db/triggers", name), "utf8");
+    for (const match of text.matchAll(sql)) names.add(match[1]);
+    for (const match of text.matchAll(assigned)) {
+      if (match[1]) names.add(match[1]);
+      else for (const arm of match[2].matchAll(branch)) names.add(arm[1]);
+    }
   }
   return names;
 }

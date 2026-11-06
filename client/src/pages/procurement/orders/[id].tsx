@@ -173,7 +173,11 @@ const getLineStatusDisplay = (lineStatus: string, orderStatus: string) => {
     if (orderStatus === "confirmed") return { label: "En attente de livraison", help: "Le fournisseur a confirmé mais n'a pas encore livré cet article." };
     if (orderStatus === "cancellation_requested") return { label: "Annulation demandée", help: "Une demande d'annulation a été envoyée au fournisseur pour cet article." };
     if (orderStatus === "delivered" || orderStatus === "completed") {
-      return { label: "Reçue au magasin", help: "La commande est réceptionnée. Statut ligne aligné automatiquement." };
+      // Depuis la réception globale alignée sur le crédit, ce cas ne vient que d'une commande ancienne.
+      return {
+        label: "Ligne restée ouverte",
+        help: "À la réception globale, seules les lignes encore ouvertes sont alignées et entrées en stock. Cette ligne est restée en attente : sa réception n'a pas été enregistrée sur cette ligne.",
+      };
     }
   }
   return {
