@@ -2,6 +2,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { isUniqueViolation } from "../lib/pg-errors";
+import { assertWorkOrderAssignee } from "./work-order-assignee";
 import { laborCatalog, users, workOrderItems } from "@shared/schema";
 import {
   computeWorkOrderItemTotals,
@@ -261,8 +262,8 @@ export class WorkOrderItemsService {
     const heuresReelles = toNumericColumn(payload.actualHours);
     const technicianId = Number(payload.technicianId);
 
-    const technicienInconnu = await this.refusTechnicien(payload.technicianId);
-    if (technicienInconnu) return { success: false, error: technicienInconnu };
+    // Même règle que l'affectation de l'OT : technicien ou chef d'atelier actif, sinon 400.
+    await assertWorkOrderAssignee(payload.technicianId);
 
     await db.insert(workOrderItems).values({
       workOrderId,
@@ -288,10 +289,7 @@ export class WorkOrderItemsService {
     payload: WorkOrderItemPayload,
   ): Promise<ServiceResult<WorkOrderItemsResult & { workOrderId: number }>> {
     // Ne dépend pas de la ligne : vérifié hors transaction, sans tenir le verrou.
-    if (estFourni(payload, "technicianId")) {
-      const technicienInconnu = await this.refusTechnicien(payload.technicianId);
-      if (technicienInconnu) return { success: false, error: technicienInconnu };
-    }
+    if (estFourni(payload, "technicianId")) await assertWorkOrderAssignee(payload.technicianId);
 
     // La ligne est verrouillée le temps de la mise à jour : deux modifications simultanées
     // s'enchaînent, et la seconde part de l'état écrit par la première (horodatages de début
@@ -388,14 +386,6 @@ export class WorkOrderItemsService {
 
     const resultat = await this.getItemsForWorkOrder(ecriture.data.workOrderId);
     return { success: true, data: { ...resultat, workOrderId: ecriture.data.workOrderId } };
-  }
-
-  /** Message de refus si `technicianId` désigne un utilisateur inexistant ; vide ou absent : rien à vérifier. */
-  private async refusTechnicien(value: unknown): Promise<string | null> {
-    const id = Number(value);
-    if (value === undefined || value === null || value === "" || !Number.isInteger(id) || id <= 0) return null;
-    const [user] = await db.select({ id: users.id }).from(users).where(eq(users.id, id)).limit(1);
-    return user ? null : "Technicien introuvable : choisissez un technicien de la liste.";
   }
 
   async deleteItem(itemId: number): Promise<ServiceResult<WorkOrderItemsResult & { workOrderId: number }>> {

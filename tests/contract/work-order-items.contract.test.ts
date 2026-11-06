@@ -2,7 +2,8 @@ import { createServer, type Server } from "http";
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
-import { workOrderItems, workOrders } from "../../shared/schema";
+import { WORK_ORDER_ASSIGNEE_ERROR } from "../../server/services/work-order-assignee";
+import { users, workOrderItems, workOrders } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD } from "../support/factories";
@@ -212,5 +213,54 @@ describe("lignes de travail d'un OT", { timeout: 180000 }, () => {
     });
     expect(ghostPoste.status).toBe(400);
     expect(ghostPoste.body?.message).not.toMatch(/foreign key|violates|constraint/i);
+  });
+
+  it("n'affecte une ligne qu'à un technicien ou un chef d'atelier actif (règle de l'OT)", async () => {
+    const manager = await createTestUser({ role: "workshop_manager" });
+    const driver = await createTestUser({ role: "driver" });
+    const removed = await createTestUser({ role: "technician" });
+    ids.userIds.push(manager.id, driver.id, removed.id);
+    await db.update(users).set({ deletedAt: new Date() }).where(eq(users.id, removed.id));
+    const vehicle = await createTestVehicle();
+    ids.vehicleIds.push(vehicle.id);
+    const [wo] = await db
+      .insert(workOrders)
+      .values({ vehicleId: vehicle.id, title: "TEST lignes affectation", status: "in_progress" })
+      .returning();
+    workOrderIds.push(wo.id);
+    const cookie = await login(manager.username);
+
+    for (const technicianId of [driver.id, removed.id]) {
+      const add = await call("POST", `/api/work-orders/${wo.id}/items`, {
+        cookie,
+        body: { customLabel: "Affectation refusée", technicianId, actualHours: 1 },
+      });
+      expect(add.status).toBe(400);
+      expect(add.body?.message).toBe(WORK_ORDER_ASSIGNEE_ERROR);
+      expect(add.body?.errors).toContainEqual({ field: "technicianId", message: WORK_ORDER_ASSIGNEE_ERROR });
+    }
+    const lignes = await db.select().from(workOrderItems).where(eq(workOrderItems.workOrderId, wo.id));
+    expect(lignes).toHaveLength(0);
+
+    // Le chef d'atelier peut porter une ligne, comme il peut porter l'OT.
+    const ok = await call("POST", `/api/work-orders/${wo.id}/items`, {
+      cookie,
+      body: { customLabel: "Ligne du chef", technicianId: manager.id, actualHours: 1 },
+    });
+    expect(ok.status).toBe(201);
+    const itemId = ok.body.items[0].id;
+
+    const patch = await call("PATCH", `/api/work-order-items/${itemId}`, {
+      cookie,
+      body: { technicianId: driver.id },
+    });
+    expect(patch.status).toBe(400);
+    expect(patch.body?.errors).toContainEqual({ field: "technicianId", message: WORK_ORDER_ASSIGNEE_ERROR });
+    const [kept] = await db.select().from(workOrderItems).where(eq(workOrderItems.id, itemId));
+    expect(kept.technicianId).toBe(manager.id);
+
+    // Désaffecter reste possible.
+    const unassign = await call("PATCH", `/api/work-order-items/${itemId}`, { cookie, body: { technicianId: null } });
+    expect(unassign.status).toBe(200);
   });
 });
