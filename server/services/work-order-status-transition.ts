@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { workOrders, type WorkOrder } from "@shared/schema";
 import { checkWorkOrderTransition, type WorkOrderStatus } from "@shared/constants/work-order-transitions";
-import { db } from "../db";
+import { db, type DbTransaction } from "../db";
 import { AppError } from "../lib/app-error";
 import { storage } from "../storage";
 import { applyWorkOrderStatusEffects } from "./work-order-status-effects";
@@ -26,6 +26,16 @@ export type WorkOrderStatusTransition = {
    * rien n'est écrit si la ligne n'a plus le statut lu.
    */
   fields?: { diagnosis?: string; startDate?: Date; endDate?: Date };
+  /**
+   * Condition ajoutée au compare-and-set : l'OT doit être encore assigné à ce technicien.
+   * Un OT réassigné entre la lecture et l'écriture est traité comme un statut périmé.
+   */
+  technicianId?: number;
+  /**
+   * Écriture liée à la transition, dans la même transaction : si elle lève, le statut et les
+   * champs sont annulés avec elle. Les effets sur le parc restent après la validation.
+   */
+  onTransition?: (tx: DbTransaction) => Promise<void>;
 };
 
 /**
@@ -41,22 +51,29 @@ export type WorkOrderStatusTransition = {
  * Les trames temps réel et les invalidations restent chez l'appelant (AGENTS.md §2).
  */
 export async function transitionWorkOrderStatus(transition: WorkOrderStatusTransition): Promise<WorkOrder | null> {
-  const { workOrderId, from, to, updatedBy, onStale = "throw", fields } = transition;
+  const { workOrderId, from, to, updatedBy, onStale = "throw", fields, technicianId, onTransition } = transition;
   const check = checkWorkOrderTransition(from, to, undefined);
   if (!check.allowed) throw new AppError(check.status, check.message);
 
-  const [written] = await db
-    .update(workOrders)
-    .set({
-      status: to,
-      diagnosis: fields?.diagnosis,
-      startDate: fields?.startDate,
-      endDate: fields?.endDate,
-      updatedBy: updatedBy ?? undefined,
-      updatedAt: new Date(),
-    })
-    .where(and(eq(workOrders.id, workOrderId), eq(workOrders.status, from as WorkOrderStatus)))
-    .returning({ id: workOrders.id, vehicleId: workOrders.vehicleId, status: workOrders.status });
+  const conditions = [eq(workOrders.id, workOrderId), eq(workOrders.status, from as WorkOrderStatus)];
+  if (technicianId !== undefined) conditions.push(eq(workOrders.technicianId, technicianId));
+
+  const written = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(workOrders)
+      .set({
+        status: to,
+        diagnosis: fields?.diagnosis,
+        startDate: fields?.startDate,
+        endDate: fields?.endDate,
+        updatedBy: updatedBy ?? undefined,
+        updatedAt: new Date(),
+      })
+      .where(and(...conditions))
+      .returning({ id: workOrders.id, vehicleId: workOrders.vehicleId, status: workOrders.status });
+    if (row && onTransition) await onTransition(tx);
+    return row;
+  });
   if (!written) {
     if (onStale === "skip") return null;
     throw new AppError(409, WORK_ORDER_STATUS_CHANGED_ERROR);

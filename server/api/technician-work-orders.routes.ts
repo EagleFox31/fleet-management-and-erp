@@ -1,5 +1,7 @@
 import { Router, type RequestHandler } from "express";
 import { z } from "zod";
+import { and, eq, lte, sql } from "drizzle-orm";
+import { vehicles } from "@shared/schema";
 import {
   TECHNICIAN_TARGET_STATUSES,
   canTechnicianTransition,
@@ -14,6 +16,9 @@ import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 import { idSchema } from "@shared/contracts/common";
 
 const log = moduleLogger("technician-work-orders");
+
+const MILEAGE_CHANGED_ERROR =
+  "Le kilométrage du véhicule vient d'être relevé plus haut. Rechargez l'ordre de travail avant de réessayer.";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "en attente",
@@ -95,16 +100,29 @@ const patchTechnicianWorkOrderStatus: RequestHandler = async (req, res, next) =>
     if (body.status === "completed") fields.endDate = new Date();
     const updateData = { status: body.status, ...fields };
 
-    // Compare-and-set sur le statut lu : un OT annulé ou remis en attente par le chef d'atelier
-    // entre la lecture et l'écriture répond 409, sans diagnostic ni kilométrage écrits.
+    // Compare-and-set sur le statut lu et sur l'assignation : un OT annulé, remis en attente ou
+    // réassigné entre la lecture et l'écriture répond 409, sans diagnostic ni kilométrage écrits.
+    // Le kilométrage est écrit dans la même transaction, et seulement vers le haut : un relevé
+    // plus élevé enregistré entre-temps fait échouer le tout, statut compris.
+    const mileageTarget = mileageToWrite?.mileage;
     const updatedOrder = await transitionWorkOrderStatus({
       workOrderId,
       from: workOrder.status,
       to: body.status,
       updatedBy: userId,
+      technicianId: userId,
       fields,
+      onTransition: mileageTarget !== undefined
+        ? async (tx) => {
+            const [raised] = await tx
+              .update(vehicles)
+              .set({ mileage: mileageTarget, lastMileage: sql`${vehicles.mileage}` })
+              .where(and(eq(vehicles.id, workOrder.vehicleId), lte(vehicles.mileage, mileageTarget)))
+              .returning({ id: vehicles.id });
+            if (!raised) throw new AppError(409, MILEAGE_CHANGED_ERROR);
+          }
+        : undefined,
     });
-    if (mileageToWrite) await storage.updateVehicle(workOrder.vehicleId, mileageToWrite);
 
     // Avancement vers l'encadrement : le chef d'atelier est prévenu du démarrage ou de la fin,
     // comme pour PATCH /api/work-orders/:id. Une alerte non envoyée ne fait pas échouer le geste.
