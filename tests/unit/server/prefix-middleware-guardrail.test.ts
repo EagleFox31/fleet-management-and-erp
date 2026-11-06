@@ -110,7 +110,10 @@ const ATTENDUS_TOLERES_ABSENTS: Array<{ name: string; file?: string; raison: str
 const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const SERVER_DIR = join(ROOT, "server");
 
-const occurrences = (): MountedMiddleware[] => scanFiles(sourceFiles(SERVER_DIR), ROOT);
+// Le balayage de server/ (analyse TypeScript de chaque fichier) coûte ~700 ms : fait une fois par
+// fichier de test, pas à chaque cas. Copie rendue à chaque appel : un cas ne modifie pas les autres.
+let scanned: MountedMiddleware[] | undefined;
+const occurrences = (): MountedMiddleware[] => [...(scanned ??= scanFiles(sourceFiles(SERVER_DIR), ROOT))];
 const entriesFor = (o: MountedMiddleware) => MIDDLEWARES_JUSTIFIES.filter((e) => e.name === o.name && (!e.file || e.file === o.file));
 const isDerogation = (o: MountedMiddleware) => DEROGATIONS_CONNUES.some((d) => d.name === o.name && d.file === o.file);
 const isExpectedIn = (list: typeof ATTENDUS_TOLERES_ABSENTS, o: MountedMiddleware) => list.some((a) => a.name === o.name && (!a.file || a.file === o.file));
