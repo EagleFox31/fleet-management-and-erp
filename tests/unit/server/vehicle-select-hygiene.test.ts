@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from "fs";
 import { join, relative } from "path";
 import { fileURLToPath } from "url";
 import { describe, expect, it } from "vitest";
+import { findWholeTableReads } from "../../support/table-select-scan";
 
 /**
  * Prix d'achat du véhicule (`vehicles.purchasePrice`) : réservé à admin, logistique et secrétariat.
@@ -69,33 +70,8 @@ function serverSources(dir: string): string[] {
   });
 }
 
-/** Argument équilibré du `.select(` qui précède la position donnée, ou null s'il n'y en a pas. */
-function selectArgument(source: string, position: number): string | null {
-  const start = source.lastIndexOf(".select(", position);
-  if (start < 0) return null;
-  let depth = 0;
-  for (let i = start + ".select".length; i < source.length; i++) {
-    if (source[i] === "(") depth++;
-    else if (source[i] === ")") {
-      depth--;
-      if (depth === 0) return source.slice(start + ".select(".length, i);
-    }
-  }
-  return null;
-}
-
-function isWholeRow(argument: string): boolean {
-  return argument.trim() === "" || /:\s*vehicles\s*[,}\n]/.test(argument) || /getTableColumns\(\s*vehicles\s*\)/.test(argument);
-}
-
 function findWholeVehicleReads(source: string, key: string): string[] {
-  const found: string[] = [];
-  const fromVehicles = /\.(?:from|leftJoin|innerJoin|rightJoin)\(\s*vehicles\b/g;
-  let ordinal = 0;
-  for (let match = fromVehicles.exec(source); match; match = fromVehicles.exec(source)) {
-    const argument = selectArgument(source, match.index);
-    if (argument !== null && isWholeRow(argument)) found.push(`${key}#${++ordinal}`);
-  }
+  const found = findWholeTableReads(source, key, "vehicles");
   if (/row_to_json\(\s*v\.\*\s*\)/.test(source)) found.push(`${key}#row_to_json`);
   return found;
 }
