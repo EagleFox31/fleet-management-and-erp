@@ -1,4 +1,4 @@
-import { db } from "../db";
+import { db, type DbTransaction } from "../db";
 import { 
   supplierInvoices, 
   supplierInvoiceSettlements,
@@ -16,6 +16,8 @@ import { AppError } from "../lib/app-error";
 import { isSettlementProofReference } from "../lib/settlement-proof";
 import { linkSupplierSettlement, reverseSupplierSettlement } from "./treasury-links";
 import type { DiscrepancyResult } from "@shared/contracts/supplier-invoice-discrepancies";
+
+const INVOICE_DISPUTED_RECONCILE_MESSAGE = "Cette facture est en litige. Lever le litige avant de rapprocher un règlement.";
 
 /**
  * Service de contrôle 3 voies pour les factures fournisseurs
@@ -130,21 +132,30 @@ export class ThreeWayMatchingService {
     );
   }
 
+  /**
+   * Recalcule le solde de la facture depuis ses règlements rapprochés. Appelée dans la transaction
+   * qui tient la facture verrouillée (`FOR UPDATE`). La facture est relue ici : le déclencheur
+   * `recalc_supplier_invoice_financials` l'a déjà recalculée au changement du règlement. L'écriture
+   * reste un compare-and-set sur le statut relu, qui exclut `disputed` : une facture en litige ne
+   * passe jamais à `paid` par ce chemin. Le verrou et le refus du litige (message lisible) sont
+   * pris par l'appelant ; le compare-and-set reste le filet si un appel futur les oubliait.
+   */
   private async syncInvoiceFromReconciledSettlements(
+    tx: DbTransaction,
     invoiceId: number,
     actorId?: number
   ): Promise<SupplierInvoice> {
-    const [invoice] = await db
+    const [invoice] = await tx
       .select()
       .from(supplierInvoices)
       .where(eq(supplierInvoices.id, invoiceId))
       .limit(1);
 
     if (!invoice) {
-      throw new Error(`Facture ${invoiceId} introuvable`);
+      throw new AppError(404, "Cette facture n'existe plus.");
     }
 
-    const reconciledSettlements = await db
+    const reconciledSettlements = await tx
       .select({
         amount: supplierInvoiceSettlements.amount,
         paymentDate: supplierInvoiceSettlements.paymentDate,
@@ -174,7 +185,7 @@ export class ThreeWayMatchingService {
       ? "paid"
       : (invoice.status === "paid" ? "approved" : invoice.status);
 
-    const [updated] = await db
+    const [updated] = await tx
       .update(supplierInvoices)
       .set({
         status: nextStatus as any,
@@ -186,11 +197,17 @@ export class ThreeWayMatchingService {
         paymentMethod: isFullySettled ? String(latestReconciled?.paymentMethod || invoice.paymentMethod || "") : invoice.paymentMethod,
         updatedAt: new Date(),
       })
-      .where(eq(supplierInvoices.id, invoiceId))
+      .where(
+        and(
+          eq(supplierInvoices.id, invoiceId),
+          eq(supplierInvoices.status, invoice.status),
+          ne(supplierInvoices.status, "disputed")
+        )
+      )
       .returning();
 
-    if (updated?.status === "paid") {
-      await this.autoCloseDeliveredOrderIfFinanceDone(updated, actorId);
+    if (!updated) {
+      throw new AppError(409, "Cette facture a été modifiée entre-temps. Rechargez la page puis réessayez.");
     }
 
     return updated;
@@ -950,49 +967,72 @@ export class ThreeWayMatchingService {
       throw new AppError(409, "Un règlement rejeté ne peut pas être rapproché.");
     }
 
-    // Compare-and-set : seul le passage recorded -> reconciled écrit. Un second
-    // rapprochement (double clic) trouve le règlement déjà rapproché et rend
-    // l'état courant au lieu d'une erreur.
-    const [updatedSettlement] = await db
-      .update(supplierInvoiceSettlements)
-      .set({
-        status: "reconciled",
-        reconciledBy,
-        reconciledAt: new Date(),
-        reconciliationNote: reconciliationNote || null,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(supplierInvoiceSettlements.id, settlementId),
-          eq(supplierInvoiceSettlements.status, "recorded")
-        )
-      )
-      .returning();
-
-    let current = updatedSettlement;
-    if (!current) {
-      [current] = await db
+    // Verrou sur la facture, pris avant le règlement comme à la saisie : un litige posé
+    // pendant le rapprochement attend la fin de la transaction, et une facture en litige
+    // refuse le rapprochement sans que le règlement change d'état.
+    const result = await db.transaction(async (tx) => {
+      const [invoice] = await tx
         .select()
-        .from(supplierInvoiceSettlements)
-        .where(eq(supplierInvoiceSettlements.id, settlementId))
-        .limit(1);
-      if (current?.status !== "reconciled") {
-        throw new AppError(409, "Ce règlement a été modifié entre-temps. Rechargez la page puis réessayez.");
+        .from(supplierInvoices)
+        .where(eq(supplierInvoices.id, invoiceId))
+        .limit(1)
+        .for("update");
+
+      if (!invoice) {
+        throw new AppError(404, "Cette facture n'existe plus.");
       }
+      if (invoice.status === "disputed") {
+        throw new AppError(409, INVOICE_DISPUTED_RECONCILE_MESSAGE);
+      }
+
+      // Compare-and-set : seul le passage recorded -> reconciled écrit. Un second
+      // rapprochement (double clic) trouve le règlement déjà rapproché et rend
+      // l'état courant au lieu d'une erreur.
+      const [updatedSettlement] = await tx
+        .update(supplierInvoiceSettlements)
+        .set({
+          status: "reconciled",
+          reconciledBy,
+          reconciledAt: new Date(),
+          reconciliationNote: reconciliationNote || null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(supplierInvoiceSettlements.id, settlementId),
+            eq(supplierInvoiceSettlements.status, "recorded")
+          )
+        )
+        .returning();
+
+      let current = updatedSettlement;
+      if (!current) {
+        [current] = await tx
+          .select()
+          .from(supplierInvoiceSettlements)
+          .where(eq(supplierInvoiceSettlements.id, settlementId))
+          .limit(1);
+        if (current?.status !== "reconciled") {
+          throw new AppError(409, "Ce règlement a été modifié entre-temps. Rechargez la page puis réessayez.");
+        }
+      }
+
+      // Recalcul idempotent du solde ; sur un rejeu, il répare aussi une
+      // synchronisation interrompue. L'auteur du paiement reste le premier.
+      const updatedInvoice = await this.syncInvoiceFromReconciledSettlements(
+        tx,
+        invoiceId,
+        current.reconciledBy ?? reconciledBy
+      );
+
+      return { settlement: current, invoice: updatedInvoice };
+    });
+
+    if (result.invoice.status === "paid") {
+      await this.autoCloseDeliveredOrderIfFinanceDone(result.invoice, result.settlement.reconciledBy ?? reconciledBy);
     }
 
-    // Recalcul idempotent du solde ; sur un rejeu, il répare aussi une
-    // synchronisation interrompue. L'auteur du paiement reste le premier.
-    const updatedInvoice = await this.syncInvoiceFromReconciledSettlements(
-      invoiceId,
-      current.reconciledBy ?? reconciledBy
-    );
-
-    return {
-      settlement: current,
-      invoice: updatedInvoice,
-    };
+    return result;
   }
 
   /**
@@ -1028,7 +1068,15 @@ export class ThreeWayMatchingService {
 
     // Compare-and-set : seul le passage recorded -> rejected écrit. La contre-passation au journal
     // de trésorerie (lot T3) est dans la même transaction : pas de rejet sans elle, ni l'inverse.
+    // Facture verrouillée avant le règlement, comme au rapprochement : le déclencheur
+    // `recalc_supplier_invoice_financials` la verrouille sinon après le règlement, et un rejet
+    // concurrent d'un rapprochement finirait en interblocage (40P01).
     const updated = await db.transaction(async (tx) => {
+      await tx
+        .select({ id: supplierInvoices.id })
+        .from(supplierInvoices)
+        .where(eq(supplierInvoices.id, invoiceId))
+        .for("update");
       const [row] = await tx
         .update(supplierInvoiceSettlements)
         .set({ status: "rejected", rejectedBy, rejectedAt: new Date(), rejectionReason, updatedAt: new Date() })
