@@ -1,5 +1,6 @@
 import { publicClientColumns, publicClientInvoiceColumns } from "../lib/client-public-columns";
 import { db } from "../db";
+import { moduleLogger } from "../lib/logger";
 import {
   supplierInvoices,
   suppliers,
@@ -10,6 +11,8 @@ import {
   clientInvoices,
   clients,
 } from "@shared/schema";
+
+const log = moduleLogger("excel-export");
 import { eq, desc, and, sql, gte, lte, isNull } from "drizzle-orm";
 import * as XLSX from 'xlsx';
 
@@ -113,7 +116,7 @@ export class ExcelExportService {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Inventaire");
 
-    console.log(`Exported ${totalParts} parts, total value: ${totalValue} FCFA`);
+    log.debug({ parts: totalParts }, "inventaire des pièces exporté");
     return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
   }
 

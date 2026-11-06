@@ -1,7 +1,10 @@
 import { db } from "../db";
+import { moduleLogger } from "../lib/logger";
 import { supplierInvoices, suppliers, parts } from "@shared/schema";
 import { eq, desc, sql } from "drizzle-orm";
 import { DEFAULT_VAT_RATE, calculateVAT as computeVAT } from "./vat-calculation";
+
+const log = moduleLogger("vat-billing");
 
 /**
  * Service Factures & TVA
@@ -321,7 +324,7 @@ export class VATBillingService {
       })).sort((a, b) => b.totalTVA - a.totalTVA)
     };
     
-    console.log(`Monthly VAT stats: ${result.invoicesCount} invoices, ${result.totalTVA} FCFA TVA`);
+    log.debug({ year, month, invoices: result.invoicesCount }, "statistiques TVA mensuelles calculées");
     return result;
   }
   
