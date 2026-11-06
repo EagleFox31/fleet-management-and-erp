@@ -77,7 +77,11 @@ const maintenanceDay = z.preprocess(
   z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Date attendue au format AAAA-MM-JJ")
-    .refine((value) => !Number.isNaN(Date.parse(value)), "Date invalide")
+    // Date.parse accepte « 2027-02-31 » (3 mars) : le jour relu doit être celui saisi.
+    .refine((value) => {
+      const day = new Date(`${value}T00:00:00Z`);
+      return !Number.isNaN(day.getTime()) && day.toISOString().slice(0, 10) === value;
+    }, "Date invalide")
     .refine((value) => value >= "1990-01-01" && value <= "2100-12-31", "Date hors de la plage 1990-2100")
     .nullish(),
 );

@@ -196,6 +196,9 @@ describe("POST /api/vehicles/activate-from-workflow : workflowData vérifié ava
     ["date de maintenance illisible", { nextMaintenanceDate: "bientot" }, "nextMaintenanceDate"],
     ["date de maintenance au format français", { firstMaintenanceDate: "15/01/2027" }, "firstMaintenanceDate"],
     ["date de maintenance hors plage", { firstMaintenanceDate: "1890-01-01" }, "firstMaintenanceDate"],
+    // Date.parse accepte un jour inexistant (OT au 3 mars, puis refus Postgres avalé) : le jour doit exister.
+    ["première maintenance à un jour inexistant", { firstMaintenanceDate: "2027-02-31" }, "firstMaintenanceDate"],
+    ["prochaine maintenance à un jour inexistant", { nextMaintenanceDate: "2027-04-31" }, "nextMaintenanceDate"],
   ])("%s : 400 sur le champ, aucun véhicule créé", async (_label, workflowData, field) => {
     const { res, rows } = await activate(uniqueTestToken("TSTA"), workflowData);
     expect(res.status).toBe(400);

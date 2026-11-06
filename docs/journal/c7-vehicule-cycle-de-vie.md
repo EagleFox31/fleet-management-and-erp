@@ -893,3 +893,5 @@ WHERE po.status IN ('delivered', 'completed')
   - `status` libre : 2 tests rouges ;
   - kilométrage sans bornes : 3 rouges ;
   - dates non contrôlées : 4 rouges.
+
+**Réserve de relecture (même PR).** `Date.parse("2027-02-31")` réussit : l'OT était créé au 3 mars, puis Postgres refusait `vehicles.next_maintenance_date`, refus avalé derrière un 201. Désormais le jour relu (`new Date(v + "T00:00:00Z").toISOString().slice(0, 10)`) doit être celui saisi, pour `firstMaintenanceDate` comme pour `nextMaintenanceDate`. Contrat : `2027-02-31` et `2027-04-31` donnent 400. Rouges avant le correctif (201), verts après ; 20 tests sur 20.
