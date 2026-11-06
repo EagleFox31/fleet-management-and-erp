@@ -4,7 +4,7 @@ import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { UNKNOWN_VEHICLE_DOCUMENT_TYPE_MESSAGE } from "../../server/lib/vehicle-document-type";
-import { vehicleDocuments, vehicleDocumentTypes, vehicles } from "../../shared/schema";
+import { statusHistory, vehicleDocuments, vehicleDocumentTypes, vehicles, workOrders } from "../../shared/schema";
 import { leakText } from "../support/api-error";
 import { startContractSession } from "../support/contract-session";
 import { uniqueTestToken } from "../support/ids";
@@ -48,8 +48,11 @@ beforeAll(async () => {
 
 afterAll(async () => {
   for (const file of files) rmSync(file, { force: true });
-  // vehicle_documents et status_history suivent le véhicule (ON DELETE CASCADE).
-  if (createdVehicleIds.length > 0) await db.delete(vehicles).where(inArray(vehicles.id, createdVehicleIds));
+  // vehicle_documents et status_history suivent le véhicule (ON DELETE CASCADE) ; l'OT de maintenance programmée est retiré avant.
+  if (createdVehicleIds.length > 0) {
+    await db.delete(workOrders).where(inArray(workOrders.vehicleId, createdVehicleIds));
+    await db.delete(vehicles).where(inArray(vehicles.id, createdVehicleIds));
+  }
   await session?.stop();
 });
 
@@ -181,6 +184,49 @@ describe("POST /api/vehicles/activate-from-workflow : workflowData vérifié ava
     });
     expect(res.status).toBe(201);
     expect(rows).toHaveLength(1);
+  });
+
+  it.each([
+    ["status hors énumération", { status: "detruit" }, "status"],
+    ["status non textuel", { status: 3 }, "status"],
+    ["kilométrage négatif", { nextMaintenanceMileage: -1 }, "nextMaintenanceMileage"],
+    ["kilométrage décimal", { nextMaintenanceMileage: 1500.5 }, "nextMaintenanceMileage"],
+    ["kilométrage au-delà de la borne", { nextMaintenanceMileage: 10_000_001 }, "nextMaintenanceMileage"],
+    ["kilométrage non numérique", { nextMaintenanceMileage: "beaucoup" }, "nextMaintenanceMileage"],
+    ["date de maintenance illisible", { nextMaintenanceDate: "bientot" }, "nextMaintenanceDate"],
+    ["date de maintenance au format français", { firstMaintenanceDate: "15/01/2027" }, "firstMaintenanceDate"],
+    ["date de maintenance hors plage", { firstMaintenanceDate: "1890-01-01" }, "firstMaintenanceDate"],
+    // Date.parse accepte un jour inexistant (OT au 3 mars, puis refus Postgres avalé) : le jour doit exister.
+    ["première maintenance à un jour inexistant", { firstMaintenanceDate: "2027-02-31" }, "firstMaintenanceDate"],
+    ["prochaine maintenance à un jour inexistant", { nextMaintenanceDate: "2027-04-31" }, "nextMaintenanceDate"],
+  ])("%s : 400 sur le champ, aucun véhicule créé", async (_label, workflowData, field) => {
+    const { res, rows } = await activate(uniqueTestToken("TSTA"), workflowData);
+    expect(res.status).toBe(400);
+    expect(res.body.errors?.map((e: { field?: string }) => e.field)).toContain(field);
+    expect(rows).toHaveLength(0);
+  });
+
+  it("status, date et kilométrage valides : écrits sur l'historique et la fiche véhicule", async () => {
+    const { res, rows } = await activate(uniqueTestToken("TSTA"), {
+      status: "maintenance",
+      maintenanceScheduled: true,
+      // Horodatage ISO d'un brouillon restauré : ramené au jour ; kilométrage saisi en texte : converti.
+      firstMaintenanceDate: "2027-01-15T00:00:00.000Z",
+      nextMaintenanceMileage: "15000",
+    });
+    expect(res.status).toBe(201);
+    expect(rows).toHaveLength(1);
+    // La création du véhicule écrit aussi sa ligne (statut de vehicleData) : on cherche celle de l'activation.
+    const history = await db.select({ status: statusHistory.status }).from(statusHistory).where(eq(statusHistory.vehicleId, rows[0].id));
+    expect(history.map((h) => h.status)).toContain("maintenance");
+    const [vehicle] = await db
+      .select({ date: vehicles.nextMaintenanceDate, mileage: vehicles.nextMaintenanceMileage })
+      .from(vehicles)
+      .where(eq(vehicles.id, rows[0].id));
+    expect(String(vehicle.date).slice(0, 10)).toBe("2027-01-15");
+    expect(vehicle.mileage).toBe(15000);
+    const planned = await db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.vehicleId, rows[0].id));
+    expect(planned).toHaveLength(1);
   });
 
   it.each([

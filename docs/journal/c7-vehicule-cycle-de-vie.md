@@ -874,3 +874,24 @@ WHERE po.status IN ('delivered', 'completed')
   - sans schéma `workflowData` : 500 pour le corps sans `workflowData` et pour `filesize: "abc"` ;
   - contrôle de fichier d'activation sans `uploadedFileCandidates` : `uploads/../package.json` est rattaché au véhicule ;
   - `verifyFileExists` sans `uploadedFileCandidates` : idem pour la voie liste.
+
+## 2026-11-06 — Activation : mineurs de la relecture sécurité (suite de #583)
+
+**Quoi.**
+- `workflowData.status` est restreint à l'énumération de `status_history` (`operational`, `maintenance`, `out_of_service`). Il était écrit avec un simple transtypage TypeScript ; une valeur hors liste faisait échouer l'insertion après la création du véhicule, échec avalé (« continuant »).
+- `firstMaintenanceDate` et `nextMaintenanceDate` sont des jours `AAAA-MM-JJ` entre 1990 et 2100. L'activation construit `${date}T00:00:00` : une date ISO complète donnait « Invalid Date ». Un horodatage ISO (brouillon restauré) est ramené à son jour, une chaîne vide vaut « non renseigné ».
+- `nextMaintenanceMileage` est un entier de 0 à 10 000 000 km. Une chaîne de chiffres du formulaire est convertie.
+- `vehicle-activation-service-working.ts` : les 23 `console.*` passent par `moduleLogger("vehicle-activation")`. Les étapes deviennent `debug`, les échecs avalés `warn` avec `err` et `vehicleId`, le compte des documents `info`. Les logs ne contiennent ni nom ni chemin de fichier.
+
+**Comment.** Champs ajoutés à `server/lib/activation-workflow-data.ts`, déjà vérifié avant `createVehicle` : une valeur refusée répond 400 avec `errors[].field`, sans véhicule créé.
+
+**Pourquoi.** Ces champs atterrissaient en base sans contrôle de type ni de bornes. Une erreur sur l'un d'eux laissait un véhicule à moitié activé (pas d'historique, pas de maintenance) derrière une réponse 201.
+
+**Preuve.**
+- Contrat `vehicle-activate-from-workflow-document-types` : 18 tests sur 18. Dix sont nouveaux : neuf cas de 400 (status hors liste ou non textuel, kilométrage négatif, décimal, au-delà de la borne ou non numérique, date illisible, au format français ou hors plage) et un cas nominal (status `maintenance`, date ISO ramenée au jour, kilométrage `"15000"` converti, OT planifié).
+- Mutants, tous détectés :
+  - `status` libre : 2 tests rouges ;
+  - kilométrage sans bornes : 3 rouges ;
+  - dates non contrôlées : 4 rouges.
+
+**Réserve de relecture (même PR).** `Date.parse("2027-02-31")` réussit : l'OT était créé au 3 mars, puis Postgres refusait `vehicles.next_maintenance_date`, refus avalé derrière un 201. Désormais le jour relu (`new Date(v + "T00:00:00Z").toISOString().slice(0, 10)`) doit être celui saisi, pour `firstMaintenanceDate` comme pour `nextMaintenanceDate`. Contrat : `2027-02-31` et `2027-04-31` donnent 400. Rouges avant le correctif (201), verts après ; 20 tests sur 20.

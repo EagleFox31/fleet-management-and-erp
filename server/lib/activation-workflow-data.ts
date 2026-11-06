@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { statusHistory } from "@shared/schema";
 
 /**
  * Corps `workflowData` de POST /api/vehicles/activate-from-workflow, vérifié AVANT la création
@@ -63,10 +64,44 @@ const keyedDocuments = z
   })
   .passthrough();
 
+// Valeur vide du formulaire = « non renseigné ».
+const emptyAsNull = (value: unknown) => (value === "" ? null : value);
+
+/**
+ * Date de maintenance au jour près : l'activation construit `${date}T00:00:00`, une date ISO complète
+ * donnerait « Invalid Date » après la création du véhicule. Un horodatage ISO (brouillon restauré)
+ * est ramené à son jour. Bornée pour refuser une saisie absurde.
+ */
+const maintenanceDay = z.preprocess(
+  (value) => (typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value) ? value.slice(0, 10) : emptyAsNull(value)),
+  z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Date attendue au format AAAA-MM-JJ")
+    // Date.parse accepte « 2027-02-31 » (3 mars) : le jour relu doit être celui saisi.
+    .refine((value) => {
+      const day = new Date(`${value}T00:00:00Z`);
+      return !Number.isNaN(day.getTime()) && day.toISOString().slice(0, 10) === value;
+    }, "Date invalide")
+    .refine((value) => value >= "1990-01-01" && value <= "2100-12-31", "Date hors de la plage 1990-2100")
+    .nullish(),
+);
+
+/** Kilométrage entier ; une chaîne numérique du formulaire est acceptée et convertie. */
+const MAX_MILEAGE_KM = 10_000_000;
+const maintenanceMileage = z.preprocess(
+  (value) => (typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value) : emptyAsNull(value)),
+  z.number().int().nonnegative().max(MAX_MILEAGE_KM).nullish(),
+);
+
 export const activationWorkflowDataSchema = z
   .object({
     // Vide tant que le brouillon n'est pas enregistré : la route ne clôture alors aucun workflow.
     sessionId: z.string().max(200).nullish(),
+    // Écrit tel quel dans status_history : seules les valeurs de son énumération passent.
+    status: z.preprocess(emptyAsNull, z.enum(statusHistory.status.enumValues).nullish()),
+    firstMaintenanceDate: maintenanceDay,
+    nextMaintenanceDate: maintenanceDay,
+    nextMaintenanceMileage: maintenanceMileage,
     documents: z.union([z.array(listedDocument).max(50), keyedDocuments]).nullish(),
     // Lues à la racine par DocumentManagementService.extractDocumentsFromWorkflowData.
     carteGrise: keyedDocument.nullish(),
