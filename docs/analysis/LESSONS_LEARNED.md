@@ -3346,3 +3346,21 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/README.md`, section Postgres local : piège « `read ECONNRESET` au bout de 30 s sous rafale ».
 - **Leçon généralisée** : toute attente réseau du produit a un plafond explicite et configurable. Avant d'en poser un sur un driver, vérifier son chemin d'échec contre un pair muet : un délai mal géré peut transformer une lenteur en plantage. Pour un échec intermittent à durée fixe, chercher d'abord quel composant coupe à cette durée, côté proxy et côté base, avant de soupçonner les verrous applicatifs.
 
+
+## 2026-11-06 — Timeouts de connexion sous rafale en local : relever le plafond n'y fait rien
+
+- **Contexte** : après #582 (plafond `DATABASE_CONNECT_TIMEOUT_MS` de 10 s), la campagne d'intégration locale de #584 donnait 71/74. Les échecs se reproduisaient sur main pur : `timeout exceeded when trying to connect` et `Connection terminated due to connection timeout`, dans `backup-production`, `login-lockout-db-store` et `management-dashboard-service`. La CI Linux de #582 était verte, intégration comprise.
+- **Cause racine** : le relais de ports de Docker Desktop (voir l'entrée du 2026-11-06 sur le 503 de la garde) perd des connexions sous rafale. Sur 20 `pool.connect()` simultanés vers le wsproxy fm-cpw, 16 ou 17 s'ouvrent en moins de 0,8 s et 3 ou 4 restent muettes jusqu'à `read ECONNRESET` à 30 s. Ces tests ouvrent justement des connexions en rafale. Le plafond ne crée pas l'échec, il le rend visible en 10 s.
+- **Classification** : environnement de test local. Rien dans le produit.
+- **Ce qui a été écarté, mesures à l'appui** : relever le plafond en local. Mesure sur les 3 fichiers, 3 passages par valeur, en alternance et sur le même relais :
+
+  | Plafond | Résultat |
+  |---|---|
+  | 10000 (défaut) | 3/3 verts |
+  | 30000 | 2 verts, 1 rouge : `Test timed out in 30000ms` (40,8 s) |
+  | 0 | vert (1 passage) |
+
+  Une connexion muette ne s'établit jamais, quel que soit le plafond. À 30000, le plafond tombe en même temps que le `timeout: 30_000` porté par ces tests : le test expire le premier, l'échec devient plus lent et moins lisible. Réduire la rafale dans les tests est aussi écarté : elle vérifie la concurrence des verrous consultatifs.
+- **Résolution** : documentation de la conduite à tenir, sans changement de code ni de configuration.
+- **Prévention** : `tests/README.md`, section Postgres local, puce « timeouts de connexion sous rafale en local, ne pas relever le plafond ». Conduite : garder 10 s, relancer le fichier, reproduire sur main pur avec une sonde de rafale ; la CI Linux fait foi.
+- **Leçon généralisée** : avant de relever un délai pour faire passer un test, vérifier si l'opération finit un jour. Quand elle ne finit jamais, un délai plus long ne fait que le rapprocher, ou le faire dépasser, d'un autre délai (ici celui du test), et l'échec devient plus lent et plus trompeur. Comparer les valeurs en alternance sur le même environnement, pas à des moments différents.
