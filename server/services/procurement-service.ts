@@ -23,6 +23,7 @@ import { broadcastAlertCreated, type BroadcastableAlert } from "../lib/alert-bro
 import { moduleLogger } from "../lib/logger";
 import { canTransitionPurchaseOrder, getPurchaseOrderStatusLabel } from "@shared/constants/purchase-order-statuses";
 import { workOrderStaffScope } from "../lib/work-order-realtime-scope";
+import { deliveryReceipts } from "../lib/purchase-order-delivery";
 
 /**
  * Service de gestion des commandes d'achat groupées
@@ -200,29 +201,6 @@ export class ProcurementService {
     actorId?: number
   ): Promise<{ created: boolean; invoiceId?: number; invoiceNumber?: string }> {
     return this.ensureAutoSupplierInvoiceFromOrder(orderId, actorId);
-  }
-
-  /**
-   * Quand une commande est réceptionnée globalement, aligner les lignes de commande.
-   * Cela évite les incohérences "commande livrée" mais lignes "pending".
-   */
-  private async markOrderLinesAsDelivered(executor: DbExecutor, orderId: number): Promise<void> {
-    await executor
-      .update(purchaseOrderLines)
-      .set({
-        deliveryStatus: sql`CASE
-          WHEN ${purchaseOrderLines.deliveryStatus} IN ('pending', 'partial')
-          THEN 'delivered'
-          ELSE ${purchaseOrderLines.deliveryStatus}
-        END`,
-        quantityReceived: sql`CASE
-          WHEN ${purchaseOrderLines.deliveryStatus} IN ('pending', 'partial')
-          THEN ${purchaseOrderLines.quantityOrdered}
-          ELSE ${purchaseOrderLines.quantityReceived}
-        END`,
-        updatedAt: new Date(),
-      })
-      .where(eq(purchaseOrderLines.purchaseOrderId, orderId));
   }
 
   /**
@@ -836,22 +814,9 @@ export class ProcurementService {
         .leftJoin(partRequirements, eq(purchaseOrderLines.partRequirementId, partRequirements.id))
         .where(eq(purchaseOrderLines.purchaseOrderId, id));
 
-    let lines = await fetchLinesWithDetails();
-
-    // Auto-rattrapage pour les anciennes commandes déjà réceptionnées
-    // dont les lignes sont restées "pending"/"partial" par incohérence historique.
-    const shouldNormalizeDeliveredLines =
-      (order.status === "delivered" || order.status === "completed")
-      && lines.some(({ line }) => {
-        const qtyReceived = Number(line.quantityReceived ?? 0);
-        const qtyOrdered = Number(line.quantityOrdered ?? 0);
-        return line.deliveryStatus === "pending" || line.deliveryStatus === "partial" || qtyReceived < qtyOrdered;
-      });
-
-    if (shouldNormalizeDeliveredLines) {
-      await this.markOrderLinesAsDelivered(db, id);
-      lines = await fetchLinesWithDetails();
-    }
+    // Lecture seule. Une ligne restée ouverte sur une commande livrée n'est pas alignée ici : un
+    // alignement sans entrée en stock ferait diverger le reçu et le stock.
+    const lines = await fetchLinesWithDetails();
 
     const requesterIds = Array.from(
       new Set(
@@ -1015,6 +980,7 @@ export class ProcurementService {
               partId: purchaseOrderLines.partId,
               quantityOrdered: purchaseOrderLines.quantityOrdered,
               quantityReceived: purchaseOrderLines.quantityReceived,
+              deliveryStatus: purchaseOrderLines.deliveryStatus,
             })
             .from(purchaseOrderLines)
             .where(eq(purchaseOrderLines.purchaseOrderId, orderId))
@@ -1118,24 +1084,22 @@ export class ProcurementService {
       // un nouvel essai refait tout. Réception complète : aligner automatiquement toutes les lignes
       // pour éviter "commande livrée" avec lignes restées en attente fournisseur.
       if (status === "delivered") {
-        await this.markOrderLinesAsDelivered(tx, orderId);
-
-        for (const line of deliveryStockDeltas) {
-          if (!line.partId) continue;
-
-          const alreadyReceived = line.quantityReceived || 0;
-          const ordered = line.quantityOrdered || 0;
-          const quantityToReceive = Math.max(0, ordered - alreadyReceived);
-          if (quantityToReceive <= 0) continue;
-
-          await this.registerPartReception(
-            tx,
-            line.partId,
-            quantityToReceive,
-            `Réception commande #${orderId}`,
-            `Entrée stock depuis commande fournisseur, ligne #${line.lineId}`,
-            userId
-          );
+        // Mêmes lignes et mêmes quantités pour l'alignement et l'entrée en stock (`deliveryReceipts`).
+        for (const receipt of deliveryReceipts(deliveryStockDeltas)) {
+          await tx
+            .update(purchaseOrderLines)
+            .set({ deliveryStatus: "delivered", quantityReceived: receipt.receivedAfter, updatedAt: new Date() })
+            .where(eq(purchaseOrderLines.id, receipt.lineId));
+          if (receipt.partId && receipt.stockIn > 0) {
+            await this.registerPartReception(
+              tx,
+              receipt.partId,
+              receipt.stockIn,
+              `Réception commande #${orderId}`,
+              `Entrée stock depuis commande fournisseur, ligne #${receipt.lineId}`,
+              userId
+            );
+          }
         }
       }
 

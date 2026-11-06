@@ -564,3 +564,14 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
 - **Correctif** : la livraison met à jour les demandes avant la boucle de stock. L'ordre devient commande, lignes, demandes, pièce, compatible avec le PATCH (demande, puis pièce).
 - **Preuve** : un test d'intégration rejoue le PATCH : il verrouille la demande, attend que la livraison s'y bloque, puis écrit la pièce. Sur 97807a0c, le test lève `deadlock detected` (40P01) ; avec le correctif, il est vert, avec stock 7 et demande reçue. tsc 0 ; unitaires 3 093 ; intégration 10 fichiers, 55 tests ; contrats 36 fichiers, 445 tests.
 - **Leçon** : déplacer un effet dans une transaction change l'ordre de ses verrous. Il faut lister tous les écrivains des tables touchées et aligner l'ordre sur le leur, avec un test qui joue l'autre écrivain.
+
+## 2026-11-06 03:56 — Réception globale : alignement des lignes sur le crédit, lecture sans écriture
+
+- **Quoi** : la livraison d'une commande aligne et crédite les mêmes lignes, pour les mêmes quantités. `getPurchaseOrderById` n'écrit plus.
+- **Comment** : une fonction pure, `deliveryReceipts` (`server/lib/purchase-order-delivery.ts`), calcule pour chaque ligne ouverte (`pending`, `partial`) la quantité reçue après alignement et l'entrée en stock. La transaction de livraison applique ce résultat, ligne par ligne, et `markOrderLinesAsDelivered` est supprimé. Une ligne close (`delivered`, `accepted`, `rejected`) n'est ni alignée ni créditée. La normalisation faite pendant la lecture est retirée.
+- **Pourquoi** : une ligne close avec un reçu inférieur au commandé était créditée de l'écart sans changer son reçu, donc le stock et le reçu divergeaient. De son côté, la lecture alignait les lignes ouvertes d'une commande livrée sans créditer le stock, et elle écrivait pendant un GET.
+- **Preuve** : deux tests d'intégration échouent sur 694555ea et passent avec le correctif.
+  - Une ligne close à 1/2 recevait 1 en stock ; elle n'en reçoit plus.
+  - Une lecture passait une ligne ouverte de 0 à 2 ; elle ne la modifie plus.
+- **Vérifications** : 9 tests unitaires de `deliveryReceipts`, dont l'invariant « chaque hausse du reçu est créditée, et rien d'autre ». tsc 0 ; unitaires 3 102 ; intégration 10 fichiers, 57 tests ; contrats 36 fichiers, 445 tests.
+- **Leçon** : quand deux effets doivent rester égaux (le marquage et le crédit), ils doivent sortir d'un même calcul. Deux requêtes écrites séparément finissent par diverger.

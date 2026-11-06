@@ -258,3 +258,44 @@ describe("transition manuelle de commande : verrou et compare-and-set", { timeou
     expect(after.status).toBe("received");
   });
 });
+
+describe("réception globale : alignement des lignes et lecture sans écriture", { timeout: 60000 }, () => {
+  it("ligne déjà livrée à 1/2 : ni recréditée ni réalignée ; la ligne en attente est créditée et alignée", async () => {
+    const closedPart = await createTestPart({ quantity: 0 });
+    const openPart = await createTestPart({ quantity: 0 });
+    ids.partIds.push(closedPart.id, openPart.id);
+    const orderId = await order("confirmed", closedPart.id);
+    const closed = await lineOf(orderId);
+    await db
+      .update(purchaseOrderLines)
+      .set({ deliveryStatus: "delivered", quantityReceived: 1 })
+      .where(eq(purchaseOrderLines.id, closed.id));
+    const [open] = await db
+      .insert(purchaseOrderLines)
+      .values({ purchaseOrderId: orderId, partId: openPart.id, quantityOrdered: 2, unitPrice: "1000.00", totalPrice: "2000.00" })
+      .returning();
+
+    await procurementService.updateOrderStatus(orderId, "delivered", actorId);
+
+    const lines = await db.select().from(purchaseOrderLines).where(eq(purchaseOrderLines.purchaseOrderId, orderId));
+    const byId = new Map(lines.map((l) => [l.id, l]));
+    expect(byId.get(closed.id)).toMatchObject({ deliveryStatus: "delivered", quantityReceived: 1 });
+    expect(await stockOf(closedPart.id)).toEqual({ quantity: 0, movements: 0 });
+    expect(byId.get(open.id)).toMatchObject({ deliveryStatus: "delivered", quantityReceived: 2 });
+    expect(await stockOf(openPart.id)).toEqual({ quantity: 2, movements: 1 });
+  });
+
+  it("lecture d'une commande livrée dont une ligne est restée en attente : la ligne n'est pas modifiée", async () => {
+    const part = await createTestPart({ quantity: 0 });
+    ids.partIds.push(part.id);
+    const orderId = await order("delivered", part.id);
+    const before = await lineOf(orderId);
+
+    const read = await procurementService.getPurchaseOrderById(orderId);
+
+    expect(read?.lines.find((l: any) => l.id === before.id)).toMatchObject({ quantityReceived: before.quantityReceived ?? 0 });
+    const after = await lineOf(orderId);
+    expect(after).toMatchObject({ deliveryStatus: before.deliveryStatus, quantityReceived: before.quantityReceived, updatedAt: before.updatedAt });
+    expect(await stockOf(part.id)).toEqual({ quantity: 0, movements: 0 });
+  });
+});
