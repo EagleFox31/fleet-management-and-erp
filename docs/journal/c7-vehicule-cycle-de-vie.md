@@ -482,3 +482,16 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
   
   Sur l'ancien code, les trois cas de litige échouent et le témoin passe. Les 12 fichiers de contrat `supplier-settlement*` et `supplier-invoice*` sont verts.
 - **Leçon** : avant d'écrire un compare-and-set sur une table, chercher ses déclencheurs (`pg_trigger`). Un déclencheur qui récrit la ligne dans la même transaction rend fausse la valeur lue avant lui. Il faut relire après l'écriture qui le déclenche.
+
+## 2026-11-06 — Relecture sécurité de #545 : cycle de verrous entre le rejet et le rapprochement
+
+- **Quoi** : `rejectInvoiceSettlement` verrouille la facture (`FOR UPDATE`) avant l'`UPDATE` du règlement.
+- **Pourquoi** : sans ce verrou, le rejet prenait le règlement, puis la facture par le déclencheur `trg_supplier_invoice_settlements_recalc`. Le rapprochement, lui, prend la facture puis le règlement. Un rejet et un rapprochement simultanés finissaient en interblocage (40P01, puis un 409 générique). L'entrée précédente affirmait que « le rejet ne verrouille que le règlement » : c'est faux, le déclencheur verrouille aussi la facture.
+- **Comment** :
+  - même ordre partout : la facture, puis le règlement ;
+  - la synchro ne reprend plus le verrou et ne refait plus le contrôle du litige : l'appelant les fait. Le compare-and-set reste le filet ;
+  - le cas « litige pendant » attend dans `pg_stat_activity` une session bloquée sur un verrou de `supplier_invoices`, au lieu d'une minuterie.
+- **Preuve** :
+  - le contrat « rejet et rapprochement simultanés » fait 5 essais, chacun attendant un 200, un 409 métier et un état final cohérent ;
+  - mutant (le verrou du rejet retiré) : 3 essais sur 5 échouent, sur deux lancements.
+- **Leçon** : l'ordre des verrous d'une transaction compte aussi les verrous pris par les déclencheurs. Avant d'affirmer qu'il n'y a pas de cycle, lire les déclencheurs de chaque table écrite, pas seulement le code TypeScript.

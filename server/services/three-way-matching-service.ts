@@ -137,7 +137,8 @@ export class ThreeWayMatchingService {
    * qui tient la facture verrouillée (`FOR UPDATE`). La facture est relue ici : le déclencheur
    * `recalc_supplier_invoice_financials` l'a déjà recalculée au changement du règlement. L'écriture
    * reste un compare-and-set sur le statut relu, qui exclut `disputed` : une facture en litige ne
-   * passe jamais à `paid` par ce chemin.
+   * passe jamais à `paid` par ce chemin. Le verrou et le refus du litige (message lisible) sont
+   * pris par l'appelant ; le compare-and-set reste le filet si un appel futur les oubliait.
    */
   private async syncInvoiceFromReconciledSettlements(
     tx: DbTransaction,
@@ -148,14 +149,10 @@ export class ThreeWayMatchingService {
       .select()
       .from(supplierInvoices)
       .where(eq(supplierInvoices.id, invoiceId))
-      .limit(1)
-      .for("update");
+      .limit(1);
 
     if (!invoice) {
       throw new AppError(404, "Cette facture n'existe plus.");
-    }
-    if (invoice.status === "disputed") {
-      throw new AppError(409, INVOICE_DISPUTED_RECONCILE_MESSAGE);
     }
 
     const reconciledSettlements = await tx
@@ -1071,7 +1068,15 @@ export class ThreeWayMatchingService {
 
     // Compare-and-set : seul le passage recorded -> rejected écrit. La contre-passation au journal
     // de trésorerie (lot T3) est dans la même transaction : pas de rejet sans elle, ni l'inverse.
+    // Facture verrouillée avant le règlement, comme au rapprochement : le déclencheur
+    // `recalc_supplier_invoice_financials` la verrouille sinon après le règlement, et un rejet
+    // concurrent d'un rapprochement finirait en interblocage (40P01).
     const updated = await db.transaction(async (tx) => {
+      await tx
+        .select({ id: supplierInvoices.id })
+        .from(supplierInvoices)
+        .where(eq(supplierInvoices.id, invoiceId))
+        .for("update");
       const [row] = await tx
         .update(supplierInvoiceSettlements)
         .set({ status: "rejected", rejectedBy, rejectedAt: new Date(), rejectionReason, updatedAt: new Date() })

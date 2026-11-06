@@ -1,7 +1,7 @@
 import { createServer, type Server } from "http";
 import fs from "fs";
 import path from "path";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { supplierInvoices, supplierInvoiceSettlements } from "../../shared/schema";
@@ -55,6 +55,28 @@ async function reconcile(invoiceId: number, settlementId: number) {
     body: "{}",
   });
   return { status: response.status, body: await response.json().catch(() => null) };
+}
+
+async function rejectSettlement(invoiceId: number, settlementId: number) {
+  const response = await fetch(`${baseUrl}/api/supplier-invoices/${invoiceId}/settlements/${settlementId}/reject`, {
+    method: "PATCH",
+    headers: { Cookie: cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ reason: "Chèque refusé par la banque" }),
+  });
+  return { status: response.status, body: await response.json().catch(() => null) };
+}
+
+/** Attend qu'une session soit bloquée sur un verrou de `supplier_invoices` (sans minuterie aveugle). */
+async function waitForInvoiceLockWaiter(timeoutMs = 10000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const result = await db.execute(sql`
+      SELECT count(*)::int AS n FROM pg_stat_activity
+      WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE '%supplier_invoices%'`);
+    if (Number((result.rows[0] as { n: number }).n) > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("Le rapprochement n'a pas atteint le verrou de la facture.");
 }
 
 async function approvedInvoice() {
@@ -152,8 +174,8 @@ describe("rapprochement sur facture en litige", { timeout: 120000 }, () => {
     await db.transaction(async (tx) => {
       await tx.select().from(supplierInvoices).where(eq(supplierInvoices.id, invoice.id)).for("update");
       pending = reconcile(invoice.id, settlementId);
-      // Laisse la requête atteindre le verrou de la facture avant de poser le litige.
-      await new Promise((resolve) => setTimeout(resolve, 1500));
+      // Le litige n'est posé qu'une fois le rapprochement bloqué sur le verrou de la facture.
+      await waitForInvoiceLockWaiter();
       await tx.update(supplierInvoices).set({ status: "disputed" }).where(eq(supplierInvoices.id, invoice.id));
     });
 
@@ -162,5 +184,32 @@ describe("rapprochement sur facture en litige", { timeout: 120000 }, () => {
     expect(after.invoice.status).toBe("disputed");
     expect(after.invoice.isPaymentComplete).not.toBe(true);
     expect(after.settlement).toEqual({ status: "recorded", reconciledAt: null });
+  });
+});
+
+describe("rejet et rapprochement simultanés du même règlement", { timeout: 120000 }, () => {
+  // Les deux transactions verrouillent la facture puis le règlement : l'une attend l'autre,
+  // jamais d'interblocage (40P01, qui ressortirait en 409 générique « Référence »).
+  const BUSINESS_409 = [
+    "Un règlement rapproché ne peut pas être rejeté.",
+    "Un règlement rejeté ne peut pas être rapproché.",
+    "Ce règlement a été modifié entre-temps. Rechargez la page puis réessayez.",
+  ];
+
+  it.each([1, 2, 3, 4, 5])("essai %i : un 200 et un 409 métier, état final cohérent", async () => {
+    const invoice = await approvedInvoice();
+    const settlementId = await postSettlement(invoice.id);
+
+    const [rec, rej] = await Promise.all([reconcile(invoice.id, settlementId), rejectSettlement(invoice.id, settlementId)]);
+
+    expect([rec.status, rej.status].sort(), JSON.stringify({ rec: rec.body, rej: rej.body })).toEqual([200, 409]);
+    const conflict = rec.status === 409 ? rec : rej;
+    expect(BUSINESS_409, JSON.stringify(conflict.body)).toContain(conflict.body.message);
+    const after = await state(invoice.id, settlementId);
+    if (rec.status === 200) {
+      expect(after).toMatchObject({ invoice: { status: "paid" }, settlement: { status: "reconciled" } });
+    } else {
+      expect(after).toMatchObject({ invoice: { status: "approved", isPaymentComplete: false }, settlement: { status: "rejected" } });
+    }
   });
 });
