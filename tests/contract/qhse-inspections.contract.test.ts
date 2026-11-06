@@ -37,7 +37,7 @@ async function login(username: string): Promise<string> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password: TEST_USER_PASSWORD }),
   });
-  expect(res.status).toBe(200);
+  expect(res.status, `login ${username} : ${await res.clone().text()}`).toBe(200);
   return res.headers.get("set-cookie")!.split(";")[0];
 }
 
@@ -94,8 +94,8 @@ describe("contrôles inopinés QHSE", { timeout: 180000 }, () => {
 
     // Grille d'origine, semée par init-database : cabine et arrêt.
     const cabin = await call("GET", cookie.logistics, "/api/qhse/criteria?category=cabin&active=true");
-    expect(cabin.status).toBe(200);
-    expect(cabin.body.length).toBeGreaterThanOrEqual(10);
+    expect(cabin.status, JSON.stringify(cabin.body)).toBe(200);
+    expect(cabin.body.length, JSON.stringify(cabin.body)).toBeGreaterThanOrEqual(10);
     const stop = await call("GET", cookie.logistics, "/api/qhse/criteria?category=stop");
     const cabinId = cabin.body[0].id as number;
     const stopId = stop.body[0].id as number;
