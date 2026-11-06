@@ -1062,32 +1062,8 @@ export class ProcurementService {
         throw new AppError(409, "La commande vient d'être modifiée. Rechargez-la puis réessayez.");
       }
 
-      // Effets de la réception, dans la transaction : si l'un échoue, la commande n'est pas livrée et
-      // un nouvel essai refait tout. Réception complète : aligner automatiquement toutes les lignes
-      // pour éviter "commande livrée" avec lignes restées en attente fournisseur.
-      if (status === "delivered") {
-        await this.markOrderLinesAsDelivered(tx, orderId);
-
-        for (const line of deliveryStockDeltas) {
-          if (!line.partId) continue;
-
-          const alreadyReceived = line.quantityReceived || 0;
-          const ordered = line.quantityOrdered || 0;
-          const quantityToReceive = Math.max(0, ordered - alreadyReceived);
-          if (quantityToReceive <= 0) continue;
-
-          await this.registerPartReception(
-            tx,
-            line.partId,
-            quantityToReceive,
-            `Réception commande #${orderId}`,
-            `Entrée stock depuis commande fournisseur, ligne #${line.lineId}`,
-            userId
-          );
-        }
-      }
-
-      // Synchroniser le statut des demandes de pièces liées à la commande
+      // Demandes de pièce avant le stock. Ordre des verrous : commande, lignes, demandes, pièce, le
+      // même que le PATCH d'une demande (demande puis pièce) ; l'ordre inverse s'interbloquait.
       if (status === 'partial' || status === 'delivered') {
         const requirementIdRows = await tx
           .select({
@@ -1135,6 +1111,31 @@ export class ProcurementService {
                 )
               );
           }
+        }
+      }
+
+      // Effets de la réception, dans la transaction : si l'un échoue, la commande n'est pas livrée et
+      // un nouvel essai refait tout. Réception complète : aligner automatiquement toutes les lignes
+      // pour éviter "commande livrée" avec lignes restées en attente fournisseur.
+      if (status === "delivered") {
+        await this.markOrderLinesAsDelivered(tx, orderId);
+
+        for (const line of deliveryStockDeltas) {
+          if (!line.partId) continue;
+
+          const alreadyReceived = line.quantityReceived || 0;
+          const ordered = line.quantityOrdered || 0;
+          const quantityToReceive = Math.max(0, ordered - alreadyReceived);
+          if (quantityToReceive <= 0) continue;
+
+          await this.registerPartReception(
+            tx,
+            line.partId,
+            quantityToReceive,
+            `Réception commande #${orderId}`,
+            `Entrée stock depuis commande fournisseur, ligne #${line.lineId}`,
+            userId
+          );
         }
       }
 

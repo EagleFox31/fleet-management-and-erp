@@ -2,7 +2,7 @@ import { eq, inArray } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
 import { procurementService } from "../../server/services/procurement-service";
-import { parts, partsStockMovements, purchaseOrderLines, purchaseOrders, supplierInvoices } from "../../shared/schema";
+import { partRequirements, parts, partsStockMovements, purchaseOrderLines, purchaseOrders, supplierInvoices } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestPart, createTestSupplier, createTestSupplierInvoice, createTestUser } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
@@ -15,10 +15,12 @@ import { pidOf, waitForWaitersOn } from "../support/lock-waiters";
  * - Témoin : clôture d'une commande livrée dont la facture est soldée.
  * - Livraison pendant une réception de ligne : le crédit déjà fait est déduit, pas recrédité.
  * - Panne de l'entrée en stock : rien n'est validé, un nouvel essai refait tout.
+ * - Livraison pendant le PATCH d'une demande liée : même ordre de verrous, pas d'interblocage.
  */
 
 const ids = createIdBag();
 const orderIds: number[] = [];
+const requirementIds: number[] = [];
 let supplierId = 0;
 let actorId = 0;
 
@@ -36,6 +38,9 @@ afterAll(async () => {
     await db.delete(supplierInvoices).where(inArray(supplierInvoices.purchaseOrderId, orderIds));
     await db.delete(purchaseOrders).where(inArray(purchaseOrders.id, orderIds));
   }
+  if (requirementIds.length > 0) {
+    await db.delete(partRequirements).where(inArray(partRequirements.id, requirementIds));
+  }
   if (ids.partIds.length > 0) {
     await db.delete(partsStockMovements).where(inArray(partsStockMovements.partId, ids.partIds));
   }
@@ -46,7 +51,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function order(status: string, partId?: number) {
+async function order(status: string, partId?: number, partRequirementId?: number) {
   const [row] = await db
     .insert(purchaseOrders)
     .values({
@@ -64,6 +69,7 @@ async function order(status: string, partId?: number) {
     await db.insert(purchaseOrderLines).values({
       purchaseOrderId: row.id,
       partId,
+      partRequirementId,
       quantityOrdered: 2,
       unitPrice: "1000.00",
       totalPrice: "2000.00",
@@ -224,5 +230,31 @@ describe("transition manuelle de commande : verrou et compare-and-set", { timeou
     await procurementService.updateOrderLine(line.id, { quantityReceived: 1 }, actorId, orderId);
     expect((await lineOf(orderId)).quantityReceived).toBe(1);
     expect(await stockOf(part.id)).toEqual({ quantity: 1, movements: 1 });
+  });
+
+  it("livraison pendant le PATCH d'une demande liée : demande puis pièce des deux côtés, pas d'interblocage", async () => {
+    const part = await createTestPart({ quantity: 0 });
+    ids.partIds.push(part.id);
+    const [requirement] = await db
+      .insert(partRequirements)
+      .values({ partId: part.id, quantityNeeded: 2, reason: "TEST CAS livraison", status: "ordered", requestedBy: actorId })
+      .returning();
+    requirementIds.push(requirement.id);
+    const orderId = await order("confirmed", part.id, requirement.id);
+
+    let delivery: Promise<unknown> = Promise.resolve();
+    await db.transaction(async (tx) => {
+      // Ce que fait le PATCH d'une demande : verrou de la demande, puis incrément du stock.
+      await tx.select({ id: partRequirements.id }).from(partRequirements).where(eq(partRequirements.id, requirement.id)).for("update");
+      delivery = procurementService.updateOrderStatus(orderId, "delivered", actorId);
+      await waitForWaitersOn(await pidOf(tx), 1);
+      // Livraison bloquée sur la demande : si elle tenait déjà la pièce, cette écriture fermerait le cycle (40P01).
+      await tx.update(parts).set({ quantity: 5 }).where(eq(parts.id, part.id));
+    });
+    await delivery;
+
+    expect((await stockOf(part.id)).quantity).toBe(7);
+    const [after] = await db.select({ status: partRequirements.status }).from(partRequirements).where(eq(partRequirements.id, requirement.id));
+    expect(after.status).toBe("received");
   });
 });

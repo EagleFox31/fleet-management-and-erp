@@ -556,3 +556,11 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
   Avec la version précédente, ces 4 cas échouent ; le deuxième n'échoue que par l'absence d'attente du verrou. tsc 0 ; unitaires 3 093 ; intégration achats et stock 10 fichiers, 54 tests ; contrats 36 fichiers, 445 tests.
 - **Pourquoi** : un effet de stock fait partie de la transition. Validé à part, il peut manquer ou être compté deux fois.
 - **Hors lot, constaté** : les écarts de stock possibles et la lecture de commande qui écrit sont détaillés dans la PR #560.
+
+## 2026-11-06 03:48 — #560, relecture de sécurité : interblocage entre la livraison et le PATCH d'une demande
+
+- **Quoi** : #560 avait placé la livraison dans une transaction qui verrouille, dans l'ordre, la commande, les lignes, la pièce (entrée en stock), puis les demandes liées. Le PATCH « reçue » d'une demande verrouille la demande, puis la pièce (`handlePartDelivery`). Les deux ordres étant inverses, l'exécution simultanée finissait en 40P01.
+- **Cause racine** : l'ordre des verrous était documenté pour la commande, les factures et les lignes, mais n'avait pas été vérifié contre les autres écrivains de la pièce et des demandes.
+- **Correctif** : la livraison met à jour les demandes avant la boucle de stock. L'ordre devient commande, lignes, demandes, pièce, compatible avec le PATCH (demande, puis pièce).
+- **Preuve** : un test d'intégration rejoue le PATCH : il verrouille la demande, attend que la livraison s'y bloque, puis écrit la pièce. Sur 97807a0c, le test lève `deadlock detected` (40P01) ; avec le correctif, il est vert, avec stock 7 et demande reçue. tsc 0 ; unitaires 3 093 ; intégration 10 fichiers, 55 tests ; contrats 36 fichiers, 445 tests.
+- **Leçon** : déplacer un effet dans une transaction change l'ordre de ses verrous. Il faut lister tous les écrivains des tables touchées et aligner l'ordre sur le leur, avec un test qui joue l'autre écrivain.
