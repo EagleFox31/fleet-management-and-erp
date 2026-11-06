@@ -6,6 +6,7 @@ import { initializeDatabase } from "../../server/init-database";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser } from "../support/factories";
 import { failLogin } from "../support/lockout";
+import { backendPid, waitForBlockedBy } from "../support/lock-wait";
 
 // Nom reserve a ce fichier : seule cette ligne est creee puis nettoyee.
 const U = "lot-be1-lockout-probe";
@@ -110,7 +111,7 @@ describe("DbLockoutStore", { timeout: 60_000 }, () => {
       await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", ["fleet-lockout:" + storedLockoutKey(U)]);
       let done = false;
       pending = write().then(() => (done = true));
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await waitForBlockedBy(await backendPid(holder), "ecriture du compteur");
       expect(done, "ecriture faite sans attendre le verrou").toBe(false);
       expect((await store.get(U)).failedCount).toBe(2);
     } finally {
@@ -139,7 +140,7 @@ describe("DbLockoutStore", { timeout: 60_000 }, () => {
       await holder.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", ["fleet-lockout:" + storedLockoutKey(name)]);
       let done = false;
       pending = store.unlockUser(user.id, null).then(() => (done = true));
-      await new Promise((resolve) => setTimeout(resolve, 300));
+      await waitForBlockedBy(await backendPid(holder), "deverrouillage admin");
       expect(done, "deverrouillage fait sans attendre le verrou").toBe(false);
       expect((await store.get(name)).failedCount).toBe(2);
       expect(await mirror(), "miroir remis a zero avant le compteur").toBe(2);
