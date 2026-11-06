@@ -30,7 +30,11 @@ import { Separator } from "@/components/ui/separator";
 import {
   Wrench, Fuel, Trash2, Plus, ArrowLeft, Car, Calendar, Gauge,
   FileText, Clock, Edit, AlertTriangle, CheckCircle, Activity, FolderOpen, Lock, RefreshCw,
+  Archive, RotateCcw,
 } from "lucide-react";
+import { useRestoreVehicle } from "@/hooks/useVehicles";
+import { AlertModal } from "@/components/design-system/alert-modal";
+import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { MaintenanceScheduleForm } from "@/components/maintenance/maintenance-schedule-form";
 import { DeadlineTile, PremiumTabsNav } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
@@ -67,6 +71,7 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isRestoreDialogOpen, setIsRestoreDialogOpen] = useState(false);
   const [isAddScheduleDialogOpen, setIsAddScheduleDialogOpen] = useState(false);
   const [isAddWorkOrderDialogOpen, setIsAddWorkOrderDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<VehicleDetailTab>("details");
@@ -97,6 +102,19 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
   });
 
   const vehicleId = vehicle?.id;
+  // Véhicule retiré (suppression douce) : le personnel le consulte, personne ne le modifie avant
+  // restauration. Le serveur refuse déjà ces écritures en 409 (VEHICLE_RETIRED) : l'écran n'en propose aucune.
+  const isRetired = Boolean(vehicle?.deletedAt);
+  const restoreVehicle = useRestoreVehicle({
+    onSuccess: (response) => {
+      toast({ title: "Véhicule restauré", description: response.message });
+      void refetchVehicle();
+    },
+    onError: (error) => {
+      toast({ variant: "destructive", title: "Restauration impossible", description: userMessageOf(error, "Le véhicule n'a pas pu être remis dans la flotte.") });
+    },
+  });
+  const submitRestore = useSingleFlightMutate(restoreVehicle.mutate);
 
   const { data: maintenanceSchedules } = useQuery<any>({
     queryKey: [`/api/maintenance-schedules/vehicle/${vehicleId}`],
@@ -131,7 +149,7 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
   const canOpenTireTracking = ["admin", "workshop_manager", "technician", "warehouse", "secretary", "logistics"].includes(
     user?.role ?? "",
   );
-  const canMountFromStock = canMountTiresFromStock(user);
+  const canMountFromStock = canMountTiresFromStock(user) && !isRetired;
 
   const occupiedTirePositions = useMemo(() => {
     return (vehicleMountedTires as Record<string, unknown>[])
@@ -149,10 +167,10 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
   };
 
   useEffect(() => {
-    if (urlParams.get("tiresPrompt") === "1" && vehicle && !tiresRegistered) {
+    if (urlParams.get("tiresPrompt") === "1" && vehicle && !tiresRegistered && !isRetired) {
       setShowTiresPrompt(true);
     }
-  }, [urlParams, vehicle, tiresRegistered]);
+  }, [urlParams, vehicle, tiresRegistered, isRetired]);
 
   const dismissTiresPrompt = () => {
     setShowTiresPrompt(false);
@@ -214,7 +232,7 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
     return { nombre: records.length, litres, dernier };
   }, [vehicleFuelRecords]);
 
-  const canCreateWorkOrder = user?.role === "admin" || user?.role === "workshop_manager";
+  const canCreateWorkOrder = !isRetired && (user?.role === "admin" || user?.role === "workshop_manager");
   const activeTrigger = resolveWorkOrderTrigger(activeWorkOrder);
 
   const getVehicleTypeLabel = (type: string) => {
@@ -268,6 +286,39 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
 
   return (
     <div className="space-y-5">
+      {isRetired && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-muted px-5 py-4" role="status">
+          <div className="flex items-start gap-3">
+            <Archive className="h-5 w-5 shrink-0 text-muted-foreground mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-foreground">Véhicule retiré de la flotte le {formatDate(vehicle.deletedAt)}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Consultation seule : son historique est conservé. Le restaurer pour le modifier ou y rattacher une saisie.
+              </p>
+            </div>
+          </div>
+          {user?.role === "admin" && (
+            <Button size="sm" className="gap-1.5" onClick={() => setIsRestoreDialogOpen(true)} disabled={restoreVehicle.isPending}>
+              <RotateCcw className="h-3.5 w-3.5" />
+              {restoreVehicle.isPending ? "Restauration..." : "Restaurer"}
+            </Button>
+          )}
+          <AlertModal
+            open={isRestoreDialogOpen}
+            onOpenChange={setIsRestoreDialogOpen}
+            variant="confirm"
+            title="Restaurer ce véhicule ?"
+            description={`${vehicle.registrationNumber} revient dans la flotte. Les plans de maintenance désactivés par le retrait sont réactivés s'ils n'ont pas été modifiés depuis.`}
+            confirmLabel="Restaurer"
+            cancelLabel="Annuler"
+            onConfirm={() => {
+              setIsRestoreDialogOpen(false);
+              submitRestore({ id: vehicle.id });
+            }}
+          />
+        </div>
+      )}
+
       {/* ── Header card ── */}
       <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-sm bg-white">
         <div className="h-0.5 bg-gradient-to-r from-green-500 to-emerald-400" />
@@ -309,6 +360,7 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
                     {vehicle.brand} {vehicle.model}
                   </h1>
                   <Badge className={getStatusColor(vehicle.status)}>{translateStatus(vehicle.status)}</Badge>
+                  {isRetired && <Badge variant="outline">Retiré</Badge>}
                   {vehicle.isPreventive && (
                     <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Préventive</Badge>
                   )}
@@ -330,11 +382,13 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
                   <Wrench className="h-3.5 w-3.5" /> Créer un OT
                 </Button>
               )}
-              <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs"
-                onClick={() => setLocation(`/fuel/new?vehicleId=${vehicleId}&registration=${encodeURIComponent(vehicle.registrationNumber)}`)}>
-                <Fuel className="h-3.5 w-3.5" /> Ajouter un plein
-              </Button>
-              {user?.role === "admin" && (
+              {!isRetired && (
+                <Button variant="outline" size="sm" className="gap-1.5 h-8 text-xs"
+                  onClick={() => setLocation(`/fuel/new?vehicleId=${vehicleId}&registration=${encodeURIComponent(vehicle.registrationNumber)}`)}>
+                  <Fuel className="h-3.5 w-3.5" /> Ajouter un plein
+                </Button>
+              )}
+              {user?.role === "admin" && !isRetired && (
                 <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
                   <DialogTrigger asChild>
                     <Button variant="destructive" size="sm" className="gap-1.5 h-8 text-xs">
@@ -659,7 +713,10 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
               <span className="text-sm font-semibold text-gray-800">Informations du véhicule</span>
             </div>
             <div className="px-5 py-4">
-              <VehicleForm initialData={vehicle} isEdit={true} vehicleId={vehicleId} />
+              {/* `fieldset disabled` neutralise champs et bouton d'enregistrement d'un véhicule retiré. */}
+              <fieldset disabled={isRetired} className="min-w-0">
+                <VehicleForm initialData={vehicle} isEdit={true} vehicleId={vehicleId} />
+              </fieldset>
             </div>
           </div>
         </TabsContent>
@@ -678,9 +735,11 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
                   <p className="text-xs text-gray-400">Maintenance préventive programmée</p>
                 </div>
               </div>
-              <Button size="sm" onClick={() => setIsAddScheduleDialogOpen(true)} className="gap-1.5 h-8 text-xs">
-                <Plus className="h-3.5 w-3.5" /> Ajouter
-              </Button>
+              {!isRetired && (
+                <Button size="sm" onClick={() => setIsAddScheduleDialogOpen(true)} className="gap-1.5 h-8 text-xs">
+                  <Plus className="h-3.5 w-3.5" /> Ajouter
+                </Button>
+              )}
             </div>
             <div className="px-5 py-4">
               {maintenanceSchedules && maintenanceSchedules.length > 0 ? (
@@ -719,10 +778,12 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
                         </div>
                       </div>
                       <div className="flex justify-end gap-2 mt-3">
-                        <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs"
-                          onClick={() => setLocation(`/maintenance/${schedule.id}?vehicleId=${vehicleId}`)}>
-                          <Edit className="h-3 w-3" /> Modifier
-                        </Button>
+                        {!isRetired && (
+                          <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs"
+                            onClick={() => setLocation(`/maintenance/${schedule.id}?vehicleId=${vehicleId}`)}>
+                            <Edit className="h-3 w-3" /> Modifier
+                          </Button>
+                        )}
                         {canCreateWorkOrder && (
                           <Button variant="outline" size="sm" className="gap-1.5 h-7 text-xs"
                             onClick={() => setLocation(`/maintenance/work-orders/new?vehicleId=${vehicleId}&scheduleId=${schedule.id}`)}>
@@ -740,9 +801,11 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
                   </div>
                   <p className="text-sm font-medium text-gray-600">Aucune planification</p>
                   <p className="text-xs text-gray-400 mt-1 mb-4">Ajoutez une planification de maintenance pour ce véhicule.</p>
-                  <Button size="sm" onClick={() => setIsAddScheduleDialogOpen(true)} className="gap-2">
-                    <Plus className="h-3.5 w-3.5" /> Ajouter une planification
-                  </Button>
+                  {!isRetired && (
+                    <Button size="sm" onClick={() => setIsAddScheduleDialogOpen(true)} className="gap-2">
+                      <Plus className="h-3.5 w-3.5" /> Ajouter une planification
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
@@ -792,7 +855,7 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
               </div>
             </div>
             <div className="p-5">
-              <FuelRecordTable vehicleId={vehicleId} />
+              <FuelRecordTable vehicleId={vehicleId} readOnly={isRetired} />
             </div>
           </div>
         </TabsContent>
@@ -804,7 +867,7 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
 
         {/* Documents */}
         <TabsContent value="documents">
-          <VehicleDocuments vehicleId={vehicleId} />
+          <VehicleDocuments vehicleId={vehicleId} readOnly={isRetired} />
         </TabsContent>
       </Tabs>
     </div>

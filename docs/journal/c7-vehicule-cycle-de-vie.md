@@ -379,9 +379,89 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
 - **Ordre des refus** : pour le personnel, le 409 de la garde passe avant le 403 de la route. Il n'y a pas de fuite : le personnel voit tous les véhicules (§11). Un anonyme ou un client ne passe pas par la garde (`!user || role === "client"`) : il reçoit le 401 ou le 403 de la route, sans rien apprendre de l'état du véhicule.
 - **À surveiller** : `prefix-middleware-guardrail` met 3,9 s pour une limite de 5 s. Il risque de devenir instable sous charge.
 
+## 2026-11-06T00:55:58+01:00 — L4 : écran admin « Véhicules retirés » et fiche en consultation seule
+
+- **Quoi** :
+  - écran `/admin/retired-vehicles` (admin seul, menu Administration) : liste `GET /api/vehicles/archived` en `PremiumDataTable`, date de retrait, bouton Restaurer avec confirmation ;
+  - la ligne ouvre la fiche véhicule, qui passe en consultation seule quand `deletedAt` est posé : bandeau « Véhicule retiré de la flotte le … », badge Retiré, formulaire désactivé, aucun bouton d'écriture (plein, document, renouvellement, échéance, OT, montage pneu, suppression), bouton Restaurer pour l'admin.
+- **Pourquoi** : l'API de retrait et de restauration existait sans écran ; un véhicule retiré n'était récupérable que par appel direct.
+- **Comment** :
+  - `useRestoreVehicle` (`client/src/hooks/useVehicles.ts`) applique les 3 couches : retrait de la ligne du cache local, trame `vehicle_restored` émise par le serveur, `invalidateVehicleLifecycleQueries` (catalogue, fiche, satellites : statistiques flotte, KPI, tableau de bord) ;
+  - envoi par `useSingleFlightMutate`, messages par `userMessageOf` ;
+  - `/api/vehicles/archived` ajouté aux `invalidates` de `vehicle_deleted` et `vehicle_restored` : un autre admin voit la liste bouger. La clé est écrite en littéral dans l'écran, forme que relève `realtime-invalidation-keys.test.ts`.
+- **Preuve** :
+  - contrat `vehicle-lifecycle` : la liste suit retrait puis restauration, technicien 403 ;
+  - e2e `29-retired-vehicles` (admin seul, le temps réel inter-profils est couvert par le contrat de la trame) : retirer, retrouver dans la liste, fiche en lecture seule, restaurer, ligne retirée, base à `deleted_at NULL`, fiche redevenue modifiable ;
+  - `screen-route-roles` : route et menu réservés à l'admin.
+- **Limites** : les onglets internes (OT, historique de statut) n'ont pas été audités bouton par bouton. Une écriture oubliée y reçoit le 409 `VEHICLE_RETIRED` de la garde L3, avec un message lisible.
 ## 2026-11-06T01:16:55+01:00 — prefix-middleware-guardrail sous la limite (suite du « À surveiller » de L3)
 
 - **Quoi** : le recensement des montages de `server/` est fait une fois par fichier de test au lieu de cinq.
 - **Pourquoi** : 3,8 s de tests pour une limite de 5 s. Cinq cas relançaient `scanFiles` (analyse TypeScript de chaque fichier serveur), à environ 700 ms par passe.
 - **Comment** : `occurrences()` mémoïse le balayage et rend une copie à chaque appel, pour qu'aucun cas ne modifie le résultat d'un autre. Aucune règle ni limite changée.
 - **Preuve** : deux mesures locales. Tests du fichier : 3,84 s, puis 1,46 s et 1,58 s. Le cas le plus long, qui porte le balayage, passe à 1,3 s ; avant, chacun des cinq cas prenait de 650 à 850 ms. 30 cas verts.
+
+## 2026-11-06T01:56:00+01:00 — L3b : écritures atteintes par un OT, routeurs hors balayage
+
+- **Quoi** :
+  - `POST /api/warehouse/stock-movement` entre dans `RETIRED_VEHICLE_WRITE_ROUTES` (lookup `workOrder` sur `body.workOrderId`). Un mouvement imputé à l'OT d'un véhicule retiré recevait jusqu'ici un 201 et déplaçait du stock ; sans `workOrderId`, le mouvement magasin passe toujours ;
+  - le garde-fou `retired-vehicle-writes-hygiene` détecte aussi `workOrderId` / `work_order_id` dans la poignée et les chemins d'objets d'OT (`/work-orders/:p`, `/work-order-items/:p`, `/parts-used/:p`, `/part-requirements/:p`). C'était le seul trou du cas (a) : toutes les autres écritures d'OT étaient déjà dans la table ;
+  - cas (b) : aucun sous-routeur monté en cascade aujourd'hui. Deux tests l'empêchent d'apparaître sans être vu : aucun montage de routeur hors `server/api/index.ts` et `server/app.ts`, aucune écriture de `server/api/` hors d'un routeur monté. Les deux routes déclarées directement sur `apiRouter` (connexion) entrent dans le balayage.
+- **Pourquoi** : la garde L3 ne voyait que les écritures qui nomment le véhicule. Une écriture qui l'atteint par un OT ou qui vit dans un routeur non monté par `index.ts` échappait au marqueur sans qu'aucun test ne le signale.
+- **Comment** : `scanWriteRoutes` garde sa forme et sa sortie. Elle s'appuie sur `walkWriteRoutes`, qui rend aussi les écritures non atteintes (`scanUnreachedWriteRoutes`). `scanNestedRouterMounts` et le motif `ROUTER_MOUNT` sont exportés depuis `tests/support/route-guard-scan.ts`. `TABLE_FLOOR` passe à 45.
+- **Preuve** :
+  - le contrat `vehicle-retired-work-order-writes` rend 409 `VEHICLE_RETIRED` sans écriture sur `POST /work-orders/:id/parts` et sur `stock-movement`, plus deux variantes de chemin (barre finale, casse). L'empreinte contrôlée couvre les demandes, les pièces posées, les mouvements et la quantité. Des témoins sur OT actif et sans OT sont acceptés ;
+  - mutant n° 1, l'entrée `stock-movement` retirée de la table : le garde-fou échoue (route non couverte, plancher) et le contrat aussi (deux 409 attendus) ;
+  - mutant n° 2, un fichier `server/api` qui monte un sous-routeur et déclare une écriture non montée : les deux nouveaux tests échouent.
+- **Leçon** : un garde-fou par balayage doit tester son propre périmètre, c'est-à-dire ce qu'il ne lit pas, et pas seulement les routes qu'il lit. Sinon un montage hors du chemin balayé le rend aveugle sans qu'aucun test ne passe au rouge.
+- **Réserve sécurité, décision 0a (2026-11-06)** :
+  - `PATCH /api/purchase-orders/:id/status` (livraison) fait passer à reçue les demandes rattachées à l'OT d'un véhicule retiré et crédite le stock. 0a la laisse passer : la marchandise arrive de toute façon, et la refuser fausserait le stock. Elle est dans `NOT_GUARDED` avec cette raison.
+  - Le garde-fou voit désormais cette route. Il cherche `partRequirementId` dans la poignée et les appels `.updateOrderStatus(` (`WORK_ORDER_SERVICE_CALL`), parce que la poignée délègue au service sans nommer la demande.
+  - La vérification d'abord, l'écriture ensuite, hors transaction (TOCTOU) : c'est le modèle L3, et 0a l'accepte, puisqu'un retrait exige des OT clos.
+## 2026-11-06T01:41:09+01:00 — Tests contrat signalés instables : finance-withholdings, qhse-inspections
+
+**Quoi.** Deux fichiers ont été signalés rouges, uniquement dans la suite contrat complète :
+- finance-withholdings, cas « admin » et « management : 200 au contrat » ;
+- qhse-inspections, cas « applique les rôles, la cloison chauffeur et la validation de la grille ».
+
+Seul le résumé a été remonté, pas le message d'erreur.
+
+**Constat.** L'échec n'est pas reproduit en local sur Postgres Docker :
+- suite contrat complète : 245 fichiers, 2963 tests verts ;
+- les deux fichiers seuls : 34 tests verts.
+
+**Pistes écartées, preuve dans le code :**
+- *Cache des drapeaux de fonctionnalité* : `getFeatureFlags` relit `FEATURE_FLAGS` à chaque appel.
+- *Plafond d'échecs par IP* : relevé à 100 000 par `setup-contract.ts`. Les deux fichiers qui l'abaissent le restaurent.
+- *Horloge figée, espions, TZ, fetch global* : tous restaurés. Aucun `stubGlobal` ni remplacement de `fetch` dans les tests contrat.
+- *CHECK `category` des critères QHSE selon l'ordre des fichiers* : `initializeDatabase()` tourne une seule fois par processus, dans `setup-contract.ts`, avant le premier fichier. La réconciliation des contraintes (#122) précède donc toujours qhse, quel que soit l'ordre.
+- *Timeout pour qhse* : le describe porte un timeout de 180 s, et le cas dure 3,7 s.
+
+**Piste ouverte.** Les cas « 200 au contrat » de finance-withholdings gardent le timeout par défaut de 5 s.
+
+**Comment.** Les assertions qui échouaient affichent désormais le corps de la réponse :
+- la connexion de qhse et la lecture de la grille cabine ;
+- le statut 200 de finance-withholdings.
+
+Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drapeau), d'un 500 ou d'une grille vide.
+
+**Pourquoi** `testTimeout` n'est pas relevé : rien ne prouve qu'un timeout soit en cause. Le relever masquerait une lenteur réelle sans la nommer.
+
+**Leçon.** Un test signalé instable se remonte avec le texte de l'assertion, pas en résumé. Toute assertion de statut sur un appel HTTP porte le corps de la réponse en message (`expect(r.status, JSON.stringify(r.body))`), sinon l'échec intermittent reste indiagnosticable.
+
+## 2026-11-06 — Bouchons createStubRouter dans le balayage de la garde véhicule retiré
+
+- **Quoi** :
+  - les écritures déclarées en données par `createStubRouter([...])` entrent dans `scanWriteRoutes`. Un bouchon d'écriture non monté apparaît dans `scanUnreachedWriteRoutes` ;
+  - `POST /api/part-requirements/:id/receive` (bouchon 501) entre dans `RETIRED_VEHICLE_WRITE_ROUTES` (lookup `partRequirement`). `TABLE_FLOOR` passe à 46.
+- **Pourquoi** : un bouchon n'utilise pas `router.post(`, donc le balayage ne le voyait pas. Il aurait été remplacé par sa vraie logique sans garde L3. Il est plus sûr de poser la garde maintenant : l'implémentation en hérite sans y penser.
+- **Comment** : on lit les objets `{ method, path }` du fichier de bouchon, et on prend le préfixe du montage unique de ce fichier dans `index.ts`. La règle n'est pas propre à ce bouchon : tout bouchon d'écriture dont le chemin correspond à `WORK_ORDER_PATH`, ou qui nomme un marqueur de véhicule, tombe sous la règle générale (table ou `NOT_GUARDED`).
+- **Preuve** :
+  - le garde-fou balaie 7 bouchons d'écriture ;
+  - mutant : l'entrée `receive` retirée de la table fait échouer la couverture et le plancher ;
+  - le contrat rend 409 `VEHICLE_RETIRED` sur `receive` pour l'OT d'un véhicule retiré, sans écriture, avant le 501 du bouchon.
+- **Effet de bord accepté** : pour le personnel, sur véhicule retiré, le 409 passe avant le 404 du drapeau `part-requirement-receive`. C'est le même ordre que celui de la garde face aux 403 (§11 : le personnel voit tous les véhicules).
+- **CI rouge sur #542 (contract shard 2/4)** : l'`afterAll` du contrat L3b supprimait les OT avant les `parts_stock_movements` acceptés par les témoins (clé étrangère sans cascade).
+  - En local, l'erreur était affichée, mais mon filtre de sortie (`Error:`, `×`) ne la retenait pas : l'erreur pg commence par `error:` en minuscules, et un échec d'`afterAll` ne marque aucun test en `×`. 8 OT de test sont restés dans la base locale. Ils sont purgés.
+  - **Correctif** : supprimer les mouvements par OT et par pièce avant les OT.
+  - **Prévention** : filtrer la sortie de vitest sur `Errors|Test Files|Tests ` (sans tenir compte de la casse), qui compte les erreurs de hooks, et vérifier les restes de test en base après le premier lancement.

@@ -70,6 +70,7 @@ import Settings from "@/pages/settings";
 import ProfilePage from "@/pages/profile";
 import UsersIndex from "@/pages/users/index";
 import AdminUsersPage from "@/pages/admin/users";
+import RetiredVehiclesPage from "@/pages/admin/retired-vehicles";
 import DocumentationPage from "@/pages/admin/documentation";
 import {
   DRIVER_MANAGER_ROLES,
@@ -713,6 +714,12 @@ function App() {
             <Route path="/admin/users">
               <AppLayout>
                 <RoleRoute component={AdminUsersPage} allowedRoles={["admin"]} />
+              </AppLayout>
+            </Route>
+
+            <Route path="/admin/retired-vehicles">
+              <AppLayout>
+                <RoleRoute component={RetiredVehiclesPage} allowedRoles={["admin"]} />
               </AppLayout>
             </Route>
 

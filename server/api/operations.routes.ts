@@ -9,7 +9,7 @@ import { withLogContext } from "../lib/error-log-context";
 import { MISSION_MANAGER_ROLES, OPERATIONS_COST_READ_ROLES, STAFF_ROLES, type AppRole } from "@shared/constants/roles";
 import { driverScopeOf } from "../lib/driver-scope";
 import { redactVehiclePriceDeep } from "../lib/vehicle-price-scope";
-import { redactMissionPrice } from "../lib/mission-price-scope";
+import { omitMissionBudget, redactMissionBudget, redactMissionPrice } from "../lib/mission-response-scope";
 import { parseQueryId, parseRouteId, MISSION_ID_INVALID_MESSAGE } from "../lib/route-id";
 
 const log = moduleLogger("operations");
@@ -46,7 +46,8 @@ const broadcastOperationMissionUpdate = (
     version: 1,
     entity: "mission",
     entityId: options?.missionId ?? null,
-    payload,
+    // Trame diffusée à tout le personnel : sans montant du budget (Q19), les lecteurs relisent par HTTP.
+    payload: omitMissionBudget(payload),
     // Missions, clients et pleins : données internes, jamais diffusées aux comptes client.
     scope: { type: "roles", roles: [...STAFF_ROLES] },
     actor: {
@@ -124,7 +125,7 @@ router.post("/missions/from-fuel", authorize([...MISSION_MANAGER_ROLES]), async 
       },
     );
 
-    res.json(result);
+    res.json(redactMissionBudget(req.user, result));
   } catch (error: any) {
     // Enregistrement carburant inconnu (404) : le gestionnaire central rend l'ApiErrorBody.
     if (error instanceof AppError) return next(error);
@@ -139,7 +140,7 @@ router.post("/missions/from-fuel", authorize([...MISSION_MANAGER_ROLES]), async 
 router.get("/missions/upcoming", authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const missions = await operationsService.getUpcomingMissions(await driverScopeOf(req.user));
-    res.json(redactMissionPrice(req.user, redactVehiclePriceDeep(req.user, missions)));
+    res.json(redactMissionBudget(req.user, redactMissionPrice(req.user, redactVehiclePriceDeep(req.user, missions))));
   } catch (error: any) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching upcoming missions:" }));
   }
@@ -152,7 +153,7 @@ router.get("/missions/upcoming", authenticate, async (req: Request, res: Respons
 router.get("/missions/active", authenticate, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const missions = await operationsService.getActiveMissions(await driverScopeOf(req.user));
-    res.json(redactMissionPrice(req.user, redactVehiclePriceDeep(req.user, missions)));
+    res.json(redactMissionBudget(req.user, redactMissionPrice(req.user, redactVehiclePriceDeep(req.user, missions))));
   } catch (error: any) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching active missions:" }));
   }
@@ -175,7 +176,7 @@ router.get("/missions", authenticate, async (req: Request, res: Response, next: 
 
     const missions = await operationsService.getAllMissions(filters, await driverScopeOf(req.user));
 
-    res.json(redactMissionPrice(req.user, redactVehiclePriceDeep(req.user, missions)));
+    res.json(redactMissionBudget(req.user, redactMissionPrice(req.user, redactVehiclePriceDeep(req.user, missions))));
   } catch (error: any) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching missions:" }));
   }
@@ -197,7 +198,7 @@ router.get("/missions/by-client/:clientName", authenticate, refuseDriver, async 
 
     const result = await operationsService.getMissionsByClient(clientName, filters);
 
-    res.json(redactMissionPrice(req.user, redactVehiclePriceDeep(req.user, result)));
+    res.json(redactMissionBudget(req.user, redactMissionPrice(req.user, redactVehiclePriceDeep(req.user, result))));
   } catch (error: any) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching missions by client:" }));
   }
@@ -210,7 +211,8 @@ router.get("/missions/by-client/:clientName", authenticate, refuseDriver, async 
 router.get("/stats/by-client", authenticate, refuseDriver, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const stats = await operationsService.getStatsByClient();
-    res.json(stats);
+    // Chiffre d'affaires et marge sommés sur estimatedFuelCost : null hors lecteurs du budget (Q19).
+    res.json(redactMissionBudget(req.user, stats));
   } catch (error: any) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching stats by client:" }));
   }
@@ -223,7 +225,7 @@ router.get("/stats/by-client", authenticate, refuseDriver, async (req: Request, 
 router.get("/stats/by-destination", authenticate, refuseDriver, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const stats = await operationsService.getStatsByDestination();
-    res.json(stats);
+    res.json(redactMissionBudget(req.user, stats));
   } catch (error: any) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching stats by destination:" }));
   }
