@@ -465,3 +465,20 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
   - En local, l'erreur était affichée, mais mon filtre de sortie (`Error:`, `×`) ne la retenait pas : l'erreur pg commence par `error:` en minuscules, et un échec d'`afterAll` ne marque aucun test en `×`. 8 OT de test sont restés dans la base locale. Ils sont purgés.
   - **Correctif** : supprimer les mouvements par OT et par pièce avant les OT.
   - **Prévention** : filtrer la sortie de vitest sur `Errors|Test Files|Tests ` (sans tenir compte de la casse), qui compte les erreurs de hooks, et vérifier les restes de test en base après le premier lancement.
+
+## 2026-11-06 — Rapprochement de règlement : une facture en litige ne passe plus à `paid`
+
+- **Quoi** : `reconcileInvoiceSettlement` refuse en 409 le rapprochement d'un règlement sur une facture `disputed` (« Cette facture est en litige. Lever le litige avant de rapprocher un règlement. »). Rien n'est écrit : le règlement reste `recorded`, la facture reste en litige.
+- **Pourquoi** : `syncInvoiceFromReconciledSettlements` écrivait le statut par un `UPDATE ... WHERE id = ?` sans condition, et sans verrou. Le déclencheur `recalc_supplier_invoice_financials` conservait bien `disputed`, mais la synchro TypeScript l'écrasait juste après par `paid`. Un litige posé entre la lecture et l'écriture était perdu de la même façon.
+- **Comment** :
+  - une seule transaction : la facture est verrouillée (`FOR UPDATE`) avant le règlement, dans le même ordre que la saisie (`recordInvoiceSettlement`). Le rejet ne verrouille que le règlement, donc il n'y a pas de cycle de verrous ;
+  - la synchro relit la facture dans la transaction, puisque le déclencheur l'a déjà recalculée. Elle écrit ensuite par compare-and-set sur le statut relu, avec `status <> 'disputed'`, et rend un 409 si aucune ligne n'est touchée ;
+  - la clôture automatique de la commande passe après la validation de la transaction, comme avant.
+- **Preuve** : `tests/contract/supplier-settlement-disputed.contract.test.ts` couvre quatre cas :
+  - un témoin soldé ;
+  - un litige posé avant le rapprochement ;
+  - un rejeu après mise en litige ;
+  - un litige posé pendant le rapprochement : une transaction tient le verrou, le rapprochement l'attend puis échoue sans écrire.
+  
+  Sur l'ancien code, les trois cas de litige échouent et le témoin passe. Les 12 fichiers de contrat `supplier-settlement*` et `supplier-invoice*` sont verts.
+- **Leçon** : avant d'écrire un compare-and-set sur une table, chercher ses déclencheurs (`pg_trigger`). Un déclencheur qui récrit la ligne dans la même transaction rend fausse la valeur lue avant lui. Il faut relire après l'écriture qui le déclenche.
