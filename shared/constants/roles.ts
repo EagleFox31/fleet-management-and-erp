@@ -293,6 +293,9 @@ export function canWriteVehiclePurchasePrice(role: string | null | undefined): b
   return (VEHICLE_PURCHASE_PRICE_WRITE_ROLES as readonly string[]).includes(String(role ?? ""));
 }
 
+/** Coût de maintenance de la flotte (`GET /api/statistics/maintenance-cost/:period`) : direction d'atelier seule. */
+export const MAINTENANCE_COST_READ_ROLES = ["admin", "workshop_manager"] as const satisfies readonly AppRole[];
+
 /** Coût d'un véhicule (`GET /api/vehicles/:id/cost-summary`). */
 export const VEHICLE_COST_ROLES = ["admin", "management", "workshop_manager", "logistics"] as const satisfies readonly AppRole[];
 
