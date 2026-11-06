@@ -32,6 +32,10 @@ import { deliveryReceipts } from "../lib/purchase-order-delivery";
  */
 const log = moduleLogger("procurement-service");
 
+/** Demande qui n'est plus approuvée au moment de la commande (déjà commandée, reçue, annulée). */
+export const REQUIREMENT_NOT_ORDERABLE_ERROR =
+  "Cette demande n'est plus à commander. Rechargez la liste des demandes.";
+
 export class ProcurementService {
   private readonly VAT_RATE = 19.25; // TVA au Cameroun
   private readonly ROLE_LABELS: Record<string, string> = {
@@ -574,7 +578,10 @@ export class ProcurementService {
         .map((item) => [item.requirementId, Math.max(1, Math.floor(item.quantityOrdered))])
     );
     
-    console.log(`📝 Création commande pour fournisseur ${data.supplierId} avec ${requirementIds.length} demandes + ${manualLines.length} lignes manuelles`);
+    log.info(
+      { supplierId: data.supplierId, requirements: requirementIds.length, manualLines: manualLines.length },
+      "création de commande"
+    );
 
     // Calculer les totaux
     let totalHT = 0;
@@ -590,6 +597,12 @@ export class ProcurementService {
         .from(partRequirements)
         .leftJoin(parts, eq(partRequirements.partId, parts.id))
         .where(inArray(partRequirements.id, requirementIds));
+
+      // Seule une demande approuvée se commande. Une demande déjà commandée ou reçue, recommandée,
+      // ferait entrer la pièce deux fois en stock à la livraison.
+      if (requirements.some(({ requirement }) => requirement.status !== 'approved')) {
+        throw new AppError(409, REQUIREMENT_NOT_ORDERABLE_ERROR);
+      }
 
       for (const { requirement, part } of requirements) {
         const requestedQty = Math.max(1, Number(requirement.quantityNeeded || 1));
@@ -651,50 +664,59 @@ export class ProcurementService {
     const expectedDelivery = new Date();
     expectedDelivery.setDate(expectedDelivery.getDate() + 10);
 
-    // Créer la commande
-    const [order] = await db.insert(purchaseOrders).values({
-      orderNumber,
-      supplierId: data.supplierId,
-      orderDate: new Date().toISOString().split('T')[0],
-      expectedDeliveryDate: expectedDelivery.toISOString().split('T')[0],
-      status: 'draft',
-      totalAmountHT: String(totalHT),
-      vatAmount: String(vatAmount),
-      totalAmountTTC: String(totalTTC),
-      discountPercentage: String(discountPct),
-      discountAmount: String(discountAmount),
-      urgency: data.urgency || 'medium',
-      notes: data.notes,
-      createdBy: data.createdBy,
-    }).returning();
+    // Commande, lignes, puis demandes, dans une transaction (ordre des verrous : commande, lignes,
+    // demandes). Le passage à `ordered` ne vaut que pour une demande encore approuvée : une demande
+    // commandée ou reçue entre la lecture et l'écriture fait échouer la création entière.
+    const uniqueRequirementIds = Array.from(new Set(requirementIds));
+    const { order, createdLines } = await db.transaction(async (tx) => {
+      const [order] = await tx.insert(purchaseOrders).values({
+        orderNumber,
+        supplierId: data.supplierId,
+        orderDate: new Date().toISOString().split('T')[0],
+        expectedDeliveryDate: expectedDelivery.toISOString().split('T')[0],
+        status: 'draft',
+        totalAmountHT: String(totalHT),
+        vatAmount: String(vatAmount),
+        totalAmountTTC: String(totalTTC),
+        discountPercentage: String(discountPct),
+        discountAmount: String(discountAmount),
+        urgency: data.urgency || 'medium',
+        notes: data.notes,
+        createdBy: data.createdBy,
+      }).returning();
 
-    // Créer les lignes de commande
-    const createdLines = await db.insert(purchaseOrderLines).values(
-      lines.map(line => ({
-        ...line,
-        purchaseOrderId: order.id,
-      }))
-    ).returning();
+      // Créer les lignes de commande
+      const createdLines = await tx.insert(purchaseOrderLines).values(
+        lines.map(line => ({
+          ...line,
+          purchaseOrderId: order.id,
+        }))
+      ).returning();
 
-    // Mettre à jour le statut des demandes (seulement si présentes)
-    if (requirementIds.length > 0) {
-      await db.update(partRequirements)
-        .set({ 
-          status: 'ordered',
-          updatedAt: new Date(),
-        })
-        .where(inArray(partRequirements.id, requirementIds));
-    }
+      if (uniqueRequirementIds.length > 0) {
+        const ordered = await tx.update(partRequirements)
+          .set({
+            status: 'ordered',
+            updatedAt: new Date(),
+          })
+          .where(and(inArray(partRequirements.id, uniqueRequirementIds), eq(partRequirements.status, 'approved')))
+          .returning({ id: partRequirements.id });
+        if (ordered.length !== uniqueRequirementIds.length) {
+          throw new AppError(409, REQUIREMENT_NOT_ORDERABLE_ERROR);
+        }
+      }
+      return { order, createdLines };
+    });
 
-    console.log(`✅ Commande ${orderNumber} créée avec ${createdLines.length} lignes - Total: ${Math.round(totalTTC).toLocaleString()} FCFA`);
-    console.log(`📋 Order object:`, JSON.stringify({ id: order.id, orderNumber: order.orderNumber }));
+    log.info(
+      { orderId: order.id, orderNumber, lines: createdLines.length, totalTTC: Math.round(totalTTC) },
+      "commande créée"
+    );
 
     const result = {
       ...order,
       lines: createdLines,
     };
-    
-    console.log(`📦 Returning order with ID: ${result.id}`);
     
     return result;
   }

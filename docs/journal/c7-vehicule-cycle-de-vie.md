@@ -606,3 +606,19 @@ JOIN purchase_order_lines l ON l.purchase_order_id = po.id
 WHERE po.status IN ('delivered', 'completed')
   AND coalesce(l.delivery_status, 'pending') IN ('pending', 'partial');
 ```
+## 2026-11-06 04:16 — Q25 complétée : lien demande-commande vérifié sous verrou, recommande refusée
+
+- **Quoi** : la revue sécurité de #562 a relevé deux trous.
+  1. Le lien était contrôlé hors de la transaction de la demande.
+  2. `createPurchaseOrder` acceptait une demande dans n'importe quel statut et la repassait à `ordered`. Une demande déjà reçue pouvait donc être recommandée, et la livraison recréditait le stock.
+- **Comment** :
+  - Le contrôle du lien se fait maintenant dans la transaction, après le CAS de la demande, qui tient la ligne verrouillée. Une commande validée pendant l'attente du verrou est donc vue.
+  - La création de commande refuse d'abord toute demande non approuvée (409 « Cette demande n'est plus à commander. Rechargez la liste des demandes. »).
+  - Ensuite, une transaction écrit la commande, ses lignes, puis les demandes avec `UPDATE … WHERE status = 'approved' RETURNING`. Si le nombre de lignes renvoyé est inférieur au nombre de demandes, toute la création est annulée.
+  - Les quatre `console.log` de la fonction passent à `moduleLogger`.
+- **Preuve** : un test discriminant par trou. Les trois échouent sur 96f519b4 et passent avec le correctif.
+  - Réception directe pendant le rattachement non validé : sur 96f519b4, `success: true`. Maintenant, 409 et stock intact.
+  - Création pendant que la demande cesse d'être approuvée : sur 96f519b4, la commande est créée. Maintenant, 409 et aucune ligne.
+  - POST d'une commande sur une demande reçue : sur 96f519b4, 201. Maintenant, 409.
+- **Vérifications** : tsc 0 ; unitaires 3 102 ; intégration 11 fichiers, 59 tests ; contrats 38 fichiers, 457 tests.
+- **Leçon** : une règle qui interdit un chemin doit fermer tous les chemins qui mènent au même effet. La réception directe et la recommande produisaient le même double crédit. Le contrôle doit aussi lire sous le même verrou que l'écriture qu'il protège.
