@@ -466,6 +466,18 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
   - **Correctif** : supprimer les mouvements par OT et par pièce avant les OT.
   - **Prévention** : filtrer la sortie de vitest sur `Errors|Test Files|Tests ` (sans tenir compte de la casse), qui compte les erreurs de hooks, et vérifier les restes de test en base après le premier lancement.
 
+## 2026-11-06 — Assertion de statut partagée : `expectStatus`
+
+- **Quoi** :
+  - `tests/support/expect-status.ts` : `expectStatus(response, attendu, libellé?)` vérifie le statut avec le corps de la réponse en message (tronqué à 2 000 caractères, sans jamais lever) et rend la réponse ;
+  - les contrats `finance-withholdings` (7 assertions) et `qhse-inspections` (47) l'utilisent ;
+  - la connexion de `startContractSession` porte aussi le corps.
+- **Pourquoi** : ce sont les deux contrats signalés instables. Une assertion `expect(r.status).toBe(200)` qui échoue ne dit ni le code d'erreur ni le message, donc l'échec intermittent reste impossible à diagnostiquer (voir l'entrée sur le contrat instable).
+- **Comment** : remplacement mécanique par expression régulière des formes `expect((await …).status).toBe(N)`, `expect(r.status).toBe(N)` et `expect(r.status, JSON.stringify(r.body)).toBe(N)`. L'unique assertion sur plusieurs lignes est faite à la main.
+- **Preuve** :
+  - test unitaire `tests/unit/support/expect-status.test.ts` : le message porte le corps et le libellé, le corps cyclique ou long est géré ;
+  - les deux contrats sont verts (34 tests), avec le même nombre d'assertions.
+- **Suite possible** : 138 autres contrats écrivent `JSON.stringify(r.body)` à la main, et d'autres n'ont pas de message. Un cliquet sur `expect(x.status).toBe(` sans message reste à décider.
 ## 2026-11-06 — Rapprochement de règlement : une facture en litige ne passe plus à `paid`
 
 - **Quoi** : `reconcileInvoiceSettlement` refuse en 409 le rapprochement d'un règlement sur une facture `disputed` (« Cette facture est en litige. Lever le litige avant de rapprocher un règlement. »). Rien n'est écrit : le règlement reste `recorded`, la facture reste en litige.
