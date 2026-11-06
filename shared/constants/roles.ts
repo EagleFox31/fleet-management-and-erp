@@ -547,3 +547,14 @@ export function canEditMissionPrice(role: string | null | undefined, status: str
   if (hasLiveInvoice) return { allowed: false, blockedBy: "invoice" };
   return { allowed: true, reasonRequired: late };
 }
+
+/**
+ * Rôles qui peuvent recevoir un ordre de travail (`workOrders.technicianId`) : l'atelier.
+ * Lu par le sélecteur `GET /api/users/technicians` et par le contrôle d'affectation
+ * (création et modification d'OT) : un chauffeur, un client ou un magasinier ne reçoit pas d'OT.
+ */
+export const WORK_ORDER_ASSIGNEE_ROLES = ["technician", "workshop_manager"] as const satisfies readonly AppRole[];
+
+export function canReceiveWorkOrder(role: string | null | undefined): boolean {
+  return (WORK_ORDER_ASSIGNEE_ROLES as readonly string[]).includes(String(role ?? ""));
+}
