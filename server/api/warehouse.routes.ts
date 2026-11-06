@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from "express";
 import { authenticate, isPartsCatalogManager, isStockValuationReader } from "../middleware/auth";
-import { PART_CATALOG_EVENT_ROLES } from "@shared/constants/roles";
+import { STOCK_VALUATION_READ_ROLES } from "@shared/constants/roles";
 import { stockAlertsService } from "../services/stock-alerts-service";
 import { AppError } from "../lib/app-error";
 import { parseRouteId } from "../lib/route-id";
@@ -30,7 +30,7 @@ const broadcastWarehouseUpdate = (
     entityId: options?.partId ?? null,
     payload,
     // Stock et prix : le personnel qui lit le stock, ni chauffeur ni client (AGENTS.md §11).
-    scope: { type: "roles", roles: [...PART_CATALOG_EVENT_ROLES] },
+    scope: { type: "roles", roles: [...STOCK_VALUATION_READ_ROLES] },
     actor: {
       userId: options?.actorUserId ?? null,
       role: options?.actorRole ?? null,
