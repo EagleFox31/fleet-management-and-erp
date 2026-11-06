@@ -448,3 +448,7 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
 **Pourquoi** `testTimeout` n'est pas relevé : rien ne prouve qu'un timeout soit en cause. Le relever masquerait une lenteur réelle sans la nommer.
 
 **Leçon.** Un test signalé instable se remonte avec le texte de l'assertion, pas en résumé. Toute assertion de statut sur un appel HTTP porte le corps de la réponse en message (`expect(r.status, JSON.stringify(r.body))`), sinon l'échec intermittent reste indiagnosticable.
+- **CI rouge sur #542 (contract shard 2/4)** : l'`afterAll` du contrat L3b supprimait les OT avant les `parts_stock_movements` acceptés par les témoins (clé étrangère sans cascade).
+  - En local, l'erreur était affichée, mais mon filtre de sortie (`Error:`, `×`) ne la retenait pas : l'erreur pg commence par `error:` en minuscules, et un échec d'`afterAll` ne marque aucun test en `×`. 8 OT de test sont restés dans la base locale. Ils sont purgés.
+  - **Correctif** : supprimer les mouvements par OT et par pièce avant les OT.
+  - **Prévention** : filtrer la sortie de vitest sur `Errors|Test Files|Tests ` (sans tenir compte de la casse), qui compte les erreurs de hooks, et vérifier les restes de test en base après le premier lancement.
