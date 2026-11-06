@@ -196,7 +196,7 @@ export class PartRequirementsService {
         if (part && part.unitPrice) {
           const unitPrice = parseFloat(part.unitPrice);
           estimatedCost = (unitPrice * requirement.quantityNeeded).toString();
-          log.debug(`Auto-calculated estimated cost: ${unitPrice} x ${requirement.quantityNeeded} = ${estimatedCost} XAF`);
+          log.debug({ partId: requirement.partId, quantityNeeded: requirement.quantityNeeded }, "coût estimé calculé depuis le prix unitaire");
         }
       }
 
@@ -362,7 +362,7 @@ export class PartRequirementsService {
           if (part && part.unitPrice) {
             const unitPrice = parseFloat(part.unitPrice);
             updateData.estimatedCost = (unitPrice * quantityNeeded).toString();
-            log.debug(`Auto-recalculated estimated cost: ${unitPrice} x ${quantityNeeded} = ${updateData.estimatedCost} XAF`);
+            log.debug({ requirementId: id, partId, quantityNeeded }, "coût estimé recalculé depuis le prix unitaire");
           }
         }
       }
