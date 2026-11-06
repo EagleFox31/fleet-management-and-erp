@@ -739,6 +739,16 @@ function walkWriteRoutes(serverDir: string): { reached: Array<{ signature: strin
       const own = fileMounts.length === 0 ? undefined : mountOf(fileMounts, v, raw);
       return own ? `/api${own.prefix}` : undefined;
     });
+    // Bouchons `createStubRouter([...])` : routes déclarées en données, servies dès le montage (501).
+    const source = stripComments(raw);
+    if (!/\bcreateStubRouter\s*\(/.test(source)) continue;
+    for (const m of source.matchAll(/\{[^{}]*\bmethod\s*:\s*["'](post|put|patch|delete)["'][^{}]*\bpath\s*:\s*["']([^"']*)["'][^{}]*\}/g)) {
+      if (fileMounts.length !== 1) {
+        unreached.push(`${file}: ${m[1].toUpperCase()} ${m[2]} (bouchon)`);
+        continue;
+      }
+      out.push({ signature: routeSignature(m[1], `/api${fileMounts[0].prefix}${m[2]}`), file, handler: m[0] });
+    }
   }
   return { reached: out, unreached };
 }

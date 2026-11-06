@@ -43,7 +43,7 @@ const NOT_GUARDED: Record<string, string> = {
 
 // Égal à la taille de la table : en ajouter une entrée oblige à relever ce nombre, sinon le cliquet
 // se périmerait et laisserait retirer une entrée sans revue.
-const TABLE_FLOOR = 45;
+const TABLE_FLOOR = 46;
 const VEHICLE_MARKER = /\b(vehicleId|vehicle_id|vehicleTireId|fuelRecordId|workOrderId|work_order_id|partRequirementId|part_requirement_id)\b/;
 // Objet d'OT désigné par le chemin : le véhicule s'atteint par l'OT, même si la poignée ne nomme ni l'un ni l'autre.
 const WORK_ORDER_PATH = /\/(work-orders|work-order-items|parts-used|part-requirements)\/:p(\/|$)/;
@@ -105,6 +105,7 @@ describe("écritures sur véhicule retiré : couverture de la garde", () => {
       "PATCH /api/part-requirements/:p",
       "POST /api/warehouse/stock-movement",
       "PATCH /api/purchase-orders/:p/status",
+      "POST /api/part-requirements/:p/receive",
     ]) {
       expect(flagged(route), route).toBe(true);
     }
@@ -118,6 +119,12 @@ describe("L3b : le balayage voit tous les routeurs d'écriture", () => {
 
   it("aucune écriture de server/api hors d'un routeur monté par index.ts", () => {
     expect(scanUnreachedWriteRoutes(serverDir)).toEqual([]);
+  });
+
+  it("les écritures des bouchons createStubRouter sont balayées", () => {
+    const stubs = scanWriteRoutes(serverDir).filter((r) => r.handler.startsWith("{"));
+    expect(stubs.map((r) => r.signature)).toContain("POST /api/part-requirements/:p/receive");
+    expect(stubs.length).toBeGreaterThanOrEqual(7);
   });
 
   it("le motif de montage reconnaît un routeur et ignore une fonction en ligne", () => {

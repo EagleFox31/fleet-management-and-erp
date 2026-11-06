@@ -79,6 +79,20 @@ describe("L3b : OT d'un véhicule retiré", () => {
   });
 });
 
+describe("L3b : bouchon de réception d'une demande", () => {
+  it("POST /part-requirements/:id/receive sur l'OT d'un véhicule retiré : 409 avant le 501 du bouchon", async () => {
+    const [req] = await db
+      .insert(partRequirements)
+      .values({ workOrderId: R.wo, vehicleId: R.vehicle, partId, quantityNeeded: 1, reason: "TEST L3b", status: "ordered" } as any)
+      .returning();
+    const before = await footprint(R.wo);
+    const res = await actors.call("POST", `/api/part-requirements/${req.id}/receive`, { actor: "admin", body: {} });
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body.message).toBe(VEHICLE_RETIRED_EDIT_MESSAGE);
+    expect(await footprint(R.wo)).toEqual(before);
+  });
+});
+
 describe("L3b : témoins", () => {
   it("demande de pièce sur un OT de véhicule actif : acceptée", async () => {
     const res = await actors.call("POST", `/api/work-orders/${A.wo}/parts`, { actor: "admin", body: { partId, quantity: 1, reason: "TEST L3b" } });
