@@ -378,3 +378,10 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - des tests unitaires dans `idempotency-guard.test` : un 409 `CONFLICT` reste rejouable, un corps nul n'est pas un refus.
 - **Ordre des refus** : pour le personnel, le 409 de la garde passe avant le 403 de la route. Il n'y a pas de fuite : le personnel voit tous les véhicules (§11). Un anonyme ou un client ne passe pas par la garde (`!user || role === "client"`) : il reçoit le 401 ou le 403 de la route, sans rien apprendre de l'état du véhicule.
 - **À surveiller** : `prefix-middleware-guardrail` met 3,9 s pour une limite de 5 s. Il risque de devenir instable sous charge.
+
+## 2026-11-06T01:16:55+01:00 — prefix-middleware-guardrail sous la limite (suite du « À surveiller » de L3)
+
+- **Quoi** : le recensement des montages de `server/` est fait une fois par fichier de test au lieu de cinq.
+- **Pourquoi** : 3,8 s de tests pour une limite de 5 s. Cinq cas relançaient `scanFiles` (analyse TypeScript de chaque fichier serveur), à environ 700 ms par passe.
+- **Comment** : `occurrences()` mémoïse le balayage et rend une copie à chaque appel, pour qu'aucun cas ne modifie le résultat d'un autre. Aucune règle ni limite changée.
+- **Preuve** : deux mesures locales. Tests du fichier : 3,84 s, puis 1,46 s et 1,58 s. Le cas le plus long, qui porte le balayage, passe à 1,3 s ; avant, chacun des cinq cas prenait de 650 à 850 ms. 30 cas verts.

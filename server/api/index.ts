@@ -38,6 +38,7 @@ import partsCatalogRoutes from "./parts-catalog.routes";
 import faultCatalogRoutes from "./fault-catalog.routes";
 import tireRotationsRoutes from "./tire-rotations.routes";
 import adminUsersGuardRoutes from "./admin-users-guard.routes";
+import statisticsCostGuardRoutes from "./statistics-cost-guard.routes";
 import lastAdminGuardRoutes from "./last-admin-guard.routes";
 import workflowsRoutes from "./workflows.routes";
 import auditLogsRoutes from "./audit-logs.routes";
@@ -79,6 +80,7 @@ import importsRoutes from "./imports.routes";
 import technicianWorkOrdersRoutes from "./technician-work-orders.routes";
 import userStockPermissionRoutes from "./user-stock-permission.routes";
 import { workOrderBookingGuard } from "../middleware/booking-guard";
+import { workOrderCostMask } from "../lib/work-order-cost-mask";
 import vehicleDocumentsRoutes from "./vehicle-documents.routes";
 import uploadedDocumentsRoutes from "./uploaded-documents.routes";
 import { loginLockoutGuard } from "../middleware/login-lockout-guard";
@@ -110,6 +112,10 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // Apply session middleware FIRST, before any routes are mounted
   // This ensures req.session.userId is available in all sub-routes
   apiRouter.use(sessionMiddleware);
+
+  // Coûts d'OT : retirés des lectures GET /api/work-orders/* pour les rôles hors
+  // WORK_ORDER_COST_READ_ROLES. Monté avant tout routeur (vehicle-history, routes.ts compris).
+  apiRouter.use("/work-orders", workOrderCostMask);
 
   // Gardes de connexion (T-12, T-48) : montes ici car /api est servi AVANT registerRoutes
   // (server/app.ts), donc avant les handlers de login de server/routes.ts. Le corps est deja
@@ -161,6 +167,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // Un admin ne se desactive pas lui-meme (garde, la route reste dans routes.ts).
   apiRouter.use(adminUsersGuardRoutes);
   apiRouter.use(lastAdminGuardRoutes);
+  // Statistiques à montant (coût de maintenance, KPI de flotte) : gardes, les routes restent dans routes.ts.
+  apiRouter.use(statisticsCostGuardRoutes);
   // Brouillon d'acquisition : liste blanche des champs, statut jamais lu du corps.
   // Fichiers téléversés : pièce jointe, nosniff, type en liste blanche (sortis de routes.ts).
   apiRouter.use(uploadedDocumentsRoutes);

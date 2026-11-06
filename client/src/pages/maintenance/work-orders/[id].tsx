@@ -729,8 +729,9 @@ export default function WorkOrderDetails({
       };
 
       const drawTableHeader = () => {
-        const headers = ["Pièce", "Qté", "Prix unitaire", "Total"];
-        const colWidths = [90, 18, 34, 44];
+        // Prix et total : rôles coût seulement (le serveur ne les envoie pas aux autres).
+        const headers = canReadLaborRate ? ["Pièce", "Qté", "Prix unitaire", "Total"] : ["Pièce", "Qté"];
+        const colWidths = canReadLaborRate ? [90, 18, 34, 44] : [146, 40];
         let cellX = margin;
 
         doc.setFillColor(30, 41, 59);
@@ -850,7 +851,7 @@ export default function WorkOrderDetails({
         ensureSpace(12);
         drawTableHeader();
 
-        const colWidths = [90, 18, 34, 44];
+        const colWidths = canReadLaborRate ? [90, 18, 34, 44] : [146, 40];
         safeParts.forEach((part: any, index: number) => {
           if (ensureSpace(8)) {
             drawSectionTitle("Pièces utilisées (suite)");
@@ -867,7 +868,9 @@ export default function WorkOrderDetails({
           const unitPrice = parseMoney(part.unitPrice);
           const total = partLineCost(part.unitPrice, part.quantity);
 
-          const rowValues = [partName, String(quantity), formatCurrency(unitPrice), formatCurrency(total)];
+          const rowValues = canReadLaborRate
+            ? [partName, String(quantity), formatCurrency(unitPrice), formatCurrency(total)]
+            : [partName, String(quantity)];
           let cellX = margin;
           doc.setFont("helvetica", "normal");
           doc.setFontSize(8.5);
@@ -911,6 +914,8 @@ export default function WorkOrderDetails({
 
       ensureSpace(Math.max(38, notesHeight + 2));
       const summaryX = pageWidth - margin - summaryWidth;
+      // Synthèse des coûts : rôles coût seulement (sinon elle afficherait 0 FCFA).
+      if (canReadLaborRate) {
       doc.setFillColor(240, 253, 250);
       doc.setDrawColor(167, 243, 208);
       doc.roundedRect(summaryX, currentY, summaryWidth, 32, 2.5, 2.5, "FD");
@@ -943,6 +948,7 @@ export default function WorkOrderDetails({
       doc.setTextColor(6, 78, 59);
       doc.text("TOTAL", summaryX + 4, costY + 2.2);
       doc.text(formatCurrency(totalCost), summaryX + summaryWidth - 4, costY + 2.2, { align: "right" });
+      }
 
       // Notes d'intervention (si disponibles)
       if (noteValue.length > 0) {
@@ -1320,6 +1326,7 @@ export default function WorkOrderDetails({
               </div>
             </div>
 
+            {canReadLaborRate && (
             <div className="bg-card/65 backdrop-blur-sm rounded-xl px-2.5 py-2 sm:px-3 sm:py-2.5 border border-success/20 flex items-center gap-2.5 min-w-0">
               <DollarSign className="h-4 w-4 text-success shrink-0" />
               <div className="min-w-0 flex-1">
@@ -1327,6 +1334,7 @@ export default function WorkOrderDetails({
                 <div className="text-xs sm:text-sm font-semibold text-foreground truncate">{formatCurrency(grandTotal)}</div>
               </div>
             </div>
+            )}
           </div>
         </div>
       </div>
@@ -1687,8 +1695,12 @@ export default function WorkOrderDetails({
                         <th className="px-5 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-gray-400">Pièce</th>
                         <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-gray-400">Référence</th>
                         <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-gray-400">Qté</th>
-                        <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-gray-400">Prix unit.</th>
-                        <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-gray-400">Total</th>
+                        {canReadLaborRate && (
+                          <>
+                            <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-gray-400">Prix unit.</th>
+                            <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-gray-400">Total</th>
+                          </>
+                        )}
                         <th className="px-4 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-gray-400">État</th>
                         <th className="px-4 py-3" />
                       </tr>
@@ -1703,8 +1715,12 @@ export default function WorkOrderDetails({
                               {partUsed.quantity}
                             </span>
                           </td>
-                          <td className="px-4 py-3.5 text-gray-500">{formatCurrency(partUsed.unitPrice)}</td>
-                          <td className="px-4 py-3.5 font-semibold text-gray-800">{formatCurrency(partLineCost(partUsed.unitPrice, partUsed.quantity))}</td>
+                          {canReadLaborRate && (
+                            <>
+                              <td className="px-4 py-3.5 text-gray-500">{formatCurrency(partUsed.unitPrice)}</td>
+                              <td className="px-4 py-3.5 font-semibold text-gray-800">{formatCurrency(partLineCost(partUsed.unitPrice, partUsed.quantity))}</td>
+                            </>
+                          )}
                           <td className="px-4 py-3.5">
                             <Badge variant="outline" className="bg-success/10 text-success border-success/30">
                               Utilisée
@@ -1739,12 +1755,16 @@ export default function WorkOrderDetails({
                               {requirement.quantityNeeded}
                             </span>
                           </td>
-                          <td className="px-4 py-3.5 text-warning-text">
-                            {formatCurrency(requirement.unitPrice || 0)}
-                          </td>
-                          <td className="px-4 py-3.5 font-semibold text-warning-text">
-                            {formatCurrency((requirement.unitPrice || 0) * requirement.quantityNeeded)}
-                          </td>
+                          {canReadLaborRate && (
+                            <>
+                              <td className="px-4 py-3.5 text-warning-text">
+                                {formatCurrency(requirement.unitPrice || 0)}
+                              </td>
+                              <td className="px-4 py-3.5 font-semibold text-warning-text">
+                                {formatCurrency((requirement.unitPrice || 0) * requirement.quantityNeeded)}
+                              </td>
+                            </>
+                          )}
                           <td className="px-4 py-3.5">
                             <div className="flex flex-col gap-1">
                               <Badge variant="outline" className="w-fit bg-warning/15 text-warning-text border-warning/30">
@@ -1826,7 +1846,7 @@ export default function WorkOrderDetails({
                   <p className="text-sm">Aucune pièce utilisée dans cet ordre de travail.</p>
                 </div>
               )}
-              {Array.isArray(partsUsed) && partsUsed.length > 0 && (
+              {canReadLaborRate && Array.isArray(partsUsed) && partsUsed.length > 0 && (
                 <div className="px-5 py-3 border-t border-gray-100 flex justify-end">
                   <div className="bg-warning/10 border border-warning/20 rounded-lg px-4 py-2 flex items-center gap-3">
                     <span className="text-sm text-warning-text">Total pièces</span>
@@ -2001,14 +2021,17 @@ export default function WorkOrderDetails({
                             <span className="font-medium">{part.partName}</span>
                             <span className="text-xs text-muted-foreground bg-muted rounded px-1.5 py-0.5">×{part.quantity}</span>
                           </div>
-                          <span className="font-semibold">{formatCurrency(partLineCost(part.unitPrice, part.quantity))}</span>
+                          {canReadLaborRate && (
+                            <span className="font-semibold">{formatCurrency(partLineCost(part.unitPrice, part.quantity))}</span>
+                          )}
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
 
-                {/* Cost recap */}
+                {/* Cost recap : rôles coût seulement (le serveur ne renvoie pas les montants aux autres) */}
+                {canReadLaborRate && (
                 <div className="rounded-xl border bg-purple-50/60 overflow-hidden">
                   <div className="px-4 py-2 bg-purple-100/60 text-xs font-semibold uppercase tracking-wide text-purple-700">
                     Récapitulatif des coûts
@@ -2041,6 +2064,7 @@ export default function WorkOrderDetails({
                     </div>
                   </div>
                 </div>
+                )}
 
                 <div className="flex justify-end">
                   <Button
