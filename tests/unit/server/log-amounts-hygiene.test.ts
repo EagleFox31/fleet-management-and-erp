@@ -13,13 +13,10 @@ import { describe, expect, it } from "vitest";
  */
 const FROZEN: Record<string, number> = {
   "server/api/mission-price.routes.ts": 1,
-  "server/services/client-billing-service.ts": 4,
-  "server/services/excel-export-service.ts": 1,
+  "server/services/client-billing-service.ts": 1,
   "server/services/fuel-card-service.ts": 4,
   "server/services/fuel-service.ts": 1,
   "server/services/mission-budgets-service.ts": 1,
-  "server/services/procurement-service.ts": 1,
-  "server/services/vat-billing-service.ts": 1,
 };
 
 const LOG_CALL = /\b(?:log|logger|console|[A-Za-z]+Log(?:ger)?)\.(?:debug|info|warn|error|trace|fatal|log)\s*\(/g;

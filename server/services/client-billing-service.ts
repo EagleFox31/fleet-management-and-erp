@@ -521,7 +521,7 @@ export class ClientBillingService {
       invoices: filteredInvoices,
     };
 
-    console.log(`Report generated: ${report.totalInvoices} invoices, ${report.totalAmountTTC} FCFA TTC`);
+    log.debug({ invoices: report.totalInvoices }, "rapport de facturation client généré");
 
     return report;
   }
@@ -540,7 +540,7 @@ export class ClientBillingService {
 
     const totalPaid = payments.reduce((sum, p) => sum + parseFloat(p.amount || "0"), 0);
 
-    console.log(`Found ${payments.length} payments, total: ${totalPaid} FCFA`);
+    log.debug({ invoiceId, payments: payments.length }, "paiements de la facture client lus");
 
     return {
       payments,
@@ -644,7 +644,7 @@ export class ClientBillingService {
       byClient,
     };
 
-    console.log(`Stats calculated: ${totalInvoices} invoices, ${totalAmountTTC} FCFA TTC`);
+    log.debug({ invoices: totalInvoices }, "statistiques de facturation client calculées");
 
     return stats;
   }

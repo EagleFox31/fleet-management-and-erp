@@ -706,8 +706,7 @@ export class ProcurementService {
         .where(inArray(partRequirements.id, requirementIds));
     }
 
-    console.log(`✅ Commande ${orderNumber} créée avec ${createdLines.length} lignes - Total: ${Math.round(totalTTC).toLocaleString()} FCFA`);
-    console.log(`📋 Order object:`, JSON.stringify({ id: order.id, orderNumber: order.orderNumber }));
+    log.info({ orderId: order.id, orderNumber, lines: createdLines.length }, "commande fournisseur créée");
 
     const result = {
       ...order,
