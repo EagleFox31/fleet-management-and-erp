@@ -4,6 +4,7 @@ import {
   DEFAULT_REPORT_TAB,
   REPORT_TAB_DEFS,
   reportTabForLocation,
+  reportsPageSubtitle,
   visibleReportTabs,
 } from "@/lib/management-report-tabs";
 
@@ -45,6 +46,14 @@ describe("onglets des rapports de direction", () => {
       }
       expect(visible).toContain(reportTabForLocation("/management/reports", flags));
     }
+  });
+
+  it("sous-titre : la distribution automatisée n'est annoncée que drapeau report-schedules allumé", () => {
+    expect(reportsPageSubtitle(off)).toBe("Génération et prévisualisation interactive des synthèses stratégiques");
+    expect(reportsPageSubtitle(defaultFeatureFlags())).not.toMatch(/distribution/i);
+    expect(reportsPageSubtitle(on)).toBe(
+      "Génération, prévisualisation interactive et distribution automatisée des synthèses stratégiques",
+    );
   });
 
   it("URL directe drapeau allumé, ou onglet sans drapeau : l'onglet demandé", () => {

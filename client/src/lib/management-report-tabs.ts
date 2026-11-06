@@ -37,6 +37,15 @@ export function visibleReportTabs<T extends Pick<ReportTabDef, "path">>(tabs: re
   return tabs.filter((tab) => isReportTabEnabled(tab, flags));
 }
 
+const SCHEDULED_TAB = REPORT_TAB_DEFS.find((t) => t.value === "scheduled")!;
+
+/** Sous-titre de la page : ne mentionne la distribution automatisée que si l'onglet d'envoi est visible. */
+export function reportsPageSubtitle(flags: FeatureFlagValues): string {
+  return isReportTabEnabled(SCHEDULED_TAB, flags)
+    ? "Génération, prévisualisation interactive et distribution automatisée des synthèses stratégiques"
+    : "Génération et prévisualisation interactive des synthèses stratégiques";
+}
+
 /** Onglet affiché pour une URL : celui qu'elle désigne s'il est visible, sinon l'onglet par défaut. */
 export function reportTabForLocation(location: string, flags: FeatureFlagValues): ReportTabId {
   const tab = REPORT_TAB_DEFS.find(
