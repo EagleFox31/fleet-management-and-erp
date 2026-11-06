@@ -43,6 +43,7 @@ beforeAll(async () => {
   baseUrl = `http://127.0.0.1:${typeof a === "object" && a ? a.port : 0}`;
   const tech = await login("technician");
   await login("client");
+  await login("driver");
 
   const vehicle = await createTestVehicle();
   ids.vehicleIds.push(vehicle.id);
@@ -87,9 +88,10 @@ describe("GET /api/work-orders/:id/audit-trail", { timeout: 120000 }, () => {
     }
   });
 
-  it("refuse sans session (401) et le client (403)", async () => {
+  it("refuse sans session (401), le client et le chauffeur (403 : details peut porter un montant)", async () => {
     expect((await get(workOrderAuditTrailPath(workOrderId))).status).toBe(401);
     expect((await get(workOrderAuditTrailPath(workOrderId), "client")).status).toBe(403);
+    expect((await get(workOrderAuditTrailPath(workOrderId), "driver")).status).toBe(403);
   });
 
   it("sert au personnel les seules lignes de cet OT, du plus ancien au plus recent, secrets masques", async () => {

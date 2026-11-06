@@ -6,7 +6,8 @@ import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { toAuditLogRow } from "../lib/audit-log-row";
 import { requireFeature } from "../lib/feature-flags";
-import { authenticate, isStaff } from "../middleware/auth";
+import { WORK_ORDER_COST_READ_ROLES } from "@shared/constants/roles";
+import { authenticate, authorize } from "../middleware/auth";
 
 const router = Router();
 
@@ -17,10 +18,12 @@ const MAX_ROWS = 1000;
 
 /**
  * Historique d'un OT (P-13) : vue du journal d'audit sur `entityType = 'work_order'`,
- * du plus ancien au plus récent. Personnel seulement (§11). Il n'existe pas de table
+ * du plus ancien au plus récent. Réservé à WORK_ORDER_COST_READ_ROLES (personnel hors
+ * chauffeur, §11) : `details` reprend le corps des écritures, qui peut porter un montant sous une clé
+ * hors du masquage des coûts d'OT ou en texte libre. Il n'existe pas de table
  * d'historique de statut d'OT : les changements de statut y figurent via leurs écritures auditées.
  */
-router.get("/work-orders/:id/audit-trail", requireFeature("work-order-audit-trail"), authenticate, isStaff, async (req, res, next) => {
+router.get("/work-orders/:id/audit-trail", requireFeature("work-order-audit-trail"), authenticate, authorize([...WORK_ORDER_COST_READ_ROLES]), async (req, res, next) => {
   try {
     const parsed = workOrderAuditTrailParamsSchema.safeParse(req.params);
     if (!parsed.success || parsed.data.id > MAX_INT) throw new AppError(400, "Identifiant d'ordre de travail invalide.");

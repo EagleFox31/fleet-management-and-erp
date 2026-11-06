@@ -7,6 +7,7 @@ import { initializeDatabase, QHSE_INSPECTIONS_SQL, reportCdcConstraintGaps } fro
 import { drivers, qhseInspectionCriteria, qhseInspections } from "../../shared/schema";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
+import { expectStatus } from "../support/expect-status";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD } from "../support/factories";
 import { TEST_PREFIX } from "../support/ids";
 
@@ -62,8 +63,8 @@ afterAll(async () => {
 describe("contrôles inopinés QHSE", { timeout: 180000 }, () => {
   it("drapeau coupé : la route n'existe pas", async () => {
     delete process.env.FEATURE_FLAGS;
-    expect((await call("GET", null, "/api/qhse/inspections")).status).toBe(404);
-    expect((await call("GET", null, "/api/qhse/criteria")).status).toBe(404);
+    expectStatus(await call("GET", null, "/api/qhse/inspections"), 404);
+    expectStatus(await call("GET", null, "/api/qhse/criteria"), 404);
   });
 
   it("applique les rôles, la cloison chauffeur et la validation de la grille", async () => {
@@ -94,7 +95,7 @@ describe("contrôles inopinés QHSE", { timeout: 180000 }, () => {
 
     // Grille d'origine, semée par init-database : cabine et arrêt.
     const cabin = await call("GET", cookie.logistics, "/api/qhse/criteria?category=cabin&active=true");
-    expect(cabin.status, JSON.stringify(cabin.body)).toBe(200);
+    expectStatus(cabin, 200);
     expect(cabin.body.length, JSON.stringify(cabin.body)).toBeGreaterThanOrEqual(10);
     const stop = await call("GET", cookie.logistics, "/api/qhse/criteria?category=stop");
     const cabinId = cabin.body[0].id as number;
@@ -110,52 +111,52 @@ describe("contrôles inopinés QHSE", { timeout: 180000 }, () => {
     });
 
     // 401 sans session.
-    expect((await call("GET", null, "/api/qhse/inspections")).status).toBe(401);
-    expect((await call("POST", null, "/api/qhse/inspections", payload(ownDriver.id))).status).toBe(401);
+    expectStatus(await call("GET", null, "/api/qhse/inspections"), 401);
+    expectStatus(await call("POST", null, "/api/qhse/inspections", payload(ownDriver.id)), 401);
 
     // 403 : rôles hors saisie, y compris le chauffeur en écriture et en lecture de la grille.
     for (const role of ["workshop", "client", "driverUser"]) {
-      expect((await call("POST", cookie[role], "/api/qhse/inspections", payload(ownDriver.id))).status).toBe(403);
-      expect((await call("GET", cookie[role], "/api/qhse/criteria")).status).toBe(403);
-      expect((await call("POST", cookie[role], "/api/qhse/criteria", { code: "x1", label: "Test", category: "cabin" })).status).toBe(403);
+      expectStatus(await call("POST", cookie[role], "/api/qhse/inspections", payload(ownDriver.id)), 403);
+      expectStatus(await call("GET", cookie[role], "/api/qhse/criteria"), 403);
+      expectStatus(await call("POST", cookie[role], "/api/qhse/criteria", { code: "x1", label: "Test", category: "cabin" }), 403);
     }
-    expect((await call("GET", cookie.workshop, "/api/qhse/inspections")).status).toBe(403);
-    expect((await call("GET", cookie.client, "/api/qhse/inspections")).status).toBe(403);
+    expectStatus(await call("GET", cookie.workshop, "/api/qhse/inspections"), 403);
+    expectStatus(await call("GET", cookie.client, "/api/qhse/inspections"), 403);
     // La logistique saisit mais ne configure pas la grille.
-    expect((await call("POST", cookie.logistics, "/api/qhse/criteria", { code: "x1", label: "Test", category: "cabin" })).status).toBe(403);
-    expect((await call("PATCH", cookie.logistics, `/api/qhse/criteria/${cabinId}`, { active: true })).status).toBe(403);
+    expectStatus(await call("POST", cookie.logistics, "/api/qhse/criteria", { code: "x1", label: "Test", category: "cabin" }), 403);
+    expectStatus(await call("PATCH", cookie.logistics, `/api/qhse/criteria/${cabinId}`, { active: true }), 403);
 
     // Corps invalides : 400.
-    expect((await call("POST", cookie.admin, "/api/qhse/inspections", { ...payload(ownDriver.id), items: [] })).status).toBe(400);
-    expect((await call("POST", cookie.admin, "/api/qhse/inspections", { ...payload(ownDriver.id), vehicleId: 2147483648 })).status).toBe(400);
-    expect((await call("POST", cookie.admin, "/api/qhse/inspections", payload(ownDriver.id, [
+    expectStatus(await call("POST", cookie.admin, "/api/qhse/inspections", { ...payload(ownDriver.id), items: [] }), 400);
+    expectStatus(await call("POST", cookie.admin, "/api/qhse/inspections", { ...payload(ownDriver.id), vehicleId: 2147483648 }), 400);
+    expectStatus(await call("POST", cookie.admin, "/api/qhse/inspections", payload(ownDriver.id, [
       { criterionId: cabinId, conform: true }, { criterionId: cabinId, conform: false },
-    ]))).status).toBe(400);
+    ])), 400);
     // Critère de l'autre grille, inexistant : 400. Véhicule ou chauffeur inconnu : 404.
-    expect((await call("POST", cookie.admin, "/api/qhse/inspections", payload(ownDriver.id, [{ criterionId: stopId, conform: true }]))).status).toBe(400);
-    expect((await call("POST", cookie.admin, "/api/qhse/inspections", payload(ownDriver.id, [{ criterionId: 2147483647, conform: true }]))).status).toBe(400);
-    expect((await call("POST", cookie.admin, "/api/qhse/inspections", { ...payload(ownDriver.id), vehicleId: 2147483647 })).status).toBe(404);
-    expect((await call("POST", cookie.admin, "/api/qhse/inspections", payload(2147483647))).status).toBe(404);
+    expectStatus(await call("POST", cookie.admin, "/api/qhse/inspections", payload(ownDriver.id, [{ criterionId: stopId, conform: true }])), 400);
+    expectStatus(await call("POST", cookie.admin, "/api/qhse/inspections", payload(ownDriver.id, [{ criterionId: 2147483647, conform: true }])), 400);
+    expectStatus(await call("POST", cookie.admin, "/api/qhse/inspections", { ...payload(ownDriver.id), vehicleId: 2147483647 }), 404);
+    expectStatus(await call("POST", cookie.admin, "/api/qhse/inspections", payload(2147483647)), 404);
 
     // Saisie par les trois rôles autorisés.
     const created = await call("POST", cookie.admin, "/api/qhse/inspections", payload(ownDriver.id));
-    expect(created.status).toBe(201);
+    expectStatus(created, 201);
     expect(created.body).toMatchObject({ kind: "cabin", driverId: ownDriver.id, inspectorId: admin.id, nonConformCount: 1 });
     expect(created.body.items[0]).toMatchObject({ criterionId: cabinId, conform: false, observation: "Ceinture non portée" });
     expect(typeof created.body.items[0].code).toBe("string");
     const byManagement = await call("POST", cookie.management, "/api/qhse/inspections", payload(otherDriver.id));
-    expect(byManagement.status).toBe(201);
-    expect((await call("POST", cookie.logistics, "/api/qhse/inspections", payload(otherDriver.id))).status).toBe(201);
+    expectStatus(byManagement, 201);
+    expectStatus(await call("POST", cookie.logistics, "/api/qhse/inspections", payload(otherDriver.id)), 201);
 
     // Date du contrôle dans le futur (au-delà de la tolérance de 5 min) : 400.
     const tomorrow = new Date(Date.now() + 86_400_000).toISOString();
-    expect((await call("POST", cookie.admin, "/api/qhse/inspections", { ...payload(ownDriver.id), inspectedAt: tomorrow })).status).toBe(400);
+    expectStatus(await call("POST", cookie.admin, "/api/qhse/inspections", { ...payload(ownDriver.id), inspectedAt: tomorrow }), 400);
 
     // Filtres from/to sur le jour Africa/Douala (UTC+1) : 2026-01-14T23:30Z est le 15 janvier à 00 h 30 locale.
     const lateNight = await call("POST", cookie.admin, "/api/qhse/inspections", {
       ...payload(otherDriver.id), inspectedAt: "2026-01-14T23:30:00.000Z",
     });
-    expect(lateNight.status).toBe(201);
+    expectStatus(lateNight, 201);
     const onDay = async (from: string, to: string) =>
       (await call("GET", cookie.admin, `/api/qhse/inspections?driverId=${otherDriver.id}&from=${from}&to=${to}`)).body.items
         .map((i: { id: number }) => i.id);
@@ -165,54 +166,54 @@ describe("contrôles inopinés QHSE", { timeout: 180000 }, () => {
 
     // Le client ne peut pas écrire l'inspecteur ni l'audit.
     const forged = await call("POST", cookie.admin, "/api/qhse/inspections", { ...payload(ownDriver.id), inspectorId: workshop.id });
-    expect(forged.status).toBe(201);
+    expectStatus(forged, 201);
     expect(forged.body.inspectorId).toBe(admin.id);
 
     // Personnel : voit tout, filtres.
     const all = await call("GET", cookie.management, `/api/qhse/inspections?driverId=${otherDriver.id}`);
-    expect(all.status).toBe(200);
+    expectStatus(all, 200);
     expect(all.body.total).toBe(2);
-    expect((await call("GET", cookie.management, "/api/qhse/inspections?kind=bogus")).status).toBe(400);
-    expect((await call("GET", cookie.management, "/api/qhse/inspections?driverId=2147483648")).status).toBe(400);
+    expectStatus(await call("GET", cookie.management, "/api/qhse/inspections?kind=bogus"), 400);
+    expectStatus(await call("GET", cookie.management, "/api/qhse/inspections?driverId=2147483648"), 400);
 
     // Chauffeur : ses seuls contrôles, en liste comme en détail.
     const mine = await call("GET", cookie.driverUser, "/api/qhse/inspections");
-    expect(mine.status).toBe(200);
+    expectStatus(mine, 200);
     expect(mine.body.items.length).toBe(2);
     expect(mine.body.items.every((i: { driverId: number }) => i.driverId === ownDriver.id)).toBe(true);
     // Un filtre sur un autre chauffeur ne contourne pas la cloison.
     const spoof = await call("GET", cookie.driverUser, `/api/qhse/inspections?driverId=${otherDriver.id}`);
-    expect(spoof.status).toBe(200);
+    expectStatus(spoof, 200);
     expect(spoof.body.total).toBe(0);
-    expect((await call("GET", cookie.driverUser, `/api/qhse/inspections/${created.body.id}`)).status).toBe(200);
-    expect((await call("GET", cookie.driverUser, `/api/qhse/inspections/${byManagement.body.id}`)).status).toBe(403);
-    expect((await call("GET", cookie.driverUser, "/api/qhse/inspections/2147483647")).status).toBe(403);
+    expectStatus(await call("GET", cookie.driverUser, `/api/qhse/inspections/${created.body.id}`), 200);
+    expectStatus(await call("GET", cookie.driverUser, `/api/qhse/inspections/${byManagement.body.id}`), 403);
+    expectStatus(await call("GET", cookie.driverUser, "/api/qhse/inspections/2147483647"), 403);
     // Compte chauffeur sans fiche liée : rien.
     const none = await call("GET", cookie.driverNoProfile, "/api/qhse/inspections");
-    expect(none.status).toBe(200);
+    expectStatus(none, 200);
     expect(none.body.total).toBe(0);
     // Détail pour un compte chauffeur sans fiche : 403 sur un contrôle existant comme sur un id absent.
-    expect((await call("GET", cookie.driverNoProfile, `/api/qhse/inspections/${created.body.id}`)).status).toBe(403);
-    expect((await call("GET", cookie.driverNoProfile, "/api/qhse/inspections/2147483647")).status).toBe(403);
+    expectStatus(await call("GET", cookie.driverNoProfile, `/api/qhse/inspections/${created.body.id}`), 403);
+    expectStatus(await call("GET", cookie.driverNoProfile, "/api/qhse/inspections/2147483647"), 403);
     // Détail côté personnel : 200, absent 404.
-    expect((await call("GET", cookie.logistics, `/api/qhse/inspections/${byManagement.body.id}`)).status).toBe(200);
-    expect((await call("GET", cookie.logistics, "/api/qhse/inspections/2147483647")).status).toBe(404);
-    expect((await call("GET", cookie.logistics, "/api/qhse/inspections/0")).status).toBe(400);
+    expectStatus(await call("GET", cookie.logistics, `/api/qhse/inspections/${byManagement.body.id}`), 200);
+    expectStatus(await call("GET", cookie.logistics, "/api/qhse/inspections/2147483647"), 404);
+    expectStatus(await call("GET", cookie.logistics, "/api/qhse/inspections/0"), 400);
 
     // Grille : création, doublon, désactivation (le critère inactif est refusé en saisie).
     const code = criterionCodes[0];
     const newCriterion = await call("POST", cookie.management, "/api/qhse/criteria", { code, label: "Critère de test", category: "stop" });
-    expect(newCriterion.status).toBe(201);
-    expect((await call("POST", cookie.admin, "/api/qhse/criteria", { code, label: "Doublon", category: "stop" })).status).toBe(409);
-    expect((await call("POST", cookie.admin, "/api/qhse/criteria", { code: "Mauvais Code", label: "Test", category: "stop" })).status).toBe(400);
+    expectStatus(newCriterion, 201);
+    expectStatus(await call("POST", cookie.admin, "/api/qhse/criteria", { code, label: "Doublon", category: "stop" }), 409);
+    expectStatus(await call("POST", cookie.admin, "/api/qhse/criteria", { code: "Mauvais Code", label: "Test", category: "stop" }), 400);
     const stopPayload = (criterionId: number) => ({ ...payload(ownDriver.id), kind: "stop", items: [{ criterionId, conform: true }] });
-    expect((await call("POST", cookie.admin, "/api/qhse/inspections", stopPayload(newCriterion.body.id))).status).toBe(201);
+    expectStatus(await call("POST", cookie.admin, "/api/qhse/inspections", stopPayload(newCriterion.body.id)), 201);
     const deactivated = await call("PATCH", cookie.admin, `/api/qhse/criteria/${newCriterion.body.id}`, { active: false, label: "Critère de test renommé" });
-    expect(deactivated.status).toBe(200);
+    expectStatus(deactivated, 200);
     expect(deactivated.body).toMatchObject({ active: false, label: "Critère de test renommé" });
-    expect((await call("POST", cookie.admin, "/api/qhse/inspections", stopPayload(newCriterion.body.id))).status).toBe(400);
-    expect((await call("PATCH", cookie.admin, `/api/qhse/criteria/${newCriterion.body.id}`, {})).status).toBe(400);
-    expect((await call("PATCH", cookie.admin, "/api/qhse/criteria/2147483647", { active: true })).status).toBe(404);
+    expectStatus(await call("POST", cookie.admin, "/api/qhse/inspections", stopPayload(newCriterion.body.id)), 400);
+    expectStatus(await call("PATCH", cookie.admin, `/api/qhse/criteria/${newCriterion.body.id}`, {}), 400);
+    expectStatus(await call("PATCH", cookie.admin, "/api/qhse/criteria/2147483647", { active: true }), 404);
 
     // L'historique garde le libellé d'origine après le renommage.
     const history = await call("GET", cookie.admin, `/api/qhse/inspections?kind=stop&driverId=${ownDriver.id}`);
