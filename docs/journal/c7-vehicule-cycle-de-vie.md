@@ -507,3 +507,16 @@ Le prochain échec dira lui-même s'il s'agit d'un 401, d'un 403, d'un 404 (drap
   - le contrat « rejet et rapprochement simultanés » fait 5 essais, chacun attendant un 200, un 409 métier et un état final cohérent ;
   - mutant (le verrou du rejet retiré) : 3 essais sur 5 échouent, sur deux lancements.
 - **Leçon** : l'ordre des verrous d'une transaction compte aussi les verrous pris par les déclencheurs. Avant d'affirmer qu'il n'y a pas de cycle, lire les déclencheurs de chaque table écrite, pas seulement le code TypeScript.
+
+## 2026-11-06 — Cliquet : pas de montant dans les journaux
+
+- **Quoi** : `tests/unit/server/log-amounts-hygiene.test.ts` balaie les appels `log.*` et `console.*` de `server/` (hors `_archive`). Il échoue sur tout appel dont les arguments portent une valeur monétaire : une clé ou une interpolation nommée prix, coût, montant, solde, TTC ou TVA, ou un `${…} FCFA` / `XAF`.
+- **Comment** :
+  - seul le code des arguments compte (le texte des chaînes est retiré, les `${…}` restent) : le mot dans le message (« fuel balance error ») n'est pas un montant ;
+  - noms exclus : suffixes `Error`, `Changed`, `Id`, `Count`, `Mode`, `Rate`… ;
+  - un segment camelCase entier est exigé : `notValidated` ne contient pas « TVA » (premier essai trop large, 3 faux positifs dans `init-database.ts`) ;
+  - dix cas d'exemple fixent le comportement du détecteur.
+- **Corrigés** (signalés par la relecture sécurité) : `part-requirements-service.ts` (2 `log.debug`) et `stock-alerts-service.ts` (1). Les logs sont conservés, sans montant ; ils journalisent les identifiants.
+- **Gelés** : 14 appels dans 8 fichiers. Ce sont des paiements, recharges et consommations carburant, le prix convenu de mission, des statistiques en `console.log`. Le compte par fichier ne fait que baisser.
+- **Pourquoi** : les journaux sont lus bien au-delà des rôles finance. L'identifiant de l'objet suffit à retrouver le montant en base.
+- **Reste** : décider si les journaux d'audit métier (paiement enregistré, prix convenu modifié) gardent le montant. C'est à trancher par 0a ; d'ici là, ils sont gelés.
