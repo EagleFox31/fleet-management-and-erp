@@ -2,11 +2,15 @@ import { db } from '../db';
 import { workOrders, vehicles, users, partsUsed, parts, tireRotations, workOrderItems } from '../../shared/schema';
 import { eq, and, desc, inArray, sum, sql } from 'drizzle-orm';
 import { computeWorkOrderCost } from '@shared/work-order-cost';
+import { AppError } from '../lib/app-error';
 import { moduleLogger } from '../lib/logger';
 import { laborRatesForWorkOrders } from './workshop-labor-rates-service';
 import { workOrderStaffScope } from "../lib/work-order-realtime-scope";
 
 const log = moduleLogger('technician-work-orders');
+
+export const WORK_ORDER_STATUS_CHANGED_ERROR =
+  "Le statut de cet ordre de travail vient de changer. Rechargez la page.";
 
 export interface TechnicianWorkOrder {
   id: number;
@@ -231,8 +235,8 @@ export class TechnicianWorkOrdersService {
     notes?: string
   ): Promise<TechnicianWorkOrder | null> {
     try {
-      console.log(`🔄 [TECH-WO] Mise à jour statut OT ${workOrderId} vers ${newStatus} par technicien ${technicianId}`);
-      
+      log.info({ workOrderId, technicianId, newStatus }, "Mise à jour du statut d'un OT par le technicien");
+
       // Vérifier que l'ordre appartient au technicien
       const existingOrder = await db
         .select()
@@ -244,27 +248,24 @@ export class TechnicianWorkOrdersService {
         .limit(1);
 
       if (!existingOrder.length) {
-        throw new Error('Ordre de travail non trouvé ou non assigné à ce technicien');
+        throw new AppError(404, 'Ordre de travail non trouvé ou non assigné à ce technicien');
       }
 
-      const updateData: any = {
-        status: newStatus,
-        updatedAt: new Date()
-      };
-
-      if (notes) {
-        updateData.notes = notes;
-      }
-
-      if (newStatus === 'completed') {
-        updateData.completedDate = new Date();
-      }
-
-      const [updatedOrder] = await db
+      // Compare-and-set : le statut lu reste la condition d'écriture. Une transition concurrente
+      // (clôture, annulation) entre la lecture et l'écriture laisse l'ordre tel quel : 409.
+      const updated = await db
         .update(workOrders)
-        .set(updateData)
-        .where(eq(workOrders.id, workOrderId))
-        .returning();
+        .set({ status: newStatus as typeof workOrders.$inferInsert.status, updatedAt: new Date() })
+        .where(and(
+          eq(workOrders.id, workOrderId),
+          eq(workOrders.technicianId, technicianId),
+          eq(workOrders.status, existingOrder[0].status)
+        ))
+        .returning({ id: workOrders.id });
+
+      if (updated.length === 0) {
+        throw new AppError(409, WORK_ORDER_STATUS_CHANGED_ERROR);
+      }
 
       if (newStatus === 'completed' && existingOrder[0].status !== 'completed') {
         // P3-1 : un OT préventif clôturé fait avancer l'échéance de son plan.
@@ -272,8 +273,8 @@ export class TechnicianWorkOrdersService {
         await preventiveMaintenanceService.onWorkOrderCompleted(workOrderId);
       }
 
-      console.log(`✅ [TECH-WO] Statut mis à jour avec succès`);
-      
+      log.info({ workOrderId, newStatus }, "Statut d'OT mis à jour");
+
       // Diffuser la mise à jour via WebSocket temps réel
       if ((global as any).broadcastUpdate) {
         (global as any).broadcastUpdate('work_order_status_changed', {
@@ -290,7 +291,7 @@ export class TechnicianWorkOrdersService {
       const enrichedOrders = await this.getTechnicianWorkOrders(technicianId);
       return enrichedOrders.find(wo => wo.id === workOrderId) || null;
     } catch (error) {
-      console.error('Erreur lors de la mise à jour du statut:', error);
+      log.error({ err: error, workOrderId, technicianId }, 'Erreur lors de la mise à jour du statut');
       throw error;
     }
   }
