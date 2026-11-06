@@ -19,7 +19,7 @@ const PRICE = "15000000.00";
 const PRICE_DIGITS = "15000000";
 const ALLOWED: readonly string[] = VEHICLE_PURCHASE_PRICE_READ_ROLES;
 const ROLES = [...ALL_APP_ROLES] as AppRole[];
-const DENIED = ROLES.filter((role) => !ALLOWED.includes(role));
+const DENIED: readonly string[] = ROLES.filter((role) => !ALLOWED.includes(role));
 // Le chauffeur n'est pas du personnel de plein droit ici : la jointure de mission le concerne s'il est affecté.
 const OPERATIONS_ROLES = ROLES.filter((role) => role !== "client");
 
@@ -244,7 +244,7 @@ describe("écriture du prix d'achat (PATCH /api/vehicles/:id)", () => {
     await db.update(vehicles).set({ purchasePrice: PRICE }).where(inArray(vehicles.id, [vehicleId]));
   });
 
-  it.each(["management", "technician"])("%s + purchasePrice : 403, prix inchangé", async (actor) => {
+  it.each(["management", "technician"] as const)("%s + purchasePrice : 403, prix inchangé", async (actor) => {
     const res = await session.call("PATCH", `/api/vehicles/${vehicleId}`, { actor, body: { purchasePrice: 17000000 } });
     expect(res.status).toBe(403);
     expect(Number((await priceInDb()).price)).toBe(Number(PRICE));

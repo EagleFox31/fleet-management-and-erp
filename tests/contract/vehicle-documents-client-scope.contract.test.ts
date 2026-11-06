@@ -231,7 +231,7 @@ describe("écritures sur un véhicule : cloison entre clients", { timeout: 60000
     expectStaffOnly(await call("PUT", `/api/vehicles/${fixture.B.vehicleId}/maintenance-position`, { actor: "clientA", body: { position: "TEST" } }));
     const [after] = await db.select().from(vehicles).where(eq(vehicles.id, fixture.B.vehicleId));
     expect(after.mileage).toBe(before.mileage);
-    expect(after.updatedAt).toEqual(before.updatedAt);
+    expect(after.maintenancePosition).toEqual(before.maintenancePosition);
   });
 
   it("un client ne saisit pas le kilométrage ni la position de son propre véhicule", async () => {
@@ -240,7 +240,7 @@ describe("écritures sur un véhicule : cloison entre clients", { timeout: 60000
     expectStaffOnly(await call("PUT", `/api/vehicles/${fixture.A.vehicleId}/maintenance-position`, { actor: "clientA", body: { position: "TEST" } }));
     const [after] = await db.select().from(vehicles).where(eq(vehicles.id, fixture.A.vehicleId));
     expect(after.mileage).toBe(before.mileage);
-    expect(after.updatedAt).toEqual(before.updatedAt);
+    expect(after.maintenancePosition).toEqual(before.maintenancePosition);
   });
 
   it("non-régression : le personnel met à jour le kilométrage de tout véhicule", async () => {

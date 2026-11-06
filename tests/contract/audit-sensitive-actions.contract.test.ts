@@ -59,7 +59,7 @@ async function pollAudit(where: ReturnType<typeof and>, expected: number): Promi
 }
 
 const auditRowsFor = (entityId: number, expected: number) =>
-  pollAudit(and(eq(activityLogs.entityType, "user"), eq(activityLogs.entityId, String(entityId))), expected);
+  pollAudit(and(eq(activityLogs.entityType, "user"), eq(activityLogs.entityId, entityId)), expected);
 
 beforeAll(async () => {
   setAuditSink(dbAuditSink);
@@ -73,11 +73,10 @@ beforeAll(async () => {
 afterAll(async () => {
   setAuditSink(null);
   if (ids.userIds.length) {
-    const asText = ids.userIds.map(String);
     await db.delete(activityLogs).where(inArray(activityLogs.userId, ids.userIds));
     await db
       .delete(activityLogs)
-      .where(and(eq(activityLogs.entityType, "user"), inArray(activityLogs.entityId, asText)));
+      .where(and(eq(activityLogs.entityType, "user"), inArray(activityLogs.entityId, ids.userIds)));
   }
   await cleanupCreated(ids);
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));

@@ -70,6 +70,18 @@ export function apiErrorProblems(
   return problems;
 }
 
+/**
+ * `message` et `code` d'un corps de réponse décodé (`undefined` s'ils manquent), pour comparer
+ * deux réponses d'erreur champ à champ sans supposer la forme d'un corps typé `unknown`.
+ */
+export function errorFields(body: unknown): { message: unknown; code: unknown } {
+  if (body === null || typeof body !== "object") return { message: undefined, code: undefined };
+  return {
+    message: "message" in body ? body.message : undefined,
+    code: "code" in body ? body.code : undefined,
+  };
+}
+
 /** `message` d'une réponse d'erreur sans le `requestId` (« Référence : … » des 5xx) : base des contrôles de fuite sur le message seul. */
 export function messageText(body: { message?: unknown; requestId?: unknown } | null | undefined): string {
   const message = typeof body?.message === "string" ? body.message : "";

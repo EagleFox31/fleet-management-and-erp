@@ -3,7 +3,7 @@ import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { parts, partsStockMovements, workOrders } from "../../shared/schema";
-import { apiErrorProblems } from "../support/api-error";
+import { apiErrorProblems, errorFields } from "../support/api-error";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestPart, createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
@@ -240,8 +240,8 @@ describe("A5-6 GET /api/work-orders/:id", { timeout: 60000 }, () => {
     expect(apiErrorProblems(res.status, res.body, 404)).toEqual([]);
     const missing = await call("GET", `/api/work-orders/${MISSING_ID}`, "clientA");
     expect(missing.status).toBe(res.status);
-    expect(missing.body.message).toBe(res.body.message);
-    expect(missing.body.code).toBe(res.body.code);
+    expect(errorFields(missing.body).message).toBe(errorFields(res.body).message);
+    expect(errorFields(missing.body).code).toBe(errorFields(res.body).code);
   });
 
   it("le propriétaire et le personnel lisent l'OT (200)", async () => {

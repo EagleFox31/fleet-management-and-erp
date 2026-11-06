@@ -1,5 +1,6 @@
 import { createServer, type Server } from "http";
 import { eq, inArray } from "drizzle-orm";
+import type { PoolClient } from "@neondatabase/serverless";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, pool } from "../../server/db";
 import { parts, partsUsed, vehicles, workOrders } from "../../shared/schema";
@@ -237,7 +238,7 @@ describe("PATCH /api/technician/work-orders/:id/status", () => {
 async function whileWorkOrderLocked(
   workOrderId: number,
   request: () => Promise<Awaited<ReturnType<typeof call>>>,
-  meanwhile: (client: Awaited<ReturnType<typeof pool.connect>>) => Promise<unknown>,
+  meanwhile: (client: PoolClient) => Promise<unknown>,
 ) {
   const client = await pool.connect();
   try {

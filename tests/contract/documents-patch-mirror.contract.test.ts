@@ -53,7 +53,7 @@ async function newVehicle(mirror: Partial<typeof vehicles.$inferInsert> = {}) {
   return vehicle.id;
 }
 
-async function addDoc(vehicleId: number, type: string, expiryDate: string | null) {
+async function addDoc(vehicleId: number, type: typeof vehicleDocuments.$inferInsert["type"], expiryDate: string | null) {
   const [doc] = await db
     .insert(vehicleDocuments)
     .values({ vehicleId, name: `TEST ${type} ${expiryDate}`, type, expiryDate, filename: "x.pdf", filesize: 1, fileType: "application/pdf", filePath: "uploads/x.pdf" })
