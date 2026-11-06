@@ -4,9 +4,10 @@ import { roleJsonMask } from "./role-json-mask";
 /**
  * Prix des pièces : lu par le personnel hors chauffeur (STOCK_VALUATION_READ_ROLES, même périmètre que
  * la valuation du stock et le prix des pneus). Le chauffeur garde la lecture du catalogue, sans prix.
- * Liste fermée : `unitPrice` (fiche, pièces posées) et `additionalPrice` (variantes).
+ * Liste fermée : `unitPrice` (fiche, pièces posées), `additionalPrice` (variantes), `partUnitPrice` et
+ * `estimatedCost` (quantité × prix) des demandes de pièce.
  */
-export const PART_PRICE_KEYS: readonly string[] = ["unitPrice", "additionalPrice"];
+export const PART_PRICE_KEYS: readonly string[] = ["unitPrice", "additionalPrice", "partUnitPrice", "estimatedCost"];
 
 export function canReadPartPrice(role: string | null | undefined): boolean {
   return (STOCK_VALUATION_READ_ROLES as readonly string[]).includes((role ?? "").trim().toLowerCase());
@@ -33,5 +34,5 @@ export function redactPartPrice<T>(role: string | null | undefined, value: T): T
   return canReadPartPrice(role) ? value : (walk(value) as T);
 }
 
-/** Monté sur `/api/parts` avant tout routeur (routes.ts compris) : masque les prix des GET pour les rôles hors périmètre. */
+/** Monté sur `/api/parts` et `/api/part-requirements` avant tout routeur (routes.ts compris) : masque les prix des GET pour les rôles hors périmètre. */
 export const partPriceMask = roleJsonMask((role, body) => redactPartPrice(role, body), "prix des pièces");

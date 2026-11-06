@@ -120,6 +120,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use("/work-orders", workOrderCostMask);
   // Prix des pièces : retirés des lectures GET /api/parts/* hors STOCK_VALUATION_READ_ROLES (chauffeur).
   apiRouter.use("/parts", partPriceMask);
+  // Demandes de pièce : prix unitaire et coût estimé (quantité × prix), même périmètre.
+  apiRouter.use("/part-requirements", partPriceMask);
 
   // Gardes de connexion (T-12, T-48) : montes ici car /api est servi AVANT registerRoutes
   // (server/app.ts), donc avant les handlers de login de server/routes.ts. Le corps est deja
