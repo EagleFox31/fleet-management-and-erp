@@ -3,6 +3,7 @@ import path from 'node:path';
 import { db, pool } from './db';
 import { users } from '../shared/schema';
 import { TREASURY_CATEGORIES } from '../shared/contracts/treasury';
+import { vehicleDocumentTypeSeedSql } from '../shared/constants/vehicle-document-types';
 import { sql } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 import { moduleLogger } from './lib/logger';
@@ -12,6 +13,8 @@ import { hashPlainUserPins } from './lib/pin-hash-migration';
 import { randomPasswordHash } from './lib/dummy-hash';
 
 const initLog = moduleLogger('init-database');
+
+const VEHICLE_DOCUMENT_TYPE_SEED_SQL = vehicleDocumentTypeSeedSql();
 
 const BOOTSTRAP_SQL_FILES = [
   'work-orders-realtime-triggers.sql',
@@ -117,19 +120,8 @@ export const LOT_RECETTE_SCHEMA_STATEMENTS: readonly string[] = [
   active boolean NOT NULL DEFAULT true,
   sort_order integer NOT NULL DEFAULT 0
 )`,
-  `INSERT INTO vehicle_document_types (code, label, validity_months, alert_days, active, sort_order) VALUES
-  ('carte_grise', 'Carte grise', 120, 30, true, 10),
-  ('carte_bleue', 'Carte bleue', 12, 30, true, 20),
-  ('visite_technique', 'Visite technique', 6, 30, true, 30),
-  ('acf', 'ACF', NULL, 30, true, 40),
-  ('tae', 'TAE', 6, 30, true, 50),
-  ('vignette', 'Vignette', 12, 30, true, 60),
-  ('jaugeage', 'Jaugeage', 24, 30, true, 70),
-  ('assurance', 'Assurance', 12, 30, true, 80),
-  ('agrement_pd', 'Agrément PD', NULL, 30, true, 90),
-  ('taxe', 'Taxe', NULL, 30, true, 900),
-  ('autre', 'Autre', NULL, 30, true, 910)
-ON CONFLICT (code) DO NOTHING`,
+  // Graine rendue depuis shared/constants/vehicle-document-types.ts (même texte que la migration).
+  VEHICLE_DOCUMENT_TYPE_SEED_SQL,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_count integer NOT NULL DEFAULT 0`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until timestamp`,
   `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_failed_login_at timestamp`,
@@ -685,6 +677,72 @@ export async function reportUsersPinBcryptGaps(client: Queryable, log: WarnLogge
       : `Contrainte ${USERS_PIN_BCRYPT_CHECK} laissée NOT VALID : ${plainPins} PIN en clair dans users, à reprendre en hash bcrypt`,
   );
   return { missing, notValidated, plainPins };
+}
+
+/**
+ * vehicle_documents.type → vehicle_document_types(code), FK posée NOT VALID (jamais validée ici) après une clé
+ * unique sur code si ni PK ni UNIQUE ne la couvre. Doit rester identique à
+ * server/db/migrations/20261106_vehicle_documents_type_fk.sql : tests/unit/server/vehicle-documents-type-fk-schema.test.ts
+ * compare les deux. Un seul envoi = une transaction, sérialisée par le verrou consultatif.
+ */
+export const VEHICLE_DOCUMENTS_TYPE_FK_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint c
+    WHERE c.conrelid = 'vehicle_document_types'::regclass
+      AND c.contype IN ('p', 'u')
+      AND c.conkey = ARRAY[(SELECT a.attnum FROM pg_attribute a WHERE a.attrelid = 'vehicle_document_types'::regclass AND a.attname = 'code')]
+  ) THEN
+    ALTER TABLE vehicle_document_types ADD CONSTRAINT vehicle_document_types_code_key UNIQUE (code);
+  END IF;
+EXCEPTION WHEN lock_not_available OR undefined_table OR unique_violation THEN
+  RAISE WARNING 'vehicle_document_types_code_key non posée : verrou indisponible, table absente ou codes en double';
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'vehicle_documents'::regclass
+      AND conname = 'vehicle_documents_type_vehicle_document_types_code_fk'
+  ) THEN
+    ALTER TABLE vehicle_documents ADD CONSTRAINT vehicle_documents_type_vehicle_document_types_code_fk
+      FOREIGN KEY (type) REFERENCES vehicle_document_types(code) NOT VALID;
+  END IF;
+EXCEPTION WHEN lock_not_available OR undefined_table OR invalid_foreign_key THEN
+  RAISE WARNING 'vehicle_documents_type_vehicle_document_types_code_fk non posée : verrou indisponible, table absente ou code sans clé unique';
+END $$;`;
+
+export const VEHICLE_DOCUMENTS_TYPE_FK = 'vehicle_documents_type_vehicle_document_types_code_fk';
+
+/**
+ * Le RAISE WARNING n'atteint pas les logs applicatifs : relit pg_constraint après VEHICLE_DOCUMENTS_TYPE_FK_SQL et
+ * journalise la FK absente ou le seul nombre de documents dont le type est hors référentiel (jamais une valeur
+ * ni un id). Ces lignes restent lisibles ; la FK NOT VALID ne contrôle que les écritures suivantes.
+ */
+export async function reportVehicleDocumentTypeGaps(client: Queryable, log: WarnLogger = initLog) {
+  const { rows } = await client.query(
+    `SELECT convalidated FROM pg_constraint WHERE conrelid = 'vehicle_documents'::regclass AND conname = $1`,
+    [VEHICLE_DOCUMENTS_TYPE_FK],
+  );
+  const missing = rows.length === 0;
+  const { rows: counted } = await client.query(
+    `SELECT count(*)::int AS n FROM vehicle_documents d
+      WHERE NOT EXISTS (SELECT 1 FROM vehicle_document_types t WHERE t.code = d.type)`,
+  );
+  const outsideReferential = Number(counted[0].n);
+  if (missing || outsideReferential > 0) {
+    log.warn(
+      { constraint: VEHICLE_DOCUMENTS_TYPE_FK, missing, outsideReferential },
+      missing
+        ? `Contrainte ${VEHICLE_DOCUMENTS_TYPE_FK} non posée (verrou, table ou clé unique absente) : type de document non contrôlé en base`
+        : `${outsideReferential} document(s) véhicule au type hors référentiel vehicle_document_types (FK ${VEHICLE_DOCUMENTS_TYPE_FK} laissée NOT VALID)`,
+    );
+  }
+  return { missing, outsideReferential };
 }
 
 /**
@@ -2369,6 +2427,10 @@ export async function initializeDatabase() {
     // Relu après le dernier SQL qui pose une contrainte réconciliée : au premier démarrage, une table
     // pas encore créée serait signalée à tort.
     await reportCdcConstraintGaps(pool);
+    // FK vehicle_documents.type → vehicle_document_types(code), NOT VALID — jumelle de
+    // server/db/migrations/20261106_vehicle_documents_type_fk.sql ; nombre de lignes hors référentiel journalisé.
+    await pool.query(VEHICLE_DOCUMENTS_TYPE_FK_SQL);
+    await reportVehicleDocumentTypeGaps(pool);
 
     // Vérifier si des utilisateurs existent déjà
     const existingUsers = await db.select().from(users).limit(1);

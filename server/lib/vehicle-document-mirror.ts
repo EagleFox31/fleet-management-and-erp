@@ -2,25 +2,10 @@ import { and, eq, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { vehicleDocuments, vehicles } from "@shared/schema";
 import { db, type DbExecutor } from "../db";
 import { toExpiryDateOnly } from "@shared/constants/expiry-day";
+import { normalizeVehicleDocumentType } from "@shared/constants/vehicle-document-types";
 
-/** Normalise les anciens codes de type de document vers ceux de `vehicle_documents`. */
-export function normalizeVehicleDocumentType(rawType: string | null | undefined): string {
-  const normalized = String(rawType || "").trim().toLowerCase();
-  switch (normalized) {
-    case "insurance":
-      return "assurance";
-    case "inspection":
-    case "technical_inspection":
-    case "controle_technique":
-      return "visite_technique";
-    case "license":
-    case "registration":
-    case "registration_card":
-      return "carte_grise";
-    default:
-      return normalized;
-  }
-}
+// Source unique de la table d'alias : shared/constants/vehicle-document-types.ts.
+export { normalizeVehicleDocumentType };
 
 export type MirrorMode =
   /** Dépôt d'un document : le miroir ne recule jamais (GREATEST). */

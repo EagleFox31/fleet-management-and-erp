@@ -801,3 +801,38 @@ WHERE po.status IN ('delivered', 'completed')
 - unitaires `alert-emission-hygiene` et `login-lockout` verts ;
 - 5 fichiers d'intégration touchés verts sur Postgres local ;
 - `login-lockout-db-store` : 8 sur 8 en relance. Le `ECONNRESET` vient du proxy local et se produit aussi sans ce changement.
+
+## 2026-11-06 — Types de document véhicule : FK vers le référentiel, normalisation unique
+
+**Quoi.** `vehicle_documents.type` référence le référentiel dynamique `vehicle_document_types(code)` par la FK `vehicle_documents_type_vehicle_document_types_code_fk`, posée `NOT VALID`, sans `ON DELETE` ni `ON UPDATE CASCADE`. L'enum TypeScript de la colonne disparaît. La graine des 11 types et la table d'alias vivent dans `shared/constants/vehicle-document-types.ts`. Les écrivains normalisent par `normalizeVehicleDocumentType`, puis vérifient le code actif par `resolveActiveVehicleDocumentType(s)` (`server/lib/vehicle-document-type.ts`) :
+- route d'upload ;
+- `workflow-document-service` ;
+- `document-management-service` ;
+- `vehicle-activation-service-working` (quatrième écrivain, typé par `VehicleDocumentTypeCode`).
+
+**Comment.**
+- `server/db/migrations/20261106_vehicle_documents_type_fk.sql` et `VEHICLE_DOCUMENTS_TYPE_FK_SQL` portent le même SQL ; un test unitaire les compare. Le SQL tourne sous verrou consultatif et `lock_timeout` de 5 s. Il ajoute une clé unique sur `code` seulement si ni PK ni UNIQUE ne la couvre (la table a sa PK), puis la FK si elle est absente. Le nom de la FK est celui que Drizzle génère : sur une base créée par `drizzle-kit push`, le SQL ne fait rien.
+- Au démarrage, `reportVehicleDocumentTypeGaps` journalise par `moduleLogger` le seul **nombre** de lignes hors référentiel, sans valeur ni identifiant. Aucun `VALIDATE`.
+- La seed d'init-database est rendue depuis la constante (`vehicleDocumentTypeSeedSql()`), au texte identique à la migration du lot recette.
+- `document-management-service` refuse en 400 avant toute insertion, et non plus en cours de boucle.
+
+**Pourquoi en base.**
+- Un code inexistant ne doit entrer par aucun chemin : route, service, script ou SQL direct.
+- Un type utilisé ne se supprime pas par un DELETE direct. Il se désactive (`active = false`), ce que le PATCH permet toujours.
+- Il n'y a pas de route DELETE : la FK protège seule ce cas.
+- Le PATCH ignore un `code` dans le corps : le schéma Zod l'omet, et un corps qui ne contient que `code` répond 400. Ce comportement est figé par contrat.
+- `NOT VALID` garde lisibles les lignes historiques hors référentiel. Il y en a 0 sur la base de test locale.
+
+**Retour arrière.** `ALTER TABLE vehicle_documents DROP CONSTRAINT vehicle_documents_type_vehicle_document_types_code_fk;`, puis retirer la migration et `VEHICLE_DOCUMENTS_TYPE_FK_SQL`. Sans cela, le démarrage suivant repose la FK.
+
+**Preuve.**
+- `tsc` : 0 erreur ; `check:tests` : 0 erreur figée ; unitaires verts, dont la table d'alias et le schéma de la FK.
+- Contrats `vehicle-documents-upload` et `vehicle-document-types` : 28 tests verts ; les 31 fichiers de contrat qui touchent `vehicle_documents` : 386 tests verts ; 11 fichiers d'intégration verts.
+- Mutants, tous détectés :
+  - normalisation retirée : l'alias `insurance` n'est plus enregistré en `assurance` ;
+  - contrôle de code actif sauté : un type inconnu ou inactif ne répond plus en 400 ;
+  - FK absente : 3 échecs (insert direct, DELETE direct, UPDATE direct) ;
+  - `.omit({ code })` retiré : le code est renommé ;
+  - désactivation d'un type utilisé refusée : 2 échecs.
+- Idempotence sur Postgres local : deux passes de la migration laissent la contrainte au même `oid` et au même `xmin` (21567 / 254976). Après le mutant FK, le démarrage suivant a reposé la contrainte.
+- Comptes avant et après : 9 documents, 11 types, 0 ligne hors référentiel.

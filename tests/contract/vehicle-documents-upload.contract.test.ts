@@ -2,9 +2,9 @@ import { createServer, type Server } from "http";
 import fs from "fs";
 import path from "path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { activityLogs, vehicleDocuments, vehicleDocumentTypes, vehicles } from "../../shared/schema";
-import { db } from "../../server/db";
+import { db, pool } from "../../server/db";
 import * as mirrorLib from "../../server/lib/vehicle-document-mirror";
 import { syncVehicleDocumentMirror } from "../../server/lib/vehicle-document-mirror";
 import { getContractApp } from "../support/app";
@@ -20,6 +20,9 @@ let vehicleId = 0;
 const ids = createIdBag();
 const cookies = new Map<string, string>();
 const INACTIVE = `zz_inactif_${Date.now().toString(36)}`;
+const FK = "vehicle_documents_type_vehicle_document_types_code_fk";
+/** Codes d'alias inscrits par ce fichier pour simuler des lignes historiques : seuls ceux-là sont retirés. */
+const aliasCodesCreated: string[] = [];
 const vehicleDir = () => path.join("./uploads/documents", `vehicle-${vehicleId}`);
 // Le dépôt versionne des `.gitkeep` dans certains `uploads/documents/vehicle-<id>/` : selon la
 // séquence de la base, l'id du véhicule de test peut tomber dessus. Ils ne comptent pas et
@@ -67,7 +70,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await db.delete(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
-  await db.delete(vehicleDocumentTypes).where(eq(vehicleDocumentTypes.code, INACTIVE));
+  await db.delete(vehicleDocumentTypes).where(inArray(vehicleDocumentTypes.code, [INACTIVE, ...aliasCodesCreated]));
   for (const f of filesOnDisk()) fs.rmSync(path.join(vehicleDir(), f), { recursive: true, force: true });
   if (fs.existsSync(vehicleDir()) && fs.readdirSync(vehicleDir()).length === 0) fs.rmdirSync(vehicleDir());
   // L'intercepteur d'audit journalise l'ecriture sur le vehicule : ces lignes bloquent la suppression des utilisateurs.
@@ -131,12 +134,18 @@ describe("POST /api/vehicles/:vehicleId/documents", { timeout: 120000 }, () => {
       ["registration_card", "licensePlateExpiry"],
       ["assurance", "insuranceExpiry"],
     ] as const;
+    // Une ligne historique peut porter un alias (antérieure à la FK NOT VALID). Pour la recréer, l'alias
+    // est inscrit le temps du test au référentiel, inactif : aucun écrivain ne peut le choisir.
+    const created = await db
+      .insert(vehicleDocumentTypes)
+      .values(cases.filter(([type]) => type !== "assurance").map(([type]) => ({ code: type, label: `TEST alias ${type}`, validityMonths: null, alertDays: 30, active: false, sortOrder: 990 })))
+      .onConflictDoNothing()
+      .returning({ code: vehicleDocumentTypes.code });
+    aliasCodesCreated.push(...created.map((r) => r.code));
     for (const [type, column] of cases) {
       const [doc] = await db
         .insert(vehicleDocuments)
-        // Les alias (insurance, license...) sont hors de l'enum TypeScript de la colonne, qui reste du
-        // texte libre en base : la valeur passe en paramètre SQL brut.
-        .values({ vehicleId, name: `TEST alias ${type}`, type: sql`${type}`, filename: "x.pdf", filesize: 1, fileType: "application/pdf", filePath: "uploads/x.pdf" })
+        .values({ vehicleId, name: `TEST alias ${type}`, type, filename: "x.pdf", filesize: 1, fileType: "application/pdf", filePath: "uploads/x.pdf" })
         .returning();
       await db.update(vehicles).set({ [column]: "2040-01-01" }).where(eq(vehicles.id, vehicleId));
       const patch = await fetch(`${baseUrl}/api/documents/${doc.id}`, {
@@ -164,6 +173,26 @@ describe("POST /api/vehicles/:vehicleId/documents", { timeout: 120000 }, () => {
       expect(res.body.message).toBe("Type de document inconnu ou inactif.");
     }
     expect(filesOnDisk()).toHaveLength(before);
+  });
+
+  it("normalise un alias a l'ecriture : insurance est enregistre en assurance (reponse et base)", async () => {
+    const res = await upload({ name: "Alias insurance", type: "insurance" }, "workshop_manager");
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ type: "assurance" });
+    const [row] = await db.select().from(vehicleDocuments).where(eq(vehicleDocuments.id, res.body.id));
+    expect(row.type).toBe("assurance");
+  });
+
+  it("FK : un insert direct hors referentiel est refuse par la base (23503), aucune ligne", async () => {
+    const outside = `zz_hors_referentiel_${Date.now().toString(36)}`;
+    await expect(
+      pool.query(
+        "INSERT INTO vehicle_documents (vehicle_id, name, type, filename, filesize, file_type, file_path) VALUES ($1, 'TEST hors referentiel', $2, 'x.pdf', 1, 'application/pdf', 'uploads/x.pdf')",
+        [vehicleId, outside],
+      ),
+    ).rejects.toMatchObject({ code: "23503", constraint: FK });
+    const { rows } = await pool.query("SELECT count(*)::int AS n FROM vehicle_documents WHERE type = $1", [outside]);
+    expect(rows[0].n).toBe(0);
   });
 
   it("garde les anciens refus : champs manquants et mime non supporte", async () => {

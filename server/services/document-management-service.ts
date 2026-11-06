@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import fs from 'fs/promises';
 import path from 'path';
 import { uploadedFileCandidates } from '../lib/uploaded-file';
+import { resolveActiveVehicleDocumentTypes } from '../lib/vehicle-document-type';
 
 export interface DocumentData {
   name: string;
@@ -32,8 +33,12 @@ export class DocumentManagementService {
 
     console.log(`Sauvegarde de ${documents.length} documents pour le véhicule ${vehicleId}`);
 
+    // Alias normalisés et codes actifs exigés pour tout le lot, avant la première écriture :
+    // un type hors référentiel donne un 400 lisible, pas une violation de clé étrangère.
+    const types = await resolveActiveVehicleDocumentTypes(documents.map((doc) => doc.type));
+
     try {
-      for (const doc of documents) {
+      for (const [index, doc] of documents.entries()) {
         // Vérifier que le fichier existe
         const fileExists = await this.verifyFileExists(doc.file_path);
         if (!fileExists) {
@@ -45,7 +50,7 @@ export class DocumentManagementService {
         await db.insert(vehicleDocuments).values({
           vehicleId,
           name: doc.name,
-          type: doc.type,
+          type: types[index],
           description: doc.description || null,
           filename: doc.filename,
           filesize: doc.filesize,
