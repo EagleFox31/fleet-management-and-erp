@@ -39,6 +39,7 @@ import faultCatalogRoutes from "./fault-catalog.routes";
 import tireRotationsRoutes from "./tire-rotations.routes";
 import adminUsersGuardRoutes from "./admin-users-guard.routes";
 import statisticsCostGuardRoutes from "./statistics-cost-guard.routes";
+import stockValuationGuardRoutes from "./stock-valuation-guard.routes";
 import lastAdminGuardRoutes from "./last-admin-guard.routes";
 import workflowsRoutes from "./workflows.routes";
 import auditLogsRoutes from "./audit-logs.routes";
@@ -169,6 +170,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(lastAdminGuardRoutes);
   // Statistiques à montant (coût de maintenance, KPI de flotte) : gardes, les routes restent dans routes.ts.
   apiRouter.use(statisticsCostGuardRoutes);
+  // Valuation du stock (/api/parts/statistics) : garde, la route reste dans routes.ts.
+  apiRouter.use(stockValuationGuardRoutes);
   // Brouillon d'acquisition : liste blanche des champs, statut jamais lu du corps.
   // Fichiers téléversés : pièce jointe, nosniff, type en liste blanche (sortis de routes.ts).
   apiRouter.use(uploadedDocumentsRoutes);

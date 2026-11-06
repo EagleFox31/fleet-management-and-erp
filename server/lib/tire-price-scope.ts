@@ -1,11 +1,11 @@
-import { PART_CATALOG_EVENT_ROLES } from "@shared/constants/roles";
+import { STOCK_VALUATION_READ_ROLES } from "@shared/constants/roles";
 
 /**
- * Prix d'achat des pneus : lu par le personnel hors chauffeur (même périmètre que le catalogue
+ * Prix d'achat des pneus : lu par le personnel hors chauffeur (STOCK_VALUATION_READ_ROLES, même périmètre que la valuation du stock
  * des pièces). Le chauffeur garde la lecture de la fiche, sans le prix.
  */
 export function canReadTirePrice(role: string | null | undefined): boolean {
-  return (PART_CATALOG_EVENT_ROLES as readonly string[]).includes((role ?? "").trim().toLowerCase());
+  return (STOCK_VALUATION_READ_ROLES as readonly string[]).includes((role ?? "").trim().toLowerCase());
 }
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> => {
