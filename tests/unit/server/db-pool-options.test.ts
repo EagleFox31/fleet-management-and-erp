@@ -1,4 +1,7 @@
+import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import net from "node:net";
+import path from "node:path";
 import { Pool, neonConfig } from "@neondatabase/serverless";
 import ws from "ws";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -47,6 +50,71 @@ describe("dbConnectTimeoutMs", () => {
   });
 });
 
+/**
+ * Garde de version du driver installé.
+ *
+ * Un `node_modules` partagé (jonction de worktree) peut garder un driver antérieur à celui de
+ * `package.json`. Le test du pair muet tombe alors en délai de test (10 s) sans dire pourquoi.
+ * La version minimale est lue dans `package.json`, pas recopiée ici.
+ */
+const NEON_PACKAGE = "@neondatabase/serverless";
+
+function parseVersion(version: string): number[] {
+  const match = /(\d+)\.(\d+)\.(\d+)/.exec(version);
+  if (!match) throw new Error(`Version illisible : « ${version} »`);
+  return match.slice(1).map(Number);
+}
+
+function isOlderThan(installed: string, required: string): boolean {
+  const [a, b] = [parseVersion(installed), parseVersion(required)];
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i];
+  return false;
+}
+
+function requiredNeonVersion(): string {
+  const pkg = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8"));
+  return pkg.dependencies[NEON_PACKAGE];
+}
+
+function installedNeonVersion(): string {
+  // Le paquet n'exporte pas son package.json : on remonte depuis son point d'entrée.
+  let dir = path.dirname(createRequire(import.meta.url).resolve(NEON_PACKAGE));
+  for (;;) {
+    const file = path.join(dir, "package.json");
+    if (existsSync(file)) {
+      const pkg = JSON.parse(readFileSync(file, "utf8"));
+      if (pkg.name === NEON_PACKAGE) return pkg.version;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) throw new Error(`package.json de ${NEON_PACKAGE} introuvable`);
+    dir = parent;
+  }
+}
+
+function assertNeonDriverUpToDate(): void {
+  const installed = installedNeonVersion();
+  const required = requiredNeonVersion();
+  if (isOlderThan(installed, required)) {
+    throw new Error(
+      `node_modules obsolète : npm ci (${NEON_PACKAGE} ${installed} installé, ${required} attendu par package.json)`,
+    );
+  }
+}
+
+describe("garde de version du driver", () => {
+  it("compare les versions numériquement", () => {
+    expect(isOlderThan("0.10.4", "^1.2.0")).toBe(true);
+    expect(isOlderThan("1.1.9", "^1.2.0")).toBe(true);
+    expect(isOlderThan("1.2.0", "^1.2.0")).toBe(false);
+    expect(isOlderThan("1.10.0", "^1.2.0")).toBe(false);
+    expect(isOlderThan("2.0.0", "^1.2.0")).toBe(false);
+  });
+
+  it("le driver installé satisfait package.json", () => {
+    expect(() => assertNeonDriverUpToDate()).not.toThrow();
+  });
+});
+
 describe("pool face à un pair qui accepte la socket puis se tait", () => {
   const sockets: net.Socket[] = [];
   const server = net.createServer((socket) => {
@@ -60,6 +128,9 @@ describe("pool face à un pair qui accepte la socket puis se tait", () => {
   };
 
   beforeAll(async () => {
+    // Sur un driver plus ancien, le test ci-dessous attendrait son délai de 10 s au lieu d'échouer
+    // net : la garde donne la cause tout de suite.
+    assertNeonDriverUpToDate();
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
     const port = typeof address === "object" && address ? address.port : 0;
