@@ -11,7 +11,8 @@ import { WorkOrderExportButton } from "@/components/work-orders/work-order-expor
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { getPartRequirementStatusLabel } from "@shared/constants/part-requirements";
 import { partLineCost, totalLaborHours } from "@shared/work-order-cost";
-import { formatKnownCost, workOrderDisplayCost } from "@/lib/work-order-tires-cost";
+import { formatKnownCost, listQueryView, workOrderDisplayCost } from "@/lib/work-order-tires-cost";
+import { readyData } from "@/lib/query-view";
 import { canReadWorkOrderCost, canRoleRemovePartUsed } from "@shared/constants/roles";
 import { useVehicle } from "@/context/vehicle-context";
 import { useAuth } from "@/hooks/useAuth";
@@ -362,15 +363,23 @@ export default function WorkOrderDetails({
   // Rotations de pneus de l'OT. Pas de `= []` par défaut : une lecture en échec n'est pas
   // « aucune rotation », sinon le coût de l'OT est sous-évalué sans signal (#592).
   const {
-    data: tireRotations,
+    data: tireRotationsData,
     error: tireRotationsError,
-    isError: tireRotationsFailed,
     isFetching: tireRotationsFetching,
     refetch: refetchTireRotations,
   } = useQuery<any[]>({
     queryKey: [`/api/work-orders/${workOrderId}/tire-rotations`],
     enabled: !!workOrderId,
   });
+  // Erreur aussi pour une réponse 200 qui n'est pas une liste ; une relance en échec
+  // garde la liste déjà lue.
+  const tireRotationsView = listQueryView<any>({
+    data: tireRotationsData,
+    error: tireRotationsError,
+    isFetching: tireRotationsFetching,
+  });
+  const tireRotations = readyData(tireRotationsView, undefined);
+  const tireRotationsFailed = tireRotationsView.kind === "error";
 
   // Tout le catalogue : `/api/parts` pagine à 10 par défaut, le sélecteur
   // n'aurait proposé que les 10 premières références.
@@ -937,7 +946,7 @@ export default function WorkOrderDetails({
       const costRows = [
         { label: "Main d'oeuvre", value: formatCurrency(laborCost) },
         { label: "Pièces", value: formatCurrency(partsCost) },
-        { label: "Rotations pneus", value: formatKnownCost(tireCost, formatCurrency, { isError: true }) },
+        { label: "Rotations pneus", value: formatKnownCost(tireCost, formatCurrency, { isError: tireRotationsFailed }) },
       ];
 
       let costY = currentY + 12;
@@ -957,7 +966,7 @@ export default function WorkOrderDetails({
       doc.setFontSize(10);
       doc.setTextColor(6, 78, 59);
       doc.text("TOTAL", summaryX + 4, costY + 2.2);
-      doc.text(formatKnownCost(totalCost, formatCurrency, { isError: true }), summaryX + summaryWidth - 4, costY + 2.2, { align: "right" });
+      doc.text(formatKnownCost(totalCost, formatCurrency, { isError: tireRotationsFailed }), summaryX + summaryWidth - 4, costY + 2.2, { align: "right" });
       }
 
       // Notes d'intervention (si disponibles)
@@ -1936,7 +1945,7 @@ export default function WorkOrderDetails({
                     </tbody>
                   </table>
                 </div>
-              ) : tireRotations === undefined && tireRotationsFailed ? (
+              ) : tireRotationsView.kind === "error" ? (
                 <div
                   role="alert"
                   data-testid="tire-rotations-error"
@@ -1944,7 +1953,7 @@ export default function WorkOrderDetails({
                 >
                   <AlertTriangle className="h-6 w-6 text-destructive-text" />
                   <p className="text-sm text-foreground">
-                    {userMessageOf(tireRotationsError, "Les rotations de pneus n'ont pas pu être chargées.")}
+                    {userMessageOf(tireRotationsView.error, "Les rotations de pneus n'ont pas pu être chargées.")}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     Le coût des pneus et le total de l'ordre de travail restent indisponibles tant qu'elles ne sont pas chargées.
@@ -1953,13 +1962,13 @@ export default function WorkOrderDetails({
                     variant="outline"
                     size="sm"
                     onClick={() => refetchTireRotations()}
-                    disabled={tireRotationsFetching}
+                    disabled={tireRotationsView.isRetrying}
                   >
-                    {tireRotationsFetching && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {tireRotationsView.isRetrying && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Réessayer
                   </Button>
                 </div>
-              ) : tireRotations === undefined ? (
+              ) : tireRotationsView.kind === "loading" ? (
                 <div className="flex items-center justify-center py-12 gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Chargement des rotations de pneus…
