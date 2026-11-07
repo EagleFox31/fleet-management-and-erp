@@ -2575,3 +2575,17 @@ soumission sans doublon.
 - **Comment tester (QA)** : un cas ajouté à `tests/unit/client/management-report-tabs.test.ts` : avec le drapeau éteint (et avec les défauts du catalogue), aucune mention de la distribution ; avec le drapeau allumé, le texte d'origine. Campagnes : unitaires 303/303, tsc 0, check:tests 0.
 - **RAIDER** : R (même garde que les onglets) ; D (texte inchangé drapeau allumé). Ne s'applique pas : A, I, Retroactive.
 - **Reste / risques** : aucun.
+
+## 2026-11-07T16:19:50+01:00 — Pneus : statistiques en erreur au lieu de faux zéros, état d'erreur de la page
+
+- **Agent** : de (fleet-testeur) · **Branche** : `fix/tire-stats-error-state` · **Commit** : voir `git log`
+- **Statut** : fait (PR brouillon)
+- **Quoi** : sur `/inventory/tires` (compte magasinier), `getTireStatisticsAdvanced` avalait toute erreur de base et renvoyait 200 avec des zéros. Après 10 s d'attente d'une place dans le pool, la page affichait « 0 pneu, valeur 0 » sans message. La page n'avait pas non plus d'état d'erreur.
+- **Comment** : le service journalise par `moduleLogger` et relance `AppError(500, …, { cause })`. La route existante répond 500, normalisé par le gestionnaire central, et `routes.ts` n'est pas modifié. La requête des statistiques passe par la queryFn par défaut, qui produit une ApiError avec un message lisible et la référence. `tiresPageState` (`client/src/lib/tires-page-state.ts`) choisit entre chargement, erreur et prêt ; l'erreur s'affiche avec `LoadingError` (`userMessageOf` et « Réessayer »).
+- **Comment tester (QA)** :
+  - `tests/unit/server/tire-statistics-advanced-error.test.ts` : rouge avant le correctif, deux échecs (« expected { Object (totalTires, …) } to be an instance of AppError »), vert après ;
+  - `tests/unit/client/tires-page-state.test.ts` ;
+  - Playwright local, compte warehouse : page normale, puis statistiques forcées en 500, où l'encart d'erreur affiche la référence et le bouton « Réessayer ».
+  - Campagnes : tsc 0, check:tests 0, unitaires 305/305 fichiers (prefix-middleware-guardrail est lent sous charge mais vert seul).
+- **RAIDER** : R (`LoadingError` et queryFn existants) ; D (réponse inchangée en cas de succès) ; E (pas de détail technique dans le message, log migré, non supprimé). Ne s'applique pas : A, I, Retroactive.
+- **Reste / risques** : d'autres méthodes du même service renvoient du vide en cas d'erreur (`getTires`, `getAllVehicleTires`, `getVehicleTires`, `getTireInspections`, `getTireRotations`, `getTireStatistics`, `getLowStockTires`, `getTireAlerts`). Elles sont signalées pour un lot séparé. Les 5 requêtes parallèles de statistics-advanced pèsent sur le pool : un regroupement en une seule requête SQL est prévu après la fusion.
