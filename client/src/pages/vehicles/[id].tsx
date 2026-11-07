@@ -41,7 +41,7 @@ import { TabIcon } from "@/lib/premium-tab-icons";
 import { VehicleTiresUnregisteredBadge } from "@/components/vehicles/vehicle-tires-status-badge";
 import { VehicleTiresPromptDialog } from "@/components/vehicles/vehicle-tires-prompt-dialog";
 import { VehicleTireMountDialog } from "@/components/vehicles/vehicle-tire-mount-dialog";
-import { vehicleHasRegisteredTires } from "@/lib/vehicle-tires-status";
+import { vehicleTiresRegistration } from "@/lib/vehicle-tires-status";
 import { canMountTiresFromStock } from "@/lib/auth";
 
 const VEHICLE_DETAIL_TABS = [
@@ -138,21 +138,24 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
     enabled: !!vehicleId,
   });
 
-  const { data: vehicleMountedTires = [] } = useQuery<unknown[]>({
+  // Pas de `= []` par défaut : une lecture en échec n'est pas « aucun pneu ».
+  const { data: vehicleMountedTires } = useQuery<unknown[]>({
     queryKey: [`/api/vehicles/${vehicleId}/tires`],
     enabled: !!vehicleId,
     staleTime: 0,
     refetchOnMount: "always",
   });
 
-  const tiresRegistered = vehicleHasRegisteredTires(vehicleMountedTires);
+  // `null` tant que les pneus n'ont jamais été lus (chargement ou échec) : ni badge
+  // « Pneus non renseignés », ni bandeau, ni invite de montage (#592).
+  const tiresRegistered = vehicleTiresRegistration(vehicleMountedTires);
   const canOpenTireTracking = ["admin", "workshop_manager", "technician", "warehouse", "secretary", "logistics"].includes(
     user?.role ?? "",
   );
   const canMountFromStock = canMountTiresFromStock(user) && !isRetired;
 
   const occupiedTirePositions = useMemo(() => {
-    return (vehicleMountedTires as Record<string, unknown>[])
+    return ((Array.isArray(vehicleMountedTires) ? vehicleMountedTires : []) as Record<string, unknown>[])
       .filter((row) => {
         const status = row.status ?? (row.vehicle_tires as Record<string, unknown> | undefined)?.status;
         return status === undefined || status === "active";
@@ -167,7 +170,7 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
   };
 
   useEffect(() => {
-    if (urlParams.get("tiresPrompt") === "1" && vehicle && !tiresRegistered && !isRetired) {
+    if (urlParams.get("tiresPrompt") === "1" && vehicle && tiresRegistered === false && !isRetired) {
       setShowTiresPrompt(true);
     }
   }, [urlParams, vehicle, tiresRegistered, isRetired]);
@@ -364,7 +367,7 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
                   {vehicle.isPreventive && (
                     <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">Préventive</Badge>
                   )}
-                  {!tiresRegistered && <VehicleTiresUnregisteredBadge />}
+                  {tiresRegistered === false && <VehicleTiresUnregisteredBadge />}
                 </div>
                 {/* Le kilométrage a sa propre tuile plus bas: on ne le répète pas ici,
                     on met le type à la place. */}
@@ -561,7 +564,7 @@ export default function VehicleDetails({ params }: { params: { id: string } }) {
         </div>
       </div>
 
-      {!tiresRegistered && (
+      {tiresRegistered === false && (
         <div className="rounded-xl border border-amber-100 bg-amber-50/70 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-start gap-3 min-w-0">
             <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />

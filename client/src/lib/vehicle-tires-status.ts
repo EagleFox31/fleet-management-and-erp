@@ -17,6 +17,19 @@ export function vehicleHasRegisteredTires(records: unknown[] | undefined): boole
   return countActiveMountedTires(records) > 0;
 }
 
+/**
+ * `null` tant que la liste n'a jamais été lue (chargement, ou échec sans données en cache) :
+ * l'état est inconnu, ce n'est pas « aucun pneu ». Ne pas afficher le badge ni l'invite.
+ */
+export function vehicleTiresRegistration(records: unknown[] | undefined): boolean | null {
+  return Array.isArray(records) ? vehicleHasRegisteredTires(records) : null;
+}
+
+/** Même règle pour la liste des véhicules : `null` = inconnu, aucun badge. */
+export function vehicleIdsWithRegisteredTiresIfKnown(records: unknown[] | undefined): Set<number> | null {
+  return Array.isArray(records) ? vehicleIdsWithRegisteredTires(records) : null;
+}
+
 export function vehicleIdsWithRegisteredTires(records: unknown[] | undefined): Set<number> {
   const ids = new Set<number>();
   for (const row of records ?? []) {
