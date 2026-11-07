@@ -10,6 +10,8 @@ interface LoadingErrorProps {
   isLoading?: boolean;
   error?: any;
   onRetry?: () => void;
+  /** Un nouvel essai est en cours : le bouton « Réessayer » est désactivé. */
+  isRetrying?: boolean;
   loadingMessage?: string;
   className?: string;
 }
@@ -17,7 +19,8 @@ interface LoadingErrorProps {
 export function LoadingError({ 
   isLoading, 
   error, 
-  onRetry, 
+  onRetry,
+  isRetrying = false,
   loadingMessage = "Chargement en cours...",
   className = ""
 }: LoadingErrorProps) {
@@ -60,6 +63,7 @@ export function LoadingError({
         type={errorTypeOf(error)}
         message={getErrorMessage(error)}
         onRetry={onRetry}
+        isRetrying={isRetrying}
         className={className}
       />
     );

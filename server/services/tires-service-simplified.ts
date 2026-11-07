@@ -904,14 +904,9 @@ export class TiresService {
         requiredActions: actions
       };
     } catch (error) {
-      console.error('Error getting advanced tire statistics:', error);
-      return {
-        totalTires: 0,
-        totalValue: 0,
-        averageWear: 0,
-        lowStockCount: 0,
-        requiredActions: { lowStock: [], criticalWear: [], rotationDue: [], rotationApproaching: [] }
-      };
+      // Une erreur de base n'est pas un stock vide : des zéros en 200 passeraient pour de vraies valeurs.
+      log.error({ err: error }, "statistiques avancées des pneus en échec");
+      throw new AppError(500, "Les statistiques des pneus sont momentanément indisponibles.", { cause: error });
     }
   }
 

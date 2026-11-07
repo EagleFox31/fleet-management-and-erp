@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
+import { LoadingError } from "@/components/ui/loading-error";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/hooks/useAuth";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
@@ -29,6 +30,7 @@ import { canMountTiresFromStock } from "@/lib/auth";
 import { formatTireUsageLabel, computeTireWearScore } from "@shared/constants/tires";
 import { getVehicleTireStatusLabel } from "@shared/constants/tire-removal";
 import { cn } from "@/lib/utils";
+import { tiresPageState } from "@/lib/tires-page-state";
 import { useFormDraft } from "@/hooks/use-form-draft";
 import { FormDraftBadge, FormDraftDiscardButton } from "@/components/form-draft/form-draft-indicator";
 import { tireRotationDraft, tireInspectionDraft } from "@/lib/form-drafts";
@@ -602,24 +604,22 @@ export default function TiresInventoryPage() {
     refetchInterval: false,
     refetchOnWindowFocus: false,
   } as const;
-  const { data: tiresResponse, isLoading: tiresLoading } = useQuery<{ tires: TireTableRow[] }>({
+  const tiresQuery = useQuery<{ tires: TireTableRow[] }>({
     queryKey: ["/api/tires"],
     ...liveQueryConfig,
   });
-  
-  const tires = tiresResponse?.tires || [];
+
+  const tires = tiresQuery.data?.tires || [];
 
   // Ces trois requêtes alimentent les KPI de l'en-tête, affichés quel que soit
   // l'onglet actif: elles ne doivent pas être conditionnées à un onglet.
-  const { data: statistics, isLoading: statsLoading } = useQuery<TireStatistics>({
+  // queryFn par défaut : une erreur serveur arrive en ApiError (message lisible + référence).
+  const statsQuery = useQuery<TireStatistics>({
     queryKey: ["/api/tires/statistics-advanced"],
-    queryFn: async () => {
-      const response = await fetch("/api/tires/statistics-advanced");
-      if (!response.ok) throw new Error("Failed to fetch statistics");
-      return response.json();
-    },
     ...liveQueryConfig,
   });
+  const statistics = statsQuery.data;
+  const pageState = tiresPageState(tiresQuery, statsQuery);
 
   // Lignes brutes: l'API renvoie une jointure (vehicle_tires / tires / vehicles),
   // que `normalizeVehicleTireRow` aplatit en `VehicleTire`. Typer la requete en
@@ -834,7 +834,20 @@ export default function TiresInventoryPage() {
     return tabs;
   }, [canAddTires, canViewRotations]);
 
-  if (tiresLoading || statsLoading) {
+  if (pageState.kind === "error") {
+    return (
+      <LoadingError
+        error={pageState.error}
+        isRetrying={pageState.isRetrying}
+        onRetry={() => {
+          void tiresQuery.refetch();
+          void statsQuery.refetch();
+        }}
+      />
+    );
+  }
+
+  if (pageState.kind === "loading") {
     return (
       <div className="space-y-6">
         <div className="flex justify-between items-center">
@@ -898,6 +911,14 @@ export default function TiresInventoryPage() {
           ) : null
         }
       >
+        {/* Statistiques sans données : encart d'erreur à la place de tuiles à zéro ; la liste reste visible. */}
+        {pageState.statsError ? (
+          <LoadingError
+            error={pageState.statsError.error}
+            isRetrying={pageState.statsError.isRetrying}
+            onRetry={() => void statsQuery.refetch()}
+          />
+        ) : (
         <KpiGrid columns={4}>
           {/* Tuiles cliquables: chacune mène à l'onglet qui détaille son chiffre.
               Même motif que les KPI de /maintenance/work-orders. */}
@@ -1165,6 +1186,7 @@ export default function TiresInventoryPage() {
             />
           )}
         </KpiGrid>
+        )}
       </HeaderCard>
 
       {/* Navigation Tabs - conditionnels selon le rôle */}
@@ -1174,7 +1196,7 @@ export default function TiresInventoryPage() {
         <TabsContent value="inventory" className="mt-0">
           <TireTable
             tires={tires}
-            isLoading={tiresLoading}
+            isLoading={tiresQuery.isLoading}
             onRowClick={handleViewTire}
             onEdit={handleEditTire}
             onMountFromStock={canMountFromStock ? (tire) => openMountDialog(tire.id) : undefined}
