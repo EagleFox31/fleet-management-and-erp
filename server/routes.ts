@@ -3980,6 +3980,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const vehicleTire = await tiresService.updateVehicleTire(id, data);
       return res.status(200).json(vehicleTire);
     } catch (error) {
+      if (error instanceof AppError) return next(error);
       log.error({ err: error, requestId: req.requestId }, "Update vehicle tire error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
