@@ -10,7 +10,9 @@ import { BookingConflictAlert } from "@/components/work-orders/booking-conflict-
 import { WorkOrderExportButton } from "@/components/work-orders/work-order-export-button";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { getPartRequirementStatusLabel } from "@shared/constants/part-requirements";
-import { computeWorkOrderCost, partLineCost, totalLaborHours } from "@shared/work-order-cost";
+import { partLineCost, totalLaborHours } from "@shared/work-order-cost";
+import { formatKnownCost, listQueryView, workOrderDisplayCost } from "@/lib/work-order-tires-cost";
+import { readyData } from "@/lib/query-view";
 import { canReadWorkOrderCost, canRoleRemovePartUsed } from "@shared/constants/roles";
 import { useVehicle } from "@/context/vehicle-context";
 import { useAuth } from "@/hooks/useAuth";
@@ -358,14 +360,26 @@ export default function WorkOrderDetails({
     gcTime: 0,
   });
 
-  // Fetch tire rotations linked to this work order
+  // Rotations de pneus de l'OT. Pas de `= []` par défaut : une lecture en échec n'est pas
+  // « aucune rotation », sinon le coût de l'OT est sous-évalué sans signal (#592).
   const {
-    data: tireRotations = [],
+    data: tireRotationsData,
+    error: tireRotationsError,
+    isFetching: tireRotationsFetching,
     refetch: refetchTireRotations,
   } = useQuery<any[]>({
     queryKey: [`/api/work-orders/${workOrderId}/tire-rotations`],
     enabled: !!workOrderId,
   });
+  // Erreur aussi pour une réponse 200 qui n'est pas une liste ; une relance en échec
+  // garde la liste déjà lue.
+  const tireRotationsView = listQueryView<any>({
+    data: tireRotationsData,
+    error: tireRotationsError,
+    isFetching: tireRotationsFetching,
+  });
+  const tireRotations = readyData(tireRotationsView, undefined);
+  const tireRotationsFailed = tireRotationsView.kind === "error";
 
   // Tout le catalogue : `/api/parts` pagine à 10 par défaut, le sélecteur
   // n'aurait proposé que les 10 premières références.
@@ -903,7 +917,7 @@ export default function WorkOrderDetails({
         partsCost,
         tiresCost: tireCost,
         totalCost,
-      } = computeWorkOrderCost({
+      } = workOrderDisplayCost({
         baseCost: workOrder.cost,
         parts: safeParts,
         tireRotations,
@@ -932,7 +946,7 @@ export default function WorkOrderDetails({
       const costRows = [
         { label: "Main d'oeuvre", value: formatCurrency(laborCost) },
         { label: "Pièces", value: formatCurrency(partsCost) },
-        { label: "Rotations pneus", value: formatCurrency(tireCost) },
+        { label: "Rotations pneus", value: formatKnownCost(tireCost, formatCurrency, { isError: tireRotationsFailed }) },
       ];
 
       let costY = currentY + 12;
@@ -952,7 +966,7 @@ export default function WorkOrderDetails({
       doc.setFontSize(10);
       doc.setTextColor(6, 78, 59);
       doc.text("TOTAL", summaryX + 4, costY + 2.2);
-      doc.text(formatCurrency(totalCost), summaryX + summaryWidth - 4, costY + 2.2, { align: "right" });
+      doc.text(formatKnownCost(totalCost, formatCurrency, { isError: tireRotationsFailed }), summaryX + summaryWidth - 4, costY + 2.2, { align: "right" });
       }
 
       // Notes d'intervention (si disponibles)
@@ -1137,13 +1151,16 @@ export default function WorkOrderDetails({
     tiresCost: totalTireRotationsCost,
     totalCost: grandTotal,
     laborValued,
-  } = computeWorkOrderCost({
+  } = workOrderDisplayCost({
     baseCost: workOrder.cost,
     parts: partsUsed,
     tireRotations,
     laborHours,
     laborRate: laborRate?.hourlyRateHt ?? null,
   });
+  // Coût pneus ou total inconnus : « Indisponible » après échec, jamais 0.
+  const costLabel = (value: number | null) =>
+    formatKnownCost(value, formatCurrency, { isError: tireRotationsFailed });
   const pendingPartsCount = Array.isArray(pendingPartRequirements) ? pendingPartRequirements.length : 0;
   const usedPartsCount = Array.isArray(partsUsed) ? partsUsed.length : 0;
   const displayedPartsCount = usedPartsCount + pendingPartsCount;
@@ -1336,7 +1353,7 @@ export default function WorkOrderDetails({
               <DollarSign className="h-4 w-4 text-success shrink-0" />
               <div className="min-w-0 flex-1">
                 <div className="text-[10px] text-success font-medium uppercase tracking-wide">Coût total</div>
-                <div className="text-xs sm:text-sm font-semibold text-foreground truncate">{formatCurrency(grandTotal)}</div>
+                <div className="text-xs sm:text-sm font-semibold text-foreground truncate">{costLabel(grandTotal)}</div>
               </div>
             </div>
             )}
@@ -1928,6 +1945,34 @@ export default function WorkOrderDetails({
                     </tbody>
                   </table>
                 </div>
+              ) : tireRotationsView.kind === "error" ? (
+                <div
+                  role="alert"
+                  data-testid="tire-rotations-error"
+                  className="flex flex-col items-center justify-center py-12 gap-3 text-center"
+                >
+                  <AlertTriangle className="h-6 w-6 text-destructive-text" />
+                  <p className="text-sm text-foreground">
+                    {userMessageOf(tireRotationsView.error, "Les rotations de pneus n'ont pas pu être chargées.")}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Le coût des pneus et le total de l'ordre de travail restent indisponibles tant qu'elles ne sont pas chargées.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => refetchTireRotations()}
+                    disabled={tireRotationsView.isRetrying}
+                  >
+                    {tireRotationsView.isRetrying && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Réessayer
+                  </Button>
+                </div>
+              ) : tireRotationsView.kind === "loading" ? (
+                <div className="flex items-center justify-center py-12 gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Chargement des rotations de pneus…
+                </div>
               ) : (
                 <div className="flex flex-col items-center justify-center py-12 gap-3 text-gray-400">
                   <div className="w-12 h-12 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center">
@@ -1943,7 +1988,7 @@ export default function WorkOrderDetails({
                   <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-2 flex items-center gap-3">
                     <span className="text-sm text-blue-700">Total rotations</span>
                     <span className="text-base font-bold text-blue-900">
-                      {formatCurrency(totalTireRotationsCost)}
+                      {costLabel(totalTireRotationsCost)}
                     </span>
                   </div>
                 </div>
@@ -2059,13 +2104,13 @@ export default function WorkOrderDetails({
                     <div className="flex justify-between text-muted-foreground">
                       <span>Pièces détachées</span><span>{formatCurrency(totalPartsCost)}</span>
                     </div>
-                    {totalTireRotationsCost > 0 && (
+                    {(totalTireRotationsCost === null || totalTireRotationsCost > 0) && (
                       <div className="flex justify-between text-muted-foreground">
-                        <span>Rotations de pneus</span><span>{formatCurrency(totalTireRotationsCost)}</span>
+                        <span>Rotations de pneus</span><span>{costLabel(totalTireRotationsCost)}</span>
                       </div>
                     )}
                     <div className="flex justify-between font-bold text-base pt-2 mt-1 border-t border-purple-200">
-                      <span>Total</span><span className="text-purple-700">{formatCurrency(grandTotal)}</span>
+                      <span>Total</span><span className="text-purple-700">{costLabel(grandTotal)}</span>
                     </div>
                   </div>
                 </div>

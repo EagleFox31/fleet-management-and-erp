@@ -85,3 +85,32 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - R : purge partagée ;
   - I : la purge par préfixe rend le run rejouable après un plantage ;
   - D : signatures internes aux e2e, tous les appelants sont mis à jour.
+
+## 2026-11-07T17:40:00+01:00 — Coût pneus de l'OT, badges pneus : une lecture en échec n'est plus prise pour du vide (#593)
+
+- **Agent** : c7 · **Branche** : `c7-tires-load-errors` · **PR** : #593
+- **Statut** : fait, en relecture
+- **Quoi** : depuis #592, les lectures pneus renvoient 500 au lieu de `[]`. Trois écrans retombaient encore sur `[]` :
+  - fiche OT : coût pneus calculé sur une liste vide, donc coût de l'OT sous-évalué sans signal, à l'écran comme dans le PDF ;
+  - liste des véhicules : badge « Pneus non renseignés » sur tous les véhicules ;
+  - fiche véhicule : badge, bandeau et invite de montage `tiresPrompt`.
+- **Comment** :
+  - `client/src/lib/work-order-tires-cost.ts` :
+    - `listQueryView` réutilise `queryView`, et une réponse 200 qui n'est pas une liste devient une erreur ;
+    - `workOrderDisplayCost` renvoie `tiresCost` et `totalCost` à `null` quand les rotations sont inconnues ;
+    - `formatKnownCost` affiche « Indisponible » après un échec, « Chargement… » pendant le chargement, jamais 0. Le PDF suit le même état.
+  - `vehicle-tires-status.ts` : `vehicleTiresRegistration` et `vehicleIdsWithRegisteredTiresIfKnown` renvoient `null` quand l'état est inconnu, et aucun badge ne s'affiche alors.
+  - Une relance en échec avec une liste en cache garde la liste.
+- **Pourquoi** : un coût d'OT faux est de l'argent. C'est la deuxième occurrence du défaut « échec pris pour du vide » après `widgets-silent-errors.md`. Les tests des helpers seuls ne prouvaient pas que les pages s'en servent.
+- **Serveur** : il ne s'appuie pas sur ce calcul. `technician-work-orders-service.ts` recalcule depuis la base. Son propre repli `ZERO_COST` en cas d'échec fera l'objet du lot suivant.
+- **Preuve automatisée** :
+  - `tests/unit/client/work-order-tires-cost.test.ts` et `vehicle-tires-registration.test.ts` : rouges avant la correction, verts après ;
+  - `tests/unit/client/tires-queries-no-empty-default.test.ts`, garde sur le code source des 3 fichiers :
+    - il interdit la valeur par défaut `= []` sur une requête pneus et exige les helpers ;
+    - il est rouge quand on remet `= []` (fiche OT et fiche véhicule, 2 échecs), vert sur le code livré.
+  - `npm run check` : 0 erreur TS ; `check:tests` : 0.
+- **Leçon** : la phrase ajoutée à l'entrée du 2026-11-07 de `docs/analysis/LESSONS_LEARNED.md` couvre aussi ces écrans.
+- **RAIDER** :
+  - R : `queryView` est réutilisé, `computeWorkOrderCost` n'est pas modifié ;
+  - D : les données lues s'affichent comme avant ;
+  - A, I et le volet rétroactif sont sans objet (client uniquement, aucune écriture).

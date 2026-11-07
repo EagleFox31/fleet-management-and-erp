@@ -16,7 +16,7 @@ import { Plus, Eye, Edit, Wrench, Search, ChevronLeft, ChevronRight, IdCard, Shi
 import { useAuth } from "@/hooks/useAuth";
 import { canManageFleetVehicles } from "@/lib/auth";
 import { VehicleTiresUnregisteredBadge } from "@/components/vehicles/vehicle-tires-status-badge";
-import { vehicleIdsWithRegisteredTires } from "@/lib/vehicle-tires-status";
+import { vehicleIdsWithRegisteredTiresIfKnown } from "@/lib/vehicle-tires-status";
 import {
   PremiumDataTable,
   type PremiumDataTableColumn,
@@ -110,7 +110,9 @@ export function VehicleTable({
     staleTime: 60_000,
   });
 
-  const vehicleIdsWithTires = vehicleIdsWithRegisteredTires(allVehicleTires);
+  // `null` tant que les pneus n'ont jamais été lus (chargement ou échec) : aucun badge,
+  // sinon « Pneus non renseignés » s'affiche sur tous les véhicules (#592).
+  const vehicleIdsWithTires = vehicleIdsWithRegisteredTiresIfKnown(allVehicleTires);
   
   const vehicles = data?.vehicles || [];
   const totalVehicles = data?.total || 0;
@@ -232,7 +234,7 @@ export function VehicleTable({
           <Badge variant="outline" className={cn(getStatusColor(row.status), "whitespace-nowrap text-[11px]")}>
             {translateStatus(row.status)}
           </Badge>
-          {!vehicleIdsWithTires.has(row.id) && <VehicleTiresUnregisteredBadge compact />}
+          {vehicleIdsWithTires && !vehicleIdsWithTires.has(row.id) && <VehicleTiresUnregisteredBadge compact />}
         </div>
       ),
     },
