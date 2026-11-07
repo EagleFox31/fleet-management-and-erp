@@ -20,6 +20,9 @@ const log = moduleLogger("tires");
 /** Index unique partiel : un seul pneu actif par position (server/db/migrations/20261107_vehicle_tires_active_position_unique.sql). */
 export const ACTIVE_POSITION_INDEX = "uq_vehicle_tires_active_position";
 
+/** Message unique du 409 « position occupée », au montage (route POST) comme à la modification (PATCH). */
+export const POSITION_OCCUPIED_MESSAGE = "Cette position est déjà occupée sur le véhicule";
+
 /** L'écriture a été refusée parce que la position porte déjà un pneu actif. */
 export function isActivePositionConflict(error: unknown): boolean {
   return isUniqueViolation(error) && pgConstraintOf(error) === ACTIVE_POSITION_INDEX;
@@ -487,7 +490,7 @@ export class TiresService {
       return updatedVehicleTire;
     } catch (error) {
       if (isActivePositionConflict(error)) {
-        throw new AppError(409, "Cette position est déjà occupée sur le véhicule.", { cause: error });
+        throw new AppError(409, POSITION_OCCUPIED_MESSAGE, { cause: error });
       }
       log.error({ err: error, vehicleTireId: id }, "modification du pneu monté en échec");
       throw new AppError(500, "La modification du pneu monté a échoué.", { cause: error });

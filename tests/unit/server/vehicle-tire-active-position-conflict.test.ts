@@ -31,7 +31,7 @@ vi.mock("../../../server/db", () => ({
   },
 }));
 
-import { isActivePositionConflict, tiresService } from "../../../server/services/tires-service-simplified";
+import { isActivePositionConflict, POSITION_OCCUPIED_MESSAGE, tiresService } from "../../../server/services/tires-service-simplified";
 import { AppError } from "../../../server/lib/app-error";
 
 const mount = {
@@ -74,7 +74,9 @@ describe("modification d'un montage : plus d'erreur avalée", () => {
   it("position déjà occupée : AppError 409", async () => {
     const error = await tiresService.updateVehicleTire(1, { position: "front_left" }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(AppError);
-    expect(error).toMatchObject({ status: 409, message: "Cette position est déjà occupée sur le véhicule." });
+    // Même texte qu'au montage (route POST) : une seule constante.
+    expect(POSITION_OCCUPIED_MESSAGE).toBe("Cette position est déjà occupée sur le véhicule");
+    expect(error).toMatchObject({ status: 409, code: "CONFLICT", message: POSITION_OCCUPIED_MESSAGE });
   });
 
   it("autre échec : AppError 500 au lieu d'un 200 vide", async () => {

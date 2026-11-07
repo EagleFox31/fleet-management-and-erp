@@ -997,8 +997,11 @@ export async function reportDriverUserIdUniqueGaps(client: Queryable, log: WarnL
  * Relit pg_indexes après VEHICLE_TIRES_ACTIVE_POSITION_UNIQUE_SQL (le RAISE WARNING n'atteint pas les logs
  * applicatifs). Index absent : journalise le nombre de positions en double et chaque couple (véhicule, position)
  * avec ses montages actifs, identifiants seulement. Rien n'est démonté ni supprimé ici : l'atelier choisit.
- * Lecture seule : aucun appel n'écrit, que l'index soit posé ou non.
+ * Lecture seule : aucun appel n'écrit, que l'index soit posé ou non. Le journal porte au plus
+ * VEHICLE_TIRE_DUPLICATES_LOG_LIMIT couples ; la valeur de retour les porte tous.
  */
+export const VEHICLE_TIRE_DUPLICATES_LOG_LIMIT = 50;
+
 export async function reportVehicleTireActivePositionGaps(client: Queryable, log: WarnLogger = initLog) {
   const { rows: index } = await client.query(
     `SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'uq_vehicle_tires_active_position'`,
@@ -1015,8 +1018,10 @@ export async function reportVehicleTireActivePositionGaps(client: Queryable, log
     position: String(r.position),
     vehicleTireIds: (r.vehicle_tire_ids as unknown[]).map(Number),
   }));
+  // Journal plafonné : le total reste exact, la liste n'en porte que les premiers couples.
+  const logged = duplicates.slice(0, VEHICLE_TIRE_DUPLICATES_LOG_LIMIT);
   log.warn(
-    { duplicateCount: duplicates.length, duplicates },
+    { duplicateCount: duplicates.length, duplicates: logged, truncated: duplicates.length > logged.length },
     duplicates.length
       ? `Index uq_vehicle_tires_active_position non posé : ${duplicates.length} position(s) de véhicule portent plusieurs pneus actifs. ` +
           "L'atelier démonte le pneu en trop par l'action de démontage ; l'index est posé au démarrage suivant."

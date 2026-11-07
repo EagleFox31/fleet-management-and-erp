@@ -2,7 +2,11 @@ import type { PoolClient } from "@neondatabase/serverless";
 import { inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { db, pool } from "../../server/db";
-import { reportVehicleTireActivePositionGaps, VEHICLE_TIRES_ACTIVE_POSITION_UNIQUE_SQL } from "../../server/init-database";
+import {
+  reportVehicleTireActivePositionGaps,
+  VEHICLE_TIRE_DUPLICATES_LOG_LIMIT,
+  VEHICLE_TIRES_ACTIVE_POSITION_UNIQUE_SQL,
+} from "../../server/init-database";
 import { tires } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestVehicle } from "../support/factories";
@@ -103,9 +107,25 @@ describe("un pneu actif par position en base", { timeout: 120_000 }, () => {
       expect(report.duplicates).toContainEqual({ vehicleId, position: "front_left", vehicleTireIds: [a, b] });
       expect(report.duplicates.some((d) => d.vehicleId === vehicleId && d.position === "front_right")).toBe(false);
       expect(log.warn).toHaveBeenCalledTimes(1);
-      expect(log.warn.mock.calls[0][0]).toMatchObject({ duplicateCount: report.duplicates.length });
+      expect(log.warn.mock.calls[0][0]).toMatchObject({ duplicateCount: report.duplicates.length, truncated: false });
       expect(log.warn.mock.calls[0][1]).toMatch(/L'atelier démonte le pneu en trop/);
     });
+  });
+
+  it("journal plafonné : total exact, liste limitée, valeur de retour complète", async () => {
+    const total = VEHICLE_TIRE_DUPLICATES_LOG_LIMIT + 10;
+    const rows = Array.from({ length: total }, (_, i) => ({ vehicle_id: i + 1, position: "front_left", vehicle_tire_ids: [2 * i + 1, 2 * i + 2] }));
+    // Client simulé : index absent, puis `total` couples en double.
+    const responses = [{ rows: [] }, { rows }];
+    const client = { query: vi.fn(async () => responses.shift()!) };
+    const log = { warn: vi.fn() };
+
+    const report = await reportVehicleTireActivePositionGaps(client as never, log);
+    expect(report.duplicates).toHaveLength(total);
+    const [fields, message] = log.warn.mock.calls[0];
+    expect(fields).toMatchObject({ duplicateCount: total, truncated: true });
+    expect(fields.duplicates).toHaveLength(VEHICLE_TIRE_DUPLICATES_LOG_LIMIT);
+    expect(message).toContain(`${total} position(s)`);
   });
 
   it("doublon réglé par l'atelier : index posé au passage suivant, puis aucune écriture", async () => {
