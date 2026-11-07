@@ -114,3 +114,24 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - R : `queryView` est réutilisé, `computeWorkOrderCost` n'est pas modifié ;
   - D : les données lues s'affichent comme avant ;
   - A, I et le volet rétroactif sont sans objet (client uniquement, aucune écriture).
+
+## 2026-11-07T18:01:12+01:00 — Profil technicien : un coût d'OT non calculé n'est plus affiché à 0
+
+- **Statut** : fait, en relecture
+- **Quoi** : `technician-work-orders-service.ts` journalisait l'échec du calcul groupé des coûts et renvoyait une carte vide. Chaque OT recevait alors `ZERO_COST`, même avec un `work_orders.cost` renseigné. `GET /api/technician/my-work-orders` répondait 200 et le profil technicien affichait 0 comme un vrai coût. La page ne lisait que `isLoading` : sur une erreur, elle affichait aussi des 0.
+- **Comment** :
+  - serveur : `calculateWorkOrderCosts` relève `AppError(500, message lisible, { cause })` après le log, et `ZERO_COST` est supprimé ; un OT sans coût calculé lève aussi une `AppError` au lieu d'un 0 ;
+  - `getPendingWorkOrdersCount` relève au lieu de `return 0` et sort de la liste gelée de `swallowed-read-catch-hygiene` ; les `console.*` du fichier passent par `moduleLogger` ;
+  - client : `client/src/lib/technician-profile-stats.ts` (`technicianProfileView`, sur `queryView`). Une erreur sans données, ou une réponse sans liste d'OT, affiche « Indisponible » avec `InlineQueryError` (message lisible, référence, « Réessayer ») ;
+  - les routes de `routes.ts` (gelé) ne sont pas modifiées : elles répondaient déjà 500 sur une exception du service.
+- **Pourquoi** : un coût faux est de l'argent. C'est la troisième occurrence du défaut « échec pris pour du vide » (après `widgets-silent-errors.md` et #593).
+- **Preuve automatisée** :
+  - `tests/unit/server/technician-work-orders-cost-error.test.ts` : 4 rouges avant la correction (OT renvoyés à coût 0, statistiques résolues, comptage à 0), verts après ; le cas nominal (coût de base conservé) est vert des deux côtés ;
+  - `tests/unit/client/technician-profile-stats.test.ts` : états error, loading, ready, et calcul des coûts ;
+  - `tests/integration/work-order-cost.test.ts` sur Postgres local : 4/4 ;
+  - unitaires : 3 240 verts, seul `db-pool-options` échoue (node_modules local, connu) ; `npm run check` : 0 erreur TS ; `check:tests` : 0.
+- **RAIDER** :
+  - R : `queryView`, `InlineQueryError` et `UNAVAILABLE` sont réutilisés ;
+  - D : un calcul réussi renvoie les mêmes valeurs qu'avant ;
+  - E : `AppError`, `moduleLogger`, cliquet resserré d'une entrée ;
+  - A, I et le volet rétroactif sont sans objet (aucune écriture, aucun schéma).

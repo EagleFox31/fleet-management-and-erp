@@ -8,38 +8,30 @@ import { useAuth } from "@/hooks/useAuth";
 import { formatPrice, cn } from "@/lib/utils";
 import { HeaderCard, KpiGrid, KpiTile, CardShell, PremiumTabsNav, SectionLabel } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
+import { technicianProfileStats, technicianProfileView } from "@/lib/technician-profile-stats";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 
 export default function TechnicianProfilePage() {
   const { user } = useAuth();
 
-  const { data: technicianData, isLoading: technicianDataLoading } = useQuery<any>({
+  const technicianQuery = useQuery<unknown>({
     queryKey: ['/api/technician/my-work-orders'],
   });
+  // Échec sans données : « Indisponible » et « Réessayer », jamais des coûts à 0.
+  const profileView = technicianProfileView(technicianQuery);
+  const profile = profileView.kind === "ready" ? profileView.data : technicianProfileStats([]);
 
-  const myWorkOrders = (technicianData as any)?.workOrders || [];
-  const toNumber = (value: unknown): number => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : 0;
-  };
-
-  const completedOrders = myWorkOrders.filter((wo: any) => wo.status === 'completed');
-  const inProgressOrders = myWorkOrders.filter((wo: any) => wo.status === 'in_progress');
-  const pendingOrders = myWorkOrders.filter((wo: any) => wo.status === 'pending');
-
-  const totalCost = completedOrders.reduce((sum: number, wo: any) => sum + toNumber(wo.cost), 0);
-  const averageCost = completedOrders.length > 0 ? totalCost / completedOrders.length : 0;
+  const myWorkOrders: any[] = profile.workOrders;
+  const completedOrders: any[] = profile.completed;
+  const inProgressOrders = profile.inProgress;
+  const pendingOrders = profile.pending;
+  const { totalCost, averageCost, partsCost, tiresCost, maintenanceCost } = profile;
   const workloadPercentage = Math.min(100, (inProgressOrders.length + pendingOrders.length) * 20);
 
   const recentActions = [...myWorkOrders]
     .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, 5);
-
-  const partsCost = completedOrders.reduce((sum: number, wo: any) => sum + toNumber(wo.partsCost), 0);
-  const tiresCost = completedOrders.reduce((sum: number, wo: any) => sum + toNumber(wo.tiresCost), 0);
-  let maintenanceCost = completedOrders.reduce((sum: number, wo: any) => sum + toNumber(wo.baseCost), 0);
-  if (maintenanceCost + partsCost + tiresCost === 0 && totalCost > 0) {
-    maintenanceCost = totalCost;
-  }
 
   const thisMonth = new Date();
   thisMonth.setDate(1);
@@ -87,7 +79,39 @@ export default function TechnicianProfilePage() {
     },
   ];
 
-  if (technicianDataLoading) {
+  if (profileView.kind === "error") {
+    return (
+      <div className="space-y-5">
+        <HeaderCard
+          moduleLabel="Technicien · Profil"
+          title={user?.name || "Mon Profil"}
+          subtitle={user?.email || "Informations personnelles et performances"}
+          icon={<User className="h-5 w-5" />}
+        >
+          <KpiGrid columns={4}>
+            {["Total OT assignés", "Terminés", "Ce mois", "Coût moyen / OT"].map((label) => (
+              <KpiTile
+                key={label}
+                label={label}
+                value={UNAVAILABLE}
+                icon={<Activity className="h-4 w-4" />}
+                iconWrapperClassName="bg-gray-100 text-gray-400"
+              />
+            ))}
+          </KpiGrid>
+        </HeaderCard>
+        <InlineQueryError
+          error={profileView.error}
+          fallback="Vos ordres de travail et leurs coûts sont momentanément indisponibles."
+          onRetry={() => void technicianQuery.refetch()}
+          isRetrying={profileView.isRetrying}
+          data-testid="technician-profile-error"
+        />
+      </div>
+    );
+  }
+
+  if (profileView.kind === "loading") {
     return (
       <div className="space-y-5">
         <CardShell topBar>

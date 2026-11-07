@@ -3,9 +3,12 @@ import { workOrders, vehicles, users, partsUsed, parts, tireRotations, workOrder
 import { eq, and, desc, inArray, sum, sql } from 'drizzle-orm';
 import { computeWorkOrderCost } from '@shared/work-order-cost';
 import { moduleLogger } from '../lib/logger';
+import { AppError } from '../lib/app-error';
 import { laborRatesForWorkOrders } from './workshop-labor-rates-service';
 
 const log = moduleLogger('technician-work-orders');
+
+const COST_UNAVAILABLE = "Le coût des ordres de travail n'a pas pu être calculé.";
 
 export interface TechnicianWorkOrder {
   id: number;
@@ -50,8 +53,6 @@ interface WorkOrderCostBreakdown {
   totalCost: number;
 }
 
-const ZERO_COST: WorkOrderCostBreakdown = { baseCost: 0, partsCost: 0, tiresCost: 0, totalCost: 0 };
-
 export class TechnicianWorkOrdersService {
   /**
    * Récupérer tous les ordres de travail assignés à un technicien spécifique
@@ -93,7 +94,11 @@ export class TechnicianWorkOrdersService {
       // Coûts de toute la liste en quatre requêtes groupées, pas cinq par OT.
       const costs = await this.calculateWorkOrderCosts(result.map((wo) => ({ id: wo.id, cost: wo.cost })));
       const enrichedWorkOrders: TechnicianWorkOrder[] = result.map((wo) => {
-          const costBreakdown = costs.get(wo.id) ?? ZERO_COST;
+          const costBreakdown = costs.get(wo.id);
+          if (!costBreakdown) {
+            // Un coût absent n'est pas un coût nul : jamais de 0 par défaut.
+            throw new AppError(500, COST_UNAVAILABLE, { details: { workOrderId: wo.id } });
+          }
           return {
             id: wo.id,
             vehicleId: wo.vehicleId,
@@ -135,10 +140,8 @@ export class TechnicianWorkOrdersService {
    * Détail des coûts d'une liste d'OT : même règle que l'écran, le PDF et le KPI
    * (`shared/work-order-cost.ts`). La main-d'oeuvre vaut heures réelles × taux en vigueur
    * quand un taux existe, sinon `work_orders.cost`. Quatre requêtes groupées, quelle que
-   * soit la longueur de la liste. Si l'une des requêtes échoue, l'erreur est journalisée et la
-   * carte renvoyée est vide : l'appelant lit alors `ZERO_COST` pour tous les OT de la liste, y
-   * compris ceux dont le coût de base est renseigné. Avant le calcul groupé, la panne ne
-   * touchait que l'OT en cause.
+   * soit la longueur de la liste. Si l'une des requêtes échoue, l'erreur est journalisée et
+   * relevée en `AppError` 500 : un coût inconnu ne doit jamais s'afficher comme un coût nul.
    */
   private async calculateWorkOrderCosts(
     rows: ReadonlyArray<{ id: number; cost: string | number | null }>,
@@ -193,6 +196,7 @@ export class TechnicianWorkOrdersService {
       log.debug({ count: rows.length }, "coûts des OT calculés");
     } catch (error) {
       log.error({ err: error, workOrderIds: ids }, "calcul du coût des OT impossible");
+      throw new AppError(500, COST_UNAVAILABLE, { cause: error });
     }
     return costs;
   }
@@ -212,10 +216,10 @@ export class TechnicianWorkOrdersService {
         total: workOrdersList.length
       };
 
-      console.log(`📊 [TECH-WO] Stats pour technicien ${technicianId}:`, stats);
+      log.debug({ technicianId, stats }, 'statistiques des ordres de travail du technicien');
       return stats;
     } catch (error) {
-      console.error('Erreur lors du calcul des statistiques:', error);
+      log.error({ err: error, technicianId }, 'calcul des statistiques des ordres de travail impossible');
       throw error;
     }
   }
@@ -235,8 +239,8 @@ export class TechnicianWorkOrdersService {
 
       return result.length;
     } catch (error) {
-      console.error('Erreur lors du comptage des ordres en attente:', error);
-      return 0;
+      log.error({ err: error, technicianId }, 'comptage des ordres de travail en attente impossible');
+      throw new AppError(500, "Le nombre d'ordres de travail en attente n'a pas pu être compté.", { cause: error });
     }
   }
 
