@@ -18,6 +18,9 @@ import { HeaderCard, KpiGrid, KpiTile, CardShell, AlertBannerCard, PremiumTabsNa
 import { formatPrice } from "@/lib/utils";
 import { useWarehouse } from "@/hooks/useWarehouse";
 import { usedTiresLabel } from "@shared/constants/tire-stock";
+import { queryView } from "@/lib/query-view";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 
 type StockMovement = {
   movementType?: string | null;
@@ -38,7 +41,9 @@ export default function WarehouseDashboard() {
   // reste sur /inventory/tires.
   // `totalTires` de l'API vaut la somme des quantités malgré son nom: lire
   // `totalReferences` (fiches) et `totalStock` (unités).
-  const { data: tireStats, isLoading: tireStatsLoading } = useQuery<{
+  // Une requête en échec sans données affiche « Indisponible » et un encart « Réessayer »,
+  // jamais 0 ni « Stock en ordre » (`queryView`, #592).
+  const tireStatsQuery = useQuery<{
     totalReferences?: number;
     totalStock?: number;
     /** Pneus usagés remis en stock : hors valeur et hors `totalStock` (neuf). */
@@ -47,6 +52,7 @@ export default function WarehouseDashboard() {
   }>({
     queryKey: ["/api/tires/statistics"],
   });
+  const tireStatsView = queryView(tireStatsQuery);
 
   // Sorties exceptionnelles: pièces parties sans passer par le magasin.
   // Indicateur de gouvernance — la tuile n'apparaît que s'il y en a eu, pour
@@ -59,7 +65,7 @@ export default function WarehouseDashboard() {
   const exceptionalTotal = Number(warehouseStats?.exceptionalIssues?.total || 0);
   const exceptional30d = Number(warehouseStats?.exceptionalIssues?.last30Days || 0);
 
-  const { data: lowStockTires = [], isLoading: lowStockTiresLoading } = useQuery<
+  const lowStockTiresQuery = useQuery<
     Array<{
       id: number;
       brand: string;
@@ -72,6 +78,8 @@ export default function WarehouseDashboard() {
   >({
     queryKey: ["/api/tires/low-stock"],
   });
+  const lowStockTiresView = queryView(lowStockTiresQuery);
+  const lowStockTiresCount = lowStockTiresView.kind === "ready" ? lowStockTiresView.data.length : 0;
   const { data: stockMovements = [], isLoading: stockMovementsLoading } = useQuery<StockMovement[]>({
     queryKey: ["/api/parts/stock-movements"],
   });
@@ -404,14 +412,20 @@ export default function WarehouseDashboard() {
                 <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-1">
                   Références au catalogue
                 </p>
-                {tireStatsLoading ? (
+                {tireStatsView.kind === "loading" ? (
                   <Skeleton className="h-7 w-16" />
+                ) : tireStatsView.kind === "error" ? (
+                  <p className="text-2xl font-bold text-gray-400" data-testid="warehouse-tire-references">{UNAVAILABLE}</p>
                 ) : (
-                  <p className="text-2xl font-bold text-gray-800">{tireStats?.totalReferences ?? 0}</p>
+                  <>
+                    <p className="text-2xl font-bold text-gray-800" data-testid="warehouse-tire-references">
+                      {tireStatsView.data.totalReferences ?? 0}
+                    </p>
+                    <p className="text-[11px] text-gray-400">{tireStatsView.data.totalStock ?? 0} neufs en rayon
+                      {(tireStatsView.data.usedQuantity ?? 0) > 0 ? ` + ${usedTiresLabel(tireStatsView.data.usedQuantity ?? 0)}` : ""}
+                    </p>
+                  </>
                 )}
-                <p className="text-[11px] text-gray-400">{tireStats?.totalStock ?? 0} neufs en rayon
-                  {(tireStats?.usedQuantity ?? 0) > 0 ? ` + ${usedTiresLabel(tireStats?.usedQuantity ?? 0)}` : ""}
-                </p>
               </div>
             </CardShell>
 
@@ -420,37 +434,52 @@ export default function WarehouseDashboard() {
                 <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-1">
                   Valeur du stock pneus
                 </p>
-                {tireStatsLoading ? (
+                {tireStatsView.kind === "loading" ? (
                   <Skeleton className="h-7 w-28" />
+                ) : tireStatsView.kind === "error" ? (
+                  <p className="text-2xl font-bold text-gray-400" data-testid="warehouse-tire-value">{UNAVAILABLE}</p>
                 ) : (
-                  <p className="text-2xl font-bold text-gray-800">
-                    {formatPrice(Number(tireStats?.totalValue ?? 0))}
+                  <p className="text-2xl font-bold text-gray-800" data-testid="warehouse-tire-value">
+                    {formatPrice(Number(tireStatsView.data.totalValue ?? 0))}
                   </p>
                 )}
                 <p className="text-[11px] text-gray-400">non incluse dans la valeur stock pièces</p>
               </div>
             </CardShell>
 
-            <CardShell className={lowStockTires.length > 0 ? "border-orange-200 bg-orange-50/60" : undefined}>
+            <CardShell className={lowStockTiresCount > 0 ? "border-orange-200 bg-orange-50/60" : undefined}>
               <div className="px-5 py-4">
                 <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-1">
                   Sous le seuil
                 </p>
-                {lowStockTiresLoading ? (
+                {lowStockTiresView.kind === "loading" ? (
                   <Skeleton className="h-7 w-12" />
+                ) : lowStockTiresView.kind === "error" ? (
+                  <p className="text-2xl font-bold text-gray-400" data-testid="warehouse-tire-low-stock-count">{UNAVAILABLE}</p>
                 ) : (
                   <p
                     className={`text-2xl font-bold ${
-                      lowStockTires.length > 0 ? "text-orange-600" : "text-gray-800"
+                      lowStockTiresCount > 0 ? "text-orange-600" : "text-gray-800"
                     }`}
+                    data-testid="warehouse-tire-low-stock-count"
                   >
-                    {lowStockTires.length}
+                    {lowStockTiresCount}
                   </p>
                 )}
                 <p className="text-[11px] text-gray-400">références à réapprovisionner</p>
               </div>
             </CardShell>
           </div>
+
+          {tireStatsView.kind === "error" ? (
+            <InlineQueryError
+              error={tireStatsView.error}
+              fallback="Les statistiques des pneus sont momentanément indisponibles."
+              onRetry={() => void tireStatsQuery.refetch()}
+              isRetrying={tireStatsView.isRetrying}
+              data-testid="warehouse-tire-stats-error"
+            />
+          ) : null}
 
           <CardShell>
             <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
@@ -467,18 +496,26 @@ export default function WarehouseDashboard() {
             </div>
 
             <div className="px-5 py-4">
-              {lowStockTiresLoading ? (
+              {lowStockTiresView.kind === "loading" ? (
                 <div className="space-y-2">
                   <Skeleton className="h-12 w-full" />
                   <Skeleton className="h-12 w-full" />
                 </div>
-              ) : lowStockTires.length === 0 ? (
+              ) : lowStockTiresView.kind === "error" ? (
+                <InlineQueryError
+                  error={lowStockTiresView.error}
+                  fallback="Les pneus sous le seuil sont momentanément indisponibles."
+                  onRetry={() => void lowStockTiresQuery.refetch()}
+                  isRetrying={lowStockTiresView.isRetrying}
+                  data-testid="warehouse-low-stock-tires-error"
+                />
+              ) : lowStockTiresView.data.length === 0 ? (
                 <p className="text-sm text-gray-400 text-center py-6">
                   Aucun pneu sous son seuil. Stock en ordre.
                 </p>
               ) : (
                 <div className="space-y-2">
-                  {lowStockTires.map((tire) => (
+                  {lowStockTiresView.data.map((tire) => (
                     <button
                       key={tire.id}
                       type="button"

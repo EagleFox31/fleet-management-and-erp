@@ -3400,14 +3400,16 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `getTires`, `getAllVehicleTires`, `getVehicleTires` ;
   - `getTireInspections`, `getTireRotations`, `getTireStatistics`, `getLowStockTires` ;
   - `storage.getTireRotationsForWorkOrder`.
-- **Classification** : erreur avalée en lecture, motif répété (49 cas hors pneus en dehors de ceux-ci). Une panne devient une donnée fausse, sans message ni référence, impossible à retrouver dans les logs côté utilisateur.
+- **Classification** : erreur avalée en lecture, motif répété (48 autres cas, hors pneus, gelés par la garde ci-dessous). Une panne devient une donnée fausse, sans message ni référence, impossible à retrouver dans les logs côté utilisateur.
 - **Résolution** :
   - #591 : `getTireStatisticsAdvanced` lève `AppError(500, …, { cause })` ; la page affiche une erreur lisible au lieu de zéros ;
-  - lot suivant : les 8 lectures lèvent `AppError(500, …, { cause })`. Leurs `console.*` sont migrés vers `moduleLogger`. Toutes les routes appelantes avaient déjà un catch qui répond 500. Les écrans passent par la queryFn par défaut, ou contrôlent `response.ok`, et retombent sur `[]` sans planter ;
+  - lot suivant : les 8 lectures lèvent `AppError(500, …, { cause })`. Leurs `console.*` sont migrés vers `moduleLogger`. Toutes les routes appelantes avaient déjà un catch qui répond 500 ;
+  - côté écrans, le 500 ne fait pas planter, mais un repli `= []` ou `?? 0` le transformait à son tour en faux vide (« Aucun pneu sous son seuil. Stock en ordre. », « 0 référence », toutes les positions libres au montage). Dans la même PR, le tableau de bord magasin, /inventory/tires (montés, inspections, rotations) et le dialogue de montage passent par `queryView` (`client/src/lib/query-view.ts`) : en échec sans données, « Indisponible » et un encart « Réessayer », jamais « Aucun… » ni 0 ; des données en cache restent affichées. Le montage reste bloqué tant que les positions occupées sont inconnues. Les autres écrans pneus (tableau des véhicules, fiche véhicule, coût pneus de l'OT) sont traités par un lot séparé ;
   - le bouchon `getTireAlerts` (`return []`, sans appelant) est retiré.
 - **Prévention vérifiée** : `tests/unit/server/swallowed-read-catch-hygiene.test.ts`, garde AST sur `server/storage.ts` et `server/services/`.
   - Elle échoue sur un catch sans `throw` qui renvoie `[]`, `{}`, `0` ou un objet dont toutes les propriétés sont vides (`"0…"` compte comme un zéro).
   - Les 48 cas existants hors pneus sont gelés, et la liste ne peut que baisser (cliquet). Aucune entrée pneus n'est admise.
   - Rejouée sur le code d'avant le correctif, elle est rouge sur exactement les 8 lectures pneus.
   - `tests/unit/server/tire-reads-error.test.ts` exige de chaque lecture une AppError 5xx dont la cause est l'erreur de base et dont le message ne contient aucun détail technique. Chaque cas a été vu rouge avant son correctif : les 7 du service en un passage, puis le cas `storage`. Après : 8 sur 8 verts.
-- **Leçon généralisée** : une lecture qui échoue ne renvoie jamais une valeur qu'une lecture réussie aurait pu renvoyer. Vide, zéro ou « aucun résultat » sont des réponses métier ; une panne doit rester une erreur, avec un message lisible et une référence. Avant de faire relever l'erreur, vérifier que chaque appelant la traite.
+  - `tests/unit/client/tire-reads-error-states.test.ts` : `queryView` (erreur sans données, cache conservé), blocage du montage, et branchement des trois écrans. Les tests de branchement ont été vus rouges sur les écrans d'avant.
+- **Leçon généralisée** : une lecture qui échoue ne renvoie jamais une valeur qu'une lecture réussie aurait pu renvoyer, ni côté serveur ni dans un repli d'écran. Vide, zéro ou « aucun résultat » sont des réponses métier ; une panne doit rester une erreur, avec un message lisible et une référence. Avant de faire relever l'erreur, vérifier que chaque appelant la traite.
