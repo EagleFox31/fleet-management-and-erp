@@ -49,7 +49,7 @@ const mount = (vehicleId: number, tireId: number, position = "front_left") =>
 /** 409 « position occupée » au contrat commun : code, requestId (corps et en-tête), aucun détail technique. */
 function expectPositionOccupied(outcome: Outcome) {
   expect(apiErrorProblems(outcome.status, outcome.body, 409, "CONFLICT", outcome.requestIdHeader)).toEqual([]);
-  expect(messageText(outcome.body)).toBe(POSITION_OCCUPIED_MESSAGE);
+  expect(messageText(outcome.body as { message?: unknown })).toBe(POSITION_OCCUPIED_MESSAGE);
   const text = JSON.stringify(outcome.body);
   expect(text).not.toContain("uq_vehicle_tires_active_position");
   expect(text).not.toContain("23505");
