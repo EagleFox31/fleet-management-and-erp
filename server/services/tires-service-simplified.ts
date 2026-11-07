@@ -112,7 +112,7 @@ export class TiresService {
     offset?: number;
   }): Promise<{ tires: Tire[]; total: number }> {
     try {
-      console.log('getTires called - fetching from PostgreSQL...');
+      log.debug("getTires called - fetching from PostgreSQL...");
       
       const conditions = [isNull(tires.deletedAt)];
       
@@ -161,7 +161,7 @@ export class TiresService {
               ? await baseQuery.offset(offset)
               : await baseQuery;
       
-      console.log(`Tires retrieved from DB: ${tiresResult.length} items, total: ${total}`);
+      log.debug({ count: tiresResult.length, total }, "pneus lus");
 
       const auditUserIds = Array.from(
         new Set(
@@ -196,8 +196,9 @@ export class TiresService {
         total
       };
     } catch (error) {
-      console.error('Error getting tires:', error);
-      return { tires: [], total: 0 };
+      // Une erreur de base n'est pas un stock vide : « aucun pneu » en 200 passerait pour la réalité.
+      log.error({ err: error }, "lecture des pneus en échec");
+      throw new AppError(500, "La liste des pneus est momentanément indisponible.", { cause: error });
     }
   }
 
@@ -362,13 +363,13 @@ export class TiresService {
       }));
     } catch (error) {
       log.error({ err: error }, "lecture des pneus montés en échec");
-      return [];
+      throw new AppError(500, "Les pneus montés sont momentanément indisponibles.", { cause: error });
     }
   }
 
   async getVehicleTires(vehicleId: number): Promise<any[]> {
     try {
-      console.log('getVehicleTires called - using simplified PostgreSQL methods');
+      log.debug({ vehicleId }, "getVehicleTires called - using simplified PostgreSQL methods");
       
       const result = await db
         .select()
@@ -380,8 +381,8 @@ export class TiresService {
       
       return result;
     } catch (error) {
-      console.error('Error getting vehicle tires:', error);
-      return [];
+      log.error({ err: error, vehicleId }, "lecture des pneus du véhicule en échec");
+      throw new AppError(500, "Les pneus du véhicule sont momentanément indisponibles.", { cause: error });
     }
   }
 
@@ -593,12 +594,12 @@ export class TiresService {
         positionRaw: inspection.position
       }));
       
-      console.log(`getTireInspections called - fetched ${translatedInspections.length} inspections`);
-      
+      log.debug({ count: translatedInspections.length }, "inspections de pneus lues");
+
       return translatedInspections;
     } catch (error) {
-      console.error('Error getting tire inspections:', error);
-      return [];
+      log.error({ err: error }, "lecture des inspections de pneus en échec");
+      throw new AppError(500, "Les inspections de pneus sont momentanément indisponibles.", { cause: error });
     }
   }
 
@@ -733,12 +734,12 @@ export class TiresService {
         .leftJoin(vehicles, eq(tireRotations.vehicleId, vehicles.id))
         .orderBy(desc(tireRotations.rotationDate));
       
-      console.log(`getTireRotations called - fetched ${rotations.length} rotations`);
-      
+      log.debug({ count: rotations.length }, "rotations de pneus lues");
+
       return rotations;
     } catch (error) {
-      console.error('Error getting tire rotations:', error);
-      return [];
+      log.error({ err: error }, "lecture des rotations de pneus en échec");
+      throw new AppError(500, "Les rotations de pneus sont momentanément indisponibles.", { cause: error });
     }
   }
 
@@ -1102,12 +1103,12 @@ export class TiresService {
           sql`${tires.stockQuantity} <= ${tires.minStockLevel}`
         ));
 
-      console.log('Tire statistics calculated:', {
+      log.debug({
         totalStock: stockResult?.totalStock,
         totalValue: valueResult?.totalValue,
         installations: installationsResult?.count,
         actions: actionsResult?.count
-      });
+      }, "statistiques des pneus calculées");
 
       return {
         // `totalTires` vaut la SOMME des quantités, pas un nombre de fiches.
@@ -1125,17 +1126,9 @@ export class TiresService {
         requiredActions: actionsResult?.count || 0
       };
     } catch (error) {
-      console.error('Error calculating tire statistics:', error);
-      return {
-        totalTires: "0",
-        totalStock: 0,
-        usedQuantity: 0,
-        totalValue: 0,
-        activeInstallations: 0,
-        lowStockCount: 0,
-        averageWear: "0mm",
-        requiredActions: 0
-      };
+      // Des zéros en 200 passeraient pour un stock réellement vide.
+      log.error({ err: error }, "statistiques des pneus en échec");
+      throw new AppError(500, "Les statistiques des pneus sont momentanément indisponibles.", { cause: error });
     }
   }
 
@@ -1152,13 +1145,9 @@ export class TiresService {
       
       return result;
     } catch (error) {
-      console.error('Error getting low stock tires:', error);
-      return [];
+      log.error({ err: error }, "lecture des pneus en stock bas en échec");
+      throw new AppError(500, "Les pneus en stock bas sont momentanément indisponibles.", { cause: error });
     }
-  }
-
-  async getTireAlerts(): Promise<any[]> {
-    return [];
   }
 }
 

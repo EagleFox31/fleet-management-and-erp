@@ -3392,3 +3392,22 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
 - **Résolution** : documentation de la conduite à tenir, sans changement de code ni de configuration.
 - **Prévention** : `tests/README.md`, section Postgres local, puce « timeouts de connexion sous rafale en local, ne pas relever le plafond ». Conduite : garder 10 s, relancer le fichier, reproduire sur main pur avec une sonde de rafale ; la CI Linux fait foi.
 - **Leçon généralisée** : avant de relever un délai pour faire passer un test, vérifier si l'opération finit un jour. Quand elle ne finit jamais, un délai plus long ne fait que le rapprocher, ou le faire dépasser, d'un autre délai (ici celui du test), et l'échec devient plus lent et plus trompeur. Comparer les valeurs en alternance sur le même environnement, pas à des moments différents.
+
+## 2026-11-07 — Un catch qui renvoie 200 avec des zéros fait passer une panne pour de vraies valeurs (#591, suite)
+
+- **Contexte** : sur /inventory/tires (compte magasinier), la page ne finissait pas de charger. Une fois chargée, elle affichait « 0 pneu, valeur 0 ». Sur Postgres local, `GET /api/tires/statistics-advanced` attendait une place dans le pool jusqu'au plafond de 10 s (`timeout exceeded when trying to connect`). `getTireStatisticsAdvanced` attrapait ensuite l'erreur et renvoyait 200 avec des zéros.
+- **Cause racine** : le catch de la méthode de service renvoyait une valeur vide (`[]`, `{ tires: [], total: 0 }`, objet de zéros) au lieu de relancer. La route recevait un résultat normal et répondait 200. Le même motif touchait 8 autres lectures pneus :
+  - `getTires`, `getAllVehicleTires`, `getVehicleTires` ;
+  - `getTireInspections`, `getTireRotations`, `getTireStatistics`, `getLowStockTires` ;
+  - `storage.getTireRotationsForWorkOrder`.
+- **Classification** : erreur avalée en lecture, motif répété (49 cas hors pneus en dehors de ceux-ci). Une panne devient une donnée fausse, sans message ni référence, impossible à retrouver dans les logs côté utilisateur.
+- **Résolution** :
+  - #591 : `getTireStatisticsAdvanced` lève `AppError(500, …, { cause })` ; la page affiche une erreur lisible au lieu de zéros ;
+  - lot suivant : les 8 lectures lèvent `AppError(500, …, { cause })`. Leurs `console.*` sont migrés vers `moduleLogger`. Toutes les routes appelantes avaient déjà un catch qui répond 500. Les écrans passent par la queryFn par défaut, ou contrôlent `response.ok`, et retombent sur `[]` sans planter ;
+  - le bouchon `getTireAlerts` (`return []`, sans appelant) est retiré.
+- **Prévention vérifiée** : `tests/unit/server/swallowed-read-catch-hygiene.test.ts`, garde AST sur `server/storage.ts` et `server/services/`.
+  - Elle échoue sur un catch sans `throw` qui renvoie `[]`, `{}`, `0` ou un objet dont toutes les propriétés sont vides (`"0…"` compte comme un zéro).
+  - Les 48 cas existants hors pneus sont gelés, et la liste ne peut que baisser (cliquet). Aucune entrée pneus n'est admise.
+  - Rejouée sur le code d'avant le correctif, elle est rouge sur exactement les 8 lectures pneus.
+  - `tests/unit/server/tire-reads-error.test.ts` exige de chaque lecture une AppError 5xx dont la cause est l'erreur de base et dont le message ne contient aucun détail technique. Chaque cas a été vu rouge avant son correctif : les 7 du service en un passage, puis le cas `storage`. Après : 8 sur 8 verts.
+- **Leçon généralisée** : une lecture qui échoue ne renvoie jamais une valeur qu'une lecture réussie aurait pu renvoyer. Vide, zéro ou « aucun résultat » sont des réponses métier ; une panne doit rester une erreur, avec un message lisible et une référence. Avant de faire relever l'erreur, vérifier que chaque appelant la traite.
