@@ -31,6 +31,9 @@ import { formatTireUsageLabel, computeTireWearScore } from "@shared/constants/ti
 import { getVehicleTireStatusLabel } from "@shared/constants/tire-removal";
 import { cn } from "@/lib/utils";
 import { tiresPageState } from "@/lib/tires-page-state";
+import { queryView } from "@/lib/query-view";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 import { useFormDraft } from "@/hooks/use-form-draft";
 import { FormDraftBadge, FormDraftDiscardButton } from "@/components/form-draft/form-draft-indicator";
 import { tireRotationDraft, tireInspectionDraft } from "@/lib/form-drafts";
@@ -624,25 +627,20 @@ export default function TiresInventoryPage() {
   // Lignes brutes: l'API renvoie une jointure (vehicle_tires / tires / vehicles),
   // que `normalizeVehicleTireRow` aplatit en `VehicleTire`. Typer la requete en
   // `VehicleTire[]` etait faux et obligeait a un cast au point d'usage.
-  const { data: vehicleTires, isLoading: vehicleTiresLoading } = useQuery<Record<string, unknown>[]>({
+  // queryFn par défaut (ApiError lisible). En échec sans données : « Indisponible » sur les KPI
+  // et un encart « Réessayer » dans l'onglet, jamais « Aucun… » ni 0 (`queryView`, #592).
+  const vehicleTiresQuery = useQuery<Record<string, unknown>[]>({
     queryKey: ["/api/vehicle-tires"],
-    queryFn: async () => {
-      const response = await fetch("/api/vehicle-tires");
-      if (!response.ok) throw new Error("Failed to fetch vehicle tires");
-      return response.json();
-    },
     ...liveQueryConfig,
   });
+  const vehicleTires = vehicleTiresQuery.data;
+  const vehicleTiresView = queryView(vehicleTiresQuery);
 
-  const { data: inspections, isLoading: inspectionsLoading } = useQuery<TireInspection[]>({
+  const inspectionsQuery = useQuery<TireInspection[]>({
     queryKey: ["/api/tire-inspections/recent"],
-    queryFn: async () => {
-      const response = await fetch("/api/tire-inspections/recent");
-      if (!response.ok) throw new Error("Failed to fetch inspections");
-      return response.json();
-    },
     ...liveQueryConfig,
   });
+  const inspectionsView = queryView(inspectionsQuery);
 
   const { data: fleetStats } = useQuery<{
     operational?: number;
@@ -678,7 +676,7 @@ export default function TiresInventoryPage() {
   const tireRotationsPending = rotationDueCount + rotationApproachingCount;
   const rotationKpiSubValue =
     tireRotationsPending === 0
-      ? mountedTires.length === 0
+      ? vehicleTiresView.kind === "ready" && mountedTires.length === 0
         ? "Montages atelier requis d'abord"
         : "Aucune alerte kilométrique"
       : rotationDueCount > 0 && rotationApproachingCount > 0
@@ -705,16 +703,12 @@ export default function TiresInventoryPage() {
   });
 
   // Query pour récupérer les rotations
-  const { data: rotations, isLoading: rotationsLoading } = useQuery<any>({
+  const rotationsQuery = useQuery<any[]>({
     queryKey: ["/api/tire-rotations"],
     enabled: isRotationsTab,
-    queryFn: async () => {
-      const response = await fetch("/api/tire-rotations");
-      if (!response.ok) throw new Error("Failed to fetch rotations");
-      return response.json();
-    },
     ...liveQueryConfig,
   });
+  const rotationsView = queryView(rotationsQuery);
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat('fr-FR', {
@@ -928,7 +922,11 @@ export default function TiresInventoryPage() {
             onClick={() => setActiveTab("inventory")}
             label="Pneus en stock"
             value={statistics?.totalTires || 0}
-            subValue={`${mountedTires.length} montés sur véhicules`}
+            subValue={
+              vehicleTiresView.kind === "ready"
+                ? `${mountedTires.length} montés sur véhicules`
+                : `Montés sur véhicules : ${vehicleTiresView.kind === "error" ? UNAVAILABLE.toLowerCase() : "…"}`
+            }
             icon={<Package className="h-4 w-4" />}
             iconWrapperClassName="bg-blue-50 text-blue-600"
           />
@@ -980,7 +978,11 @@ export default function TiresInventoryPage() {
               className="cursor-pointer transition-shadow hover:shadow-md"
               onClick={() => setActiveTab("inspections")}
               label="Inspections dues"
-              value={inspections?.filter((i) => new Date(i.nextInspectionDate) <= new Date()).length || 0}
+              value={
+                inspectionsView.kind === "ready"
+                  ? inspectionsView.data.filter((i) => new Date(i.nextInspectionDate) <= new Date()).length
+                  : inspectionsView.kind === "error" ? UNAVAILABLE : "…"
+              }
               subValue="Controles a effectuer"
               valueClassName="text-orange-600"
               icon={<Timer className="h-4 w-4" />}
@@ -1062,7 +1064,11 @@ export default function TiresInventoryPage() {
               className="cursor-pointer transition-shadow hover:shadow-md"
               onClick={() => setActiveTab("inspections")}
               label="Pressions a corriger"
-              value={mountedTires.filter((vt) => Math.abs(vt.currentPressure - vt.recommendedPressure) > 0.5).length}
+              value={
+                vehicleTiresView.kind === "ready"
+                  ? mountedTires.filter((vt) => Math.abs(vt.currentPressure - vt.recommendedPressure) > 0.5).length
+                  : vehicleTiresView.kind === "error" ? UNAVAILABLE : "…"
+              }
               subValue="Ecarts de pression detectes"
               valueClassName="text-blue-600"
               icon={<Gauge className="h-4 w-4" />}
@@ -1230,7 +1236,20 @@ export default function TiresInventoryPage() {
               )}
             </div>
             <div className="px-5 py-4">
-              {mountedTires.length === 0 ? (
+              {vehicleTiresView.kind === "loading" ? (
+                <div className="space-y-2">
+                  <Skeleton className="h-12 w-full" />
+                  <Skeleton className="h-12 w-full" />
+                </div>
+              ) : vehicleTiresView.kind === "error" ? (
+                <InlineQueryError
+                  error={vehicleTiresView.error}
+                  fallback="Les pneus montés sont momentanément indisponibles."
+                  onRetry={() => void vehicleTiresQuery.refetch()}
+                  isRetrying={vehicleTiresView.isRetrying}
+                  data-testid="mounted-tires-error"
+                />
+              ) : mountedTires.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
                   <Truck className="h-10 w-10 text-gray-200 mb-3" />
                   <p className="text-sm font-medium text-gray-600">Aucun pneu monté sur un véhicule</p>
@@ -1344,21 +1363,29 @@ export default function TiresInventoryPage() {
             </div>
             <div className="px-5 py-4">
               <div className="space-y-4">
-                {inspectionsLoading ? (
+                {inspectionsView.kind === "loading" ? (
                 <div className="flex justify-center py-8">
                   <div className="flex items-center space-x-2">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
                     <span>Chargement des inspections...</span>
                   </div>
                 </div>
-              ) : !inspections || inspections.length === 0 ? (
+              ) : inspectionsView.kind === "error" ? (
+                <InlineQueryError
+                  error={inspectionsView.error}
+                  fallback="Les inspections de pneus sont momentanément indisponibles."
+                  onRetry={() => void inspectionsQuery.refetch()}
+                  isRetrying={inspectionsView.isRetrying}
+                  data-testid="tire-inspections-error"
+                />
+              ) : inspectionsView.data.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <Eye className="h-12 w-12 mx-auto mb-4 opacity-50" />
                   <p>Aucune inspection enregistrée</p>
                   <p className="text-sm">Cliquez sur "Nouvelle Inspection" pour commencer</p>
                 </div>
               ) : (
-                inspections.map((inspection) => (
+                inspectionsView.data.map((inspection) => (
                   <div 
                     key={`inspection-${inspection.id}`} 
                     className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 cursor-pointer transition-colors"
@@ -1501,15 +1528,23 @@ export default function TiresInventoryPage() {
                 </div>
               )}
 
-              {rotationsLoading ? (
+              {rotationsView.kind === "loading" ? (
                 <div className="flex justify-center py-8">
                   <div className="flex items-center space-x-2">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-green-600"></div>
                     <span className="text-muted-foreground">Chargement des rotations...</span>
                   </div>
                 </div>
+              ) : rotationsView.kind === "error" ? (
+                <InlineQueryError
+                  error={rotationsView.error}
+                  fallback="Les rotations de pneus sont momentanément indisponibles."
+                  onRetry={() => void rotationsQuery.refetch()}
+                  isRetrying={rotationsView.isRetrying}
+                  data-testid="tire-rotations-error"
+                />
               ) : (
-                <RotationsCalendar rotations={rotations || []} />
+                <RotationsCalendar rotations={rotationsView.data} />
               )}
             </div>
           </CardShell>
