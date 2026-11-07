@@ -838,6 +838,7 @@ export default function TiresInventoryPage() {
     return (
       <LoadingError
         error={pageState.error}
+        isRetrying={pageState.isRetrying}
         onRetry={() => {
           void tiresQuery.refetch();
           void statsQuery.refetch();
@@ -910,6 +911,14 @@ export default function TiresInventoryPage() {
           ) : null
         }
       >
+        {/* Statistiques sans données : encart d'erreur à la place de tuiles à zéro ; la liste reste visible. */}
+        {pageState.statsError ? (
+          <LoadingError
+            error={pageState.statsError.error}
+            isRetrying={pageState.statsError.isRetrying}
+            onRetry={() => void statsQuery.refetch()}
+          />
+        ) : (
         <KpiGrid columns={4}>
           {/* Tuiles cliquables: chacune mène à l'onglet qui détaille son chiffre.
               Même motif que les KPI de /maintenance/work-orders. */}
@@ -1177,6 +1186,7 @@ export default function TiresInventoryPage() {
             />
           )}
         </KpiGrid>
+        )}
       </HeaderCard>
 
       {/* Navigation Tabs - conditionnels selon le rôle */}

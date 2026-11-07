@@ -9,6 +9,8 @@ interface AnimatedErrorProps {
   type: ErrorType;
   message: string;
   onRetry?: () => void;
+  /** Un nouvel essai est en cours : le bouton est désactivé (pas de rafale de relances). */
+  isRetrying?: boolean;
   className?: string;
 }
 
@@ -99,7 +101,7 @@ export const errorConfig: Record<ErrorType, { icon: typeof AlertCircle; color: s
   }
 };
 
-export function AnimatedError({ type, message, onRetry, className = "" }: AnimatedErrorProps) {
+export function AnimatedError({ type, message, onRetry, isRetrying = false, className = "" }: AnimatedErrorProps) {
   const [isVisible, setIsVisible] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const config = errorConfig[type];
@@ -184,9 +186,11 @@ export function AnimatedError({ type, message, onRetry, className = "" }: Animat
                       variant="outline"
                       size="sm"
                       onClick={onRetry}
+                      disabled={isRetrying}
+                      aria-busy={isRetrying}
                       className="h-8 text-xs"
                     >
-                      <RefreshCw className="h-3 w-3 mr-1" />
+                      <RefreshCw className={`h-3 w-3 mr-1${isRetrying ? " animate-spin" : ""}`} />
                       Réessayer
                     </Button>
                   </motion.div>
