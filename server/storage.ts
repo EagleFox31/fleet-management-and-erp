@@ -2383,7 +2383,8 @@ export class DatabaseStorage implements IStorage {
       return rotations;
     } catch (error) {
       storageLog.error({ err: error, workOrderId }, "Error getting tire rotations for work order");
-      return [];
+      // Une liste vide passerait pour « aucune rotation sur cet OT ».
+      throw new AppError(500, "Les rotations de pneus de l'ordre de travail sont momentanément indisponibles.", { cause: error });
     }
   }
 }

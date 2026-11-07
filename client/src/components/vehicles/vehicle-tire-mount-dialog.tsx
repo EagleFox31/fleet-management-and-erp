@@ -23,6 +23,9 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { TIRE_MOUNT_POSITIONS } from "@shared/constants/tires";
 import { TIRE_STOCK_SOURCES, TIRE_STOCK_SOURCE_LABELS, usedTiresLabel, type TireStockSource } from "@shared/constants/tire-stock";
 import { CircleDot, Loader2 } from "lucide-react";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
+import { queryView } from "@/lib/query-view";
+import { mountBlock, occupiedPositionsView } from "@/lib/tire-mount-readiness";
 
 interface TireCatalogRow {
   id: number;
@@ -113,17 +116,21 @@ export function VehicleTireMountDialog({
     },
   });
 
-  const { data: allVehicleTires = [] } = useQuery<VehicleTireRow[]>({
+  // Positions occupées et catalogue : en échec sans données, encart « Réessayer » et montage
+  // bloqué. Une liste vide passerait pour « toutes les positions libres » ou « aucun pneu en stock ».
+  const vehicleTiresQuery = useQuery<VehicleTireRow[]>({
     queryKey: ["/api/vehicle-tires"],
     enabled: open && !isVehicleLocked && effectiveVehicleId > 0,
   });
 
-  const { data: tiresResponse, isLoading: tiresLoading } = useQuery<{ tires: TireCatalogRow[] }>({
+  const tiresQuery = useQuery<{ tires: TireCatalogRow[] }>({
     queryKey: ["/api/tires", { limit: 500 }],
     enabled: open,
   });
+  const catalogView = queryView(tiresQuery);
+  const tiresLoading = catalogView.kind === "loading";
 
-  const tiresCatalog = tiresResponse?.tires ?? [];
+  const tiresCatalog = catalogView.kind === "ready" ? catalogView.data.tires ?? [] : [];
 
   const selectedFleetVehicle = useMemo(() => {
     if (isVehicleLocked) {
@@ -136,22 +143,22 @@ export function VehicleTireMountDialog({
     return vehiclesList.find((v) => v.id === effectiveVehicleId) ?? null;
   }, [effectiveVehicleId, isVehicleLocked, registrationNumber, vehicleId, vehicleMileage, vehiclesList]);
 
-  const resolvedOccupiedPositions = useMemo(() => {
-    if (isVehicleLocked) return occupiedPositions;
-    return allVehicleTires
-      .filter((row) => row.vehicleId === effectiveVehicleId && (row.status === undefined || row.status === "active"))
-      .map((row) => row.position);
-  }, [allVehicleTires, effectiveVehicleId, isVehicleLocked, occupiedPositions]);
+  const vehicleTiresView = queryView(vehicleTiresQuery);
+  const occupiedView = occupiedPositionsView({
+    locked: isVehicleLocked,
+    lockedOccupied: occupiedPositions,
+    vehicleId: effectiveVehicleId,
+    vehicleTires: vehicleTiresView,
+  });
+  const positionsKnown = occupiedView.kind === "ready";
+  const resolvedOccupiedPositions = occupiedView.kind === "ready" ? occupiedView.data : [];
 
   const availableTires = useMemo(
     () => tiresCatalog.filter((tire) => stockOf(tire, "new") + stockOf(tire, "used") > 0),
     [tiresCatalog],
   );
 
-  const availablePositions = useMemo(
-    () => TIRE_MOUNT_POSITIONS.filter((p) => !resolvedOccupiedPositions.includes(p.value)),
-    [resolvedOccupiedPositions],
-  );
+  const availablePositions = TIRE_MOUNT_POSITIONS.filter((p) => !resolvedOccupiedPositions.includes(p.value));
 
   useEffect(() => {
     if (!open) return;
@@ -292,13 +299,17 @@ export function VehicleTireMountDialog({
             <Select
               value={position}
               onValueChange={setPosition}
-              disabled={!effectiveVehicleId || availablePositions.length === 0}
+              disabled={!effectiveVehicleId || !positionsKnown || availablePositions.length === 0}
             >
               <SelectTrigger id="mount-position">
                 <SelectValue
                   placeholder={
                     !effectiveVehicleId
                       ? "Choisir un véhicule d'abord"
+                      : !positionsKnown
+                        ? occupiedView.kind === "error"
+                          ? "Positions occupées inconnues"
+                          : "Chargement..."
                       : availablePositions.length === 0
                         ? "Toutes les positions sont occupées"
                         : "Choisir une position"
@@ -313,6 +324,15 @@ export function VehicleTireMountDialog({
                 ))}
               </SelectContent>
             </Select>
+            {effectiveVehicleId && occupiedView.kind === "error" ? (
+              <InlineQueryError
+                error={occupiedView.error}
+                fallback="Les positions occupées sont momentanément indisponibles."
+                onRetry={() => void vehicleTiresQuery.refetch()}
+                isRetrying={occupiedView.isRetrying}
+                data-testid="mount-positions-error"
+              />
+            ) : null}
           </div>
 
           <div className="grid gap-2">
@@ -320,10 +340,14 @@ export function VehicleTireMountDialog({
             <Select
               value={tireId}
               onValueChange={setTireId}
-              disabled={tiresLoading || !!preselectedTireId}
+              disabled={catalogView.kind !== "ready" || !!preselectedTireId}
             >
               <SelectTrigger id="mount-tire">
-                <SelectValue placeholder={tiresLoading ? "Chargement..." : "Choisir un pneu"} />
+                <SelectValue
+                  placeholder={
+                    tiresLoading ? "Chargement..." : catalogView.kind === "error" ? "Stock inconnu" : "Choisir un pneu"
+                  }
+                />
               </SelectTrigger>
               <SelectContent>
                 {availableTires.length === 0 ? (
@@ -340,6 +364,15 @@ export function VehicleTireMountDialog({
                 )}
               </SelectContent>
             </Select>
+            {catalogView.kind === "error" ? (
+              <InlineQueryError
+                error={catalogView.error}
+                fallback="Le stock de pneus est momentanément indisponible."
+                onRetry={() => void tiresQuery.refetch()}
+                isRetrying={catalogView.isRetrying}
+                data-testid="mount-catalog-error"
+              />
+            ) : null}
             {selectedTire ? (
               <div className="grid gap-2">
                 {canChooseSource ? (
@@ -425,12 +458,16 @@ export function VehicleTireMountDialog({
           <Button
             onClick={() => mountMutation.mutate()}
             disabled={
-              mountMutation.isPending ||
-              !effectiveVehicleId ||
-              !position ||
-              !tireId ||
-              availableTires.length === 0 ||
-              availablePositions.length === 0
+              mountBlock({
+                isPending: mountMutation.isPending,
+                vehicleId: effectiveVehicleId,
+                position,
+                tireId,
+                occupied: occupiedView,
+                freePositionsCount: availablePositions.length,
+                catalog: catalogView,
+                availableTiresCount: availableTires.length,
+              }) !== null
             }
           >
             {mountMutation.isPending ? (
