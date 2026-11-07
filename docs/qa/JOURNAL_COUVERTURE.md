@@ -2590,6 +2590,6 @@ soumission sans doublon.
   - `tests/unit/server/tire-statistics-advanced-error.test.ts` : rouge avant le correctif, deux échecs (« expected { Object (totalTires, …) } to be an instance of AppError »), vert après ;
   - `tests/unit/client/tires-page-state.test.ts` : après la relecture, 6 échecs sur 7 avant le correctif, dont « liste en cache et relance en échec » (la page passait en erreur) ; 7 sur 7 verts après ;
   - Playwright local, compte warehouse : page normale, puis statistiques forcées en 500, où l'encart d'erreur affiche la référence et le bouton « Réessayer ».
-  - Campagnes : tsc 0, check:tests 0. Unitaires : 304 fichiers sur 305 en suite complète ; prefix-middleware-guardrail échoue sous charge mais passe seul.
+  - Campagnes : tsc 0, check:tests 0, unitaires 305/305 fichiers (3178 tests). prefix-middleware-guardrail est instable sous charge (un échec à la première campagne, vert seul et à la seconde).
 - **RAIDER** : R (`LoadingError` et queryFn existants) ; D (réponse inchangée en cas de succès) ; E (pas de détail technique dans le message, log migré, non supprimé). Ne s'applique pas : A, I, Retroactive.
 - **Reste / risques** : d'autres méthodes du même service renvoient du vide en cas d'erreur (`getTires`, `getAllVehicleTires`, `getVehicleTires`, `getTireInspections`, `getTireRotations`, `getTireStatistics`, `getLowStockTires`, `getTireAlerts`). Elles sont signalées pour un lot séparé. Les 5 requêtes parallèles de statistics-advanced pèsent sur le pool : un regroupement en une seule requête SQL est prévu après la fusion.
