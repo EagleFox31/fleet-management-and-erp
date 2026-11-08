@@ -101,14 +101,13 @@ export class TechnicianWorkOrdersService {
 
       // Coûts de toute la liste en quatre requêtes groupées, pas cinq par OT.
       const costs = await this.calculateWorkOrderCosts(result.map((wo) => ({ id: wo.id, cost: wo.cost })));
+      const unavailableIds: number[] = [];
       const enrichedWorkOrders: TechnicianWorkOrder[] = result.map((wo) => {
           // Un coût absent n'est pas un coût nul : l'OT reste servi, son coût vaut null
           // (« Indisponible » à l'écran), jamais 0.
           const costBreakdown = costs.get(wo.id) ?? UNAVAILABLE_COST;
           const costUnavailable = costBreakdown.totalCost === null;
-          if (costUnavailable) {
-            log.error({ workOrderId: wo.id, technicianId }, "coût de l'OT indisponible");
-          }
+          if (costUnavailable) unavailableIds.push(wo.id);
           return {
             costUnavailable,
             id: wo.id,
@@ -138,6 +137,14 @@ export class TechnicianWorkOrdersService {
             estimatedDuration: this.getDefaultDuration(wo.title)
           };
         });
+
+      // Un seul log pour toute la liste : la cause est déjà journalisée par composante.
+      if (unavailableIds.length > 0) {
+        log.warn(
+          { technicianId, count: unavailableIds.length, workOrderIds: unavailableIds },
+          "coût indisponible pour des OT du technicien",
+        );
+      }
 
       log.debug({ technicianId, count: enrichedWorkOrders.length }, 'ordres de travail du technicien trouvés');
       return enrichedWorkOrders;

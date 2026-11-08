@@ -151,6 +151,17 @@ describe("OT du technicien : seule la composante en échec passe à null", () =>
     expect(wo.cost).toBe(500);
     expect(wo.costUnavailable).toBe(false);
   });
+
+  it("heures en échec avec un taux connu : main-d'oeuvre et total à null, jamais un coût sans les heures", async () => {
+    failOnly(1);
+    laborRates.mockResolvedValueOnce(new Map([[workOrderRow.id, 15000]]));
+    const [wo] = await technicianWorkOrdersService.getTechnicianWorkOrders(3);
+    expect(wo.baseCost).toBeNull();
+    expect(wo.cost).toBeNull();
+    expect(wo.costUnavailable).toBe(true);
+    expect(wo.partsCost).toBe(0);
+    expect(wo.tiresCost).toBe(0);
+  });
 });
 
 describe("OT en attente du technicien : erreur de base", () => {

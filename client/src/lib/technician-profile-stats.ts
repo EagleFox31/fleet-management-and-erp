@@ -85,8 +85,9 @@ export function technicianProfileStats(workOrders: TechnicianProfileWorkOrder[])
 
 /**
  * Vue du profil technicien. Une requête en échec sans données, ou une réponse sans liste d'OT,
- * donne `error` : le profil affiche « Indisponible » et « Réessayer », jamais des coûts à 0
- * (le service lève une AppError 500 quand le calcul du coût échoue).
+ * donne `error` : le profil affiche « Indisponible » et « Réessayer », jamais des coûts à 0.
+ * Quand seul le calcul du coût échoue, le service sert la liste avec `cost: null` et
+ * `costUnavailable: true` sur l'OT concerné : les totaux passent alors à « Indisponible ».
  */
 export function technicianProfileView(
   query: QueryStatus<unknown>,
