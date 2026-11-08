@@ -14,7 +14,39 @@ import { preventiveDueDay } from "../lib/kpi-rules";
 import { stampPreventiveDue } from "../lib/preventive-due";
 
 import { PART_CATALOG_EVENT_ROLES, STAFF_ROLES } from "@shared/constants/roles";
+import { jsonRowOf, rowFromJson } from "../lib/json-table-row";
 const log = moduleLogger("tires");
+
+/** Ligne unique de la requête de `getTireStatisticsAdvanced` (types tels que livrés par le pilote). */
+interface CriticalWearInspectionRow {
+  inspectionId: number;
+  treadDepth: number | null;
+  vehicleRegistration: string | null;
+  tireBrand: string | null;
+  tireModel: string | null;
+  position: string | null;
+}
+interface RotationVehicleRow {
+  vehicleId: number;
+  vehicleRegistration: string;
+  currentMileage: number;
+  lastRotationMileage: number | null;
+  nextRotationMileage: number | null;
+}
+interface TireStatisticsAdvancedRow {
+  /** SUM d'un integer : bigint, livré en texte par le pilote (contrat de réponse inchangé). */
+  total_quantity: string | null;
+  /** SUM d'un numeric : livré en texte. */
+  total_value: string | null;
+  average_wear: number | null;
+  low_stock_tires: Record<string, unknown>[];
+  critical_wear_inspections: CriticalWearInspectionRow[];
+  vehicles_with_rotations: RotationVehicleRow[];
+}
+
+function rowsOf<T>(result: unknown): T[] {
+  return ((result as { rows?: T[] }).rows ?? (result as T[])) as T[];
+}
 
 const createdByUser = alias(users, "tires_created_by_user");
 const updatedByUser = alias(users, "tires_updated_by_user");
@@ -873,34 +905,67 @@ export class TiresService {
   // Statistiques avancées avec données réelles
   async getTireStatisticsAdvanced(): Promise<any> {
     try {
-      // Lancer les calculs en parallèle pour éviter un temps cumulé par aller-retour DB.
-      const [stockStats, wearStats, actions] = await Promise.all([
-        db
-          .select({
-            totalQuantity: sql<number>`SUM(${tires.stockQuantity})`,
-            totalValue: sql<number>`SUM(${tires.stockQuantity} * ${tires.purchasePrice})`,
-            totalTypes: sql<number>`COUNT(*)`
-          })
-          .from(tires)
-          .where(isNull(tires.deletedAt)),
-        db
-          .select({
-            averageWear: sql<number>`AVG(${tireInspections.treadDepth})`,
-            criticalWearCount: sql<number>`COUNT(CASE WHEN ${tireInspections.treadDepth} < 3.0 THEN 1 END)`
-          })
-          .from(tireInspections)
-          .leftJoin(vehicleTires, eq(tireInspections.vehicleTireId, vehicleTires.id))
-          .where(eq(vehicleTires.status, 'active')),
-        this.calculateRequiredActions(),
-      ]);
+      // Une seule requête, donc une seule connexion du pool : les cinq lectures parallèles
+      // d'avant pouvaient saturer le pool et faire attendre la page jusqu'au plafond de connexion.
+      const result = await db.execute(sql`
+        SELECT
+          (SELECT SUM(stock_quantity) FROM tires WHERE deleted_at IS NULL) AS total_quantity,
+          (SELECT SUM(stock_quantity * purchase_price) FROM tires WHERE deleted_at IS NULL) AS total_value,
+          (SELECT AVG(i.tread_depth)
+             FROM tire_inspections i
+             LEFT JOIN vehicle_tires vt ON i.vehicle_tire_id = vt.id
+            WHERE vt.status = 'active') AS average_wear,
+          COALESCE((
+            SELECT json_agg(${jsonRowOf(tires, "t")} ORDER BY t.id)
+              FROM tires t
+             WHERE t.deleted_at IS NULL AND t.stock_quantity <= t.min_stock_level
+          ), '[]'::json) AS low_stock_tires,
+          COALESCE((
+            SELECT json_agg(json_build_object(
+                     'inspectionId', i.id,
+                     'treadDepth', i.tread_depth,
+                     'vehicleRegistration', v.registration_number,
+                     'tireBrand', t.brand,
+                     'tireModel', t.model,
+                     'position', vt.position
+                   ) ORDER BY i.id)
+              FROM tire_inspections i
+              LEFT JOIN vehicle_tires vt ON i.vehicle_tire_id = vt.id
+              LEFT JOIN vehicles v ON vt.vehicle_id = v.id
+              LEFT JOIN tires t ON vt.tire_id = t.id
+             WHERE i.tread_depth < 3.0 AND vt.status = 'active'
+          ), '[]'::json) AS critical_wear_inspections,
+          COALESCE((
+            SELECT json_agg(json_build_object(
+                     'vehicleId', v.id,
+                     'vehicleRegistration', v.registration_number,
+                     'currentMileage', v.mileage,
+                     'lastRotationMileage', (
+                       SELECT rotation_mileage FROM tire_rotations
+                        WHERE vehicle_id = v.id ORDER BY rotation_date DESC LIMIT 1
+                     ),
+                     'nextRotationMileage', (
+                       SELECT next_rotation_mileage FROM tire_rotations
+                        WHERE vehicle_id = v.id ORDER BY rotation_date DESC LIMIT 1
+                     )
+                   ) ORDER BY v.id)
+              FROM vehicles v
+             WHERE v.status = 'operational'
+          ), '[]'::json) AS vehicles_with_rotations
+      `);
+      const row = rowsOf<TireStatisticsAdvancedRow>(result)[0];
+      if (!row) throw new Error("statistiques avancées des pneus : aucune ligne renvoyée");
 
-      const stats = stockStats[0];
-      const wear = wearStats[0];
+      const actions = this.buildRequiredActions(
+        row.low_stock_tires.map((json) => rowFromJson(tires, json)),
+        row.critical_wear_inspections,
+        row.vehicles_with_rotations,
+      );
 
       return {
-        totalTires: stats.totalQuantity || 0,
-        totalValue: stats.totalValue || 0,
-        averageWear: wear.averageWear ? Number(wear.averageWear.toFixed(1)) : 0,
+        totalTires: row.total_quantity || 0,
+        totalValue: row.total_value || 0,
+        averageWear: row.average_wear ? Number(row.average_wear.toFixed(1)) : 0,
         lowStockCount: actions.lowStock.length,
         requiredActions: actions
       };
@@ -911,8 +976,12 @@ export class TiresService {
     }
   }
 
-  // Calcul des actions requises
-  private async calculateRequiredActions(): Promise<any> {
+  // Calcul des actions requises, à partir des lignes lues par getTireStatisticsAdvanced
+  private buildRequiredActions(
+    lowStockTires: Tire[],
+    criticalWearInspections: CriticalWearInspectionRow[],
+    vehiclesWithRotations: RotationVehicleRow[],
+  ): any {
     const actions = {
       lowStock: [] as any[],
       outOfStock: [] as any[],
@@ -920,55 +989,6 @@ export class TiresService {
       rotationDue: [] as any[],
       rotationApproaching: [] as any[]
     };
-
-    const [lowStockTires, criticalWearInspections, vehiclesWithRotations] = await Promise.all([
-      db
-        .select()
-        .from(tires)
-        .where(and(
-          isNull(tires.deletedAt),
-          sql`${tires.stockQuantity} <= ${tires.minStockLevel}`
-        )),
-      db
-        .select({
-          inspectionId: tireInspections.id,
-          treadDepth: tireInspections.treadDepth,
-          vehicleRegistration: vehicles.registrationNumber,
-          tireBrand: tires.brand,
-          tireModel: tires.model,
-          position: vehicleTires.position
-        })
-        .from(tireInspections)
-        .leftJoin(vehicleTires, eq(tireInspections.vehicleTireId, vehicleTires.id))
-        .leftJoin(vehicles, eq(vehicleTires.vehicleId, vehicles.id))
-        .leftJoin(tires, eq(vehicleTires.tireId, tires.id))
-        .where(and(
-          sql`${tireInspections.treadDepth} < 3.0`,
-          eq(vehicleTires.status, 'active')
-        )),
-      db
-        .select({
-          vehicleId: vehicles.id,
-          vehicleRegistration: vehicles.registrationNumber,
-          currentMileage: vehicles.mileage,
-          lastRotationMileage: sql<number>`(
-            SELECT rotation_mileage
-            FROM tire_rotations
-            WHERE vehicle_id = ${vehicles.id}
-            ORDER BY rotation_date DESC
-            LIMIT 1
-          )`,
-          nextRotationMileage: sql<number>`(
-            SELECT next_rotation_mileage
-            FROM tire_rotations
-            WHERE vehicle_id = ${vehicles.id}
-            ORDER BY rotation_date DESC
-            LIMIT 1
-          )`
-        })
-        .from(vehicles)
-        .where(eq(vehicles.status, 'operational')),
-    ]);
 
     for (const tire of lowStockTires) {
       if (tire.stockQuantity === 0) {

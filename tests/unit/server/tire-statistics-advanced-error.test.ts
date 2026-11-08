@@ -26,7 +26,7 @@ function failingQuery(): unknown {
   return chain;
 }
 
-vi.mock("../../../server/db", () => ({ db: { select: () => failingQuery() } }));
+vi.mock("../../../server/db", () => ({ db: { select: () => failingQuery(), execute: () => failingQuery() } }));
 
 import { tiresService } from "../../../server/services/tires-service-simplified";
 import { AppError } from "../../../server/lib/app-error";
