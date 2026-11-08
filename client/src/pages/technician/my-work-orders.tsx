@@ -21,6 +21,9 @@ import {
 } from "@/lib/technician-work-orders-query";
 import { HeaderCard, KpiGrid, KpiTile, CardShell, PremiumTabsNav } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
+import { technicianWorkOrdersView, workOrderCostLabel } from "@/lib/technician-profile-stats";
+import type { QueryView } from "@/lib/query-view";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 
 type WorkOrdersTab = "pending" | "in_progress" | "completed";
 
@@ -46,11 +49,17 @@ export default function MyWorkOrdersPage() {
 
   const [mileageUpdate, setMileageUpdate] = useState<string>("");
 
-  const { data: workOrdersData, isLoading } = useQuery<any>({
+  const isTechnician = !!user?.id && user?.role === "technician";
+  const workOrdersQuery = useQuery<unknown>({
     queryKey: TECHNICIAN_MY_WORK_ORDERS_KEY,
-    enabled: !!user?.id && user?.role === "technician",
+    enabled: isTechnician,
     staleTime: 0,
   });
+  // Échec sans données : message et « Réessayer », jamais « aucun OT » ni des compteurs à 0.
+  // Requête désactivée (pas un technicien) : liste vide, comme avant.
+  const workOrdersView: QueryView<{ workOrders: any[] }> = isTechnician
+    ? technicianWorkOrdersView<any>(workOrdersQuery)
+    : { kind: "ready", data: { workOrders: [] } };
 
   // Les pièces ne s'ajoutent pas ici : le technicien les demande depuis la fiche de l'OT,
   // le magasinier les sort du stock.
@@ -211,8 +220,7 @@ export default function MyWorkOrdersPage() {
     }
   };
 
-  const myWorkOrders = (workOrdersData as any)?.workOrders || [];
-  const stats = (workOrdersData as any)?.stats || { pending: 0, inProgress: 0, completed: 0, total: 0 };
+  const myWorkOrders = workOrdersView.kind === "ready" ? workOrdersView.data.workOrders : [];
 
   const pendingOrders = myWorkOrders.filter((wo: any) => wo.status === 'pending');
   const inProgressOrders = myWorkOrders.filter((wo: any) => wo.status === 'in_progress');
@@ -270,7 +278,7 @@ export default function MyWorkOrdersPage() {
                 {new Date(workOrder.startDate).toLocaleDateString('fr-FR')}
               </span>
             )}
-            <span className="ml-auto text-gray-900 dark:text-gray-100 font-semibold">{formatPrice(workOrder.cost || 0)}</span>
+            <span className="ml-auto text-gray-900 dark:text-gray-100 font-semibold">{workOrderCostLabel(workOrder, formatPrice)}</span>
           </div>
 
           {workOrder.diagnosis && (
@@ -310,7 +318,27 @@ export default function MyWorkOrdersPage() {
     setLocation(`/technician/my-work-orders?status=${nextTab}`);
   };
 
-  if (isLoading) {
+  if (workOrdersView.kind === "error") {
+    return (
+      <div className="space-y-5">
+        <HeaderCard
+          moduleLabel="Technicien · Ordres de travail"
+          title="Mes Ordres de Travail"
+          subtitle="Interventions qui vous sont assignées"
+          icon={<ClipboardList className="h-5 w-5" />}
+        />
+        <InlineQueryError
+          error={workOrdersView.error}
+          fallback="Vos ordres de travail sont momentanément indisponibles."
+          onRetry={() => void workOrdersQuery.refetch()}
+          isRetrying={workOrdersView.isRetrying}
+          data-testid="tech-my-work-orders-error"
+        />
+      </div>
+    );
+  }
+
+  if (workOrdersView.kind === "loading") {
     return (
       <div className="space-y-5">
         <div className="h-32 rounded-2xl border border-gray-100 bg-gray-50 animate-pulse" />
