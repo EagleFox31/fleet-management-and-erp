@@ -7,6 +7,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * et renvoyait une carte vide ; `getTechnicianWorkOrders` lisait alors `ZERO_COST` pour chaque OT,
  * y compris ceux dont `work_orders.cost` était renseigné. La route répondait 200 et le profil
  * affichait « 0 » comme une vraie valeur.
+ *
+ * Contrat retenu (décision 0a) : la liste reste servie, car un technicien qui ne voit plus ses
+ * interventions ne peut plus travailler ; l'OT sans coût porte `cost: null` et
+ * `costUnavailable: true`.
  */
 const dbFailure = new Error("timeout exceeded when trying to connect");
 
@@ -51,8 +55,9 @@ const workOrderRow = {
 
 const select = vi.fn();
 vi.mock("../../../server/db", () => ({ db: { select: (...args: unknown[]) => select(...args) } }));
+const laborRates = vi.fn(async (): Promise<Map<number, number | null>> => new Map());
 vi.mock("../../../server/services/workshop-labor-rates-service", () => ({
-  laborRatesForWorkOrders: async () => new Map(),
+  laborRatesForWorkOrders: () => laborRates(),
 }));
 
 import { technicianWorkOrdersService } from "../../../server/services/technician-work-orders-service";
@@ -66,27 +71,26 @@ describe("OT du technicien : échec du calcul de coût", () => {
     select.mockImplementation(() => query({ error: dbFailure }));
   });
 
-  it("lève une AppError 5xx au lieu de renvoyer des OT à coût 0", async () => {
-    const outcome = await technicianWorkOrdersService.getTechnicianWorkOrders(3).then(
-      (value: unknown) => ({ value }),
-      (error: unknown) => ({ error }),
-    );
-
-    expect(outcome).not.toHaveProperty("value");
-    const { error } = outcome as { error: unknown };
-    expect(error).toBeInstanceOf(AppError);
-    expect((error as AppError).status).toBeGreaterThanOrEqual(500);
-    expect((error as AppError).cause).toBe(dbFailure);
+  it("la liste reste servie : le technicien voit toujours ses interventions", async () => {
+    const list = await technicianWorkOrdersService.getTechnicianWorkOrders(3);
+    expect(list.map((wo) => wo.id)).toEqual([1]);
+    expect(list[0].title).toBe("Vidange");
   });
 
-  it("le message destiné à l'utilisateur ne contient aucun détail technique", async () => {
-    const error = await technicianWorkOrdersService.getTechnicianWorkOrders(3).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(AppError);
-    expect((error as AppError).message).not.toMatch(/timeout|connect|sql|select/i);
+  it("l'OT dont le coût n'a pas pu être calculé porte des coûts null, jamais 0", async () => {
+    const [wo] = await technicianWorkOrdersService.getTechnicianWorkOrders(3);
+    expect(wo.costUnavailable).toBe(true);
+    expect(wo.cost).toBeNull();
+    // Sans taux, la main-d'oeuvre vaut work_orders.cost : elle reste connue.
+    expect(wo.baseCost).toBe(500);
+    expect(wo.partsCost).toBeNull();
+    expect(wo.tiresCost).toBeNull();
   });
 
-  it("les statistiques propagent l'erreur au lieu de compter sur des coûts faux", async () => {
-    await expect(technicianWorkOrdersService.getTechnicianWorkOrderStats(3)).rejects.toBeInstanceOf(AppError);
+  it("les statistiques (comptages) restent calculées", async () => {
+    const stats = await technicianWorkOrdersService.getTechnicianWorkOrderStats(3);
+    expect(stats.completed).toBe(1);
+    expect(stats.total).toBe(1);
   });
 
   it("calcul réussi : le coût de base est conservé", async () => {
@@ -95,10 +99,57 @@ describe("OT du technicien : échec du calcul de coût", () => {
     select.mockImplementation(() => query({ rows: [] }));
 
     const [wo] = await technicianWorkOrdersService.getTechnicianWorkOrders(3);
+    expect(wo.costUnavailable).toBe(false);
     expect(wo.cost).toBe(500);
     expect(wo.baseCost).toBe(500);
     expect(wo.partsCost).toBe(0);
     expect(wo.tiresCost).toBe(0);
+  });
+});
+
+describe("OT du technicien : seule la composante en échec passe à null", () => {
+  // Ordre des requêtes de coût : liste, heures, pièces, rotations (taux mockés à vide).
+  function failOnly(index: number) {
+    select.mockReset();
+    select.mockImplementationOnce(() => query({ rows: [workOrderRow] }));
+    for (let i = 1; i <= 3; i++) {
+      select.mockImplementationOnce(() => (i === index ? query({ error: dbFailure }) : query({ rows: [] })));
+    }
+  }
+
+  it("rotations en échec : pneus et total à null, main-d'oeuvre et pièces conservées", async () => {
+    failOnly(3);
+    const [wo] = await technicianWorkOrdersService.getTechnicianWorkOrders(3);
+    expect(wo.tiresCost).toBeNull();
+    expect(wo.cost).toBeNull();
+    expect(wo.costUnavailable).toBe(true);
+    expect(wo.baseCost).toBe(500);
+    expect(wo.partsCost).toBe(0);
+  });
+
+  it("pièces en échec : pièces et total à null", async () => {
+    failOnly(2);
+    const [wo] = await technicianWorkOrdersService.getTechnicianWorkOrders(3);
+    expect(wo.partsCost).toBeNull();
+    expect(wo.cost).toBeNull();
+    expect(wo.tiresCost).toBe(0);
+  });
+
+  it("taux en échec : main-d'oeuvre et total à null", async () => {
+    failOnly(0);
+    laborRates.mockRejectedValueOnce(dbFailure);
+    const [wo] = await technicianWorkOrdersService.getTechnicianWorkOrders(3);
+    expect(wo.baseCost).toBeNull();
+    expect(wo.cost).toBeNull();
+    expect(wo.partsCost).toBe(0);
+  });
+
+  it("heures en échec sans taux : la main-d'oeuvre vaut work_orders.cost, le total reste connu", async () => {
+    failOnly(1);
+    const [wo] = await technicianWorkOrdersService.getTechnicianWorkOrders(3);
+    expect(wo.baseCost).toBe(500);
+    expect(wo.cost).toBe(500);
+    expect(wo.costUnavailable).toBe(false);
   });
 });
 

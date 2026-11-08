@@ -8,8 +8,6 @@ import { laborRatesForWorkOrders } from './workshop-labor-rates-service';
 
 const log = moduleLogger('technician-work-orders');
 
-const COST_UNAVAILABLE = "Le coût des ordres de travail n'a pas pu être calculé.";
-
 export interface TechnicianWorkOrder {
   id: number;
   vehicleId: number;
@@ -33,9 +31,11 @@ export interface TechnicianWorkOrder {
   statusLabel?: string;
   isOverdue?: boolean;
   estimatedDuration?: number;
-  baseCost?: number;
-  partsCost?: number;
-  tiresCost?: number;
+  /** `null` avec `costUnavailable` quand le calcul a échoué : jamais 0 par défaut. */
+  baseCost?: number | null;
+  partsCost?: number | null;
+  tiresCost?: number | null;
+  costUnavailable?: boolean;
 }
 
 export interface WorkOrderStats {
@@ -47,11 +47,19 @@ export interface WorkOrderStats {
 }
 
 interface WorkOrderCostBreakdown {
-  baseCost: number;
-  partsCost: number;
-  tiresCost: number;
-  totalCost: number;
+  baseCost: number | null;
+  partsCost: number | null;
+  tiresCost: number | null;
+  totalCost: number | null;
 }
+
+/** Coût d'un OT que le calcul n'a pas pu établir : tout à null, jamais à 0. */
+const UNAVAILABLE_COST: WorkOrderCostBreakdown = Object.freeze({
+  baseCost: null,
+  partsCost: null,
+  tiresCost: null,
+  totalCost: null,
+});
 
 export class TechnicianWorkOrdersService {
   /**
@@ -94,12 +102,15 @@ export class TechnicianWorkOrdersService {
       // Coûts de toute la liste en quatre requêtes groupées, pas cinq par OT.
       const costs = await this.calculateWorkOrderCosts(result.map((wo) => ({ id: wo.id, cost: wo.cost })));
       const enrichedWorkOrders: TechnicianWorkOrder[] = result.map((wo) => {
-          const costBreakdown = costs.get(wo.id);
-          if (!costBreakdown) {
-            // Un coût absent n'est pas un coût nul : jamais de 0 par défaut.
-            throw new AppError(500, COST_UNAVAILABLE, { details: { workOrderId: wo.id } });
+          // Un coût absent n'est pas un coût nul : l'OT reste servi, son coût vaut null
+          // (« Indisponible » à l'écran), jamais 0.
+          const costBreakdown = costs.get(wo.id) ?? UNAVAILABLE_COST;
+          const costUnavailable = costBreakdown.totalCost === null;
+          if (costUnavailable) {
+            log.error({ workOrderId: wo.id, technicianId }, "coût de l'OT indisponible");
           }
           return {
+            costUnavailable,
             id: wo.id,
             vehicleId: wo.vehicleId,
             title: wo.title,
@@ -140,8 +151,9 @@ export class TechnicianWorkOrdersService {
    * Détail des coûts d'une liste d'OT : même règle que l'écran, le PDF et le KPI
    * (`shared/work-order-cost.ts`). La main-d'oeuvre vaut heures réelles × taux en vigueur
    * quand un taux existe, sinon `work_orders.cost`. Quatre requêtes groupées, quelle que
-   * soit la longueur de la liste. Si l'une des requêtes échoue, l'erreur est journalisée et
-   * relevée en `AppError` 500 : un coût inconnu ne doit jamais s'afficher comme un coût nul.
+   * soit la longueur de la liste, chacune isolée : une requête en échec est journalisée et ne
+   * met à `null` que la composante qu'elle porte (main-d'oeuvre, pièces ou pneus), et le total
+   * avec elle. Jamais 0 par défaut, et la liste des OT reste servie.
    */
   private async calculateWorkOrderCosts(
     rows: ReadonlyArray<{ id: number; cost: string | number | null }>,
@@ -149,55 +161,67 @@ export class TechnicianWorkOrdersService {
     const costs = new Map<number, WorkOrderCostBreakdown>();
     if (rows.length === 0) return costs;
     const ids = rows.map((row) => row.id);
-    try {
-      const [hoursRows, partsRows, rotationsRows, rates] = await Promise.all([
-        db
-          .select({
-            workOrderId: workOrderItems.workOrderId,
-            hours: sql<string>`COALESCE(SUM(${workOrderItems.actualHours}), 0)`,
-          })
-          .from(workOrderItems)
-          .where(and(inArray(workOrderItems.workOrderId, ids), sql`${workOrderItems.status} <> 'cancelled'`))
-          .groupBy(workOrderItems.workOrderId),
-        db
-          .select({
-            workOrderId: partsUsed.workOrderId,
-            total: sql<string>`COALESCE(SUM(${partsUsed.unitPrice} * ${partsUsed.quantity}), 0)`,
-          })
-          .from(partsUsed)
-          .where(inArray(partsUsed.workOrderId, ids))
-          .groupBy(partsUsed.workOrderId),
-        db
-          .select({
-            workOrderId: tireRotations.workOrderId,
-            total: sql<string>`COALESCE(SUM(CAST(${tireRotations.cost} AS NUMERIC)), 0)`,
-          })
-          .from(tireRotations)
-          .where(inArray(tireRotations.workOrderId, ids))
-          .groupBy(tireRotations.workOrderId),
-        laborRatesForWorkOrders(ids),
-      ]);
-      const hoursOf = new Map(hoursRows.map((row) => [Number(row.workOrderId), row.hours]));
-      const partsOf = new Map(partsRows.map((row) => [Number(row.workOrderId), Number(row.total) || 0]));
-      const rotationsOf = new Map(rotationsRows.map((row) => [Number(row.workOrderId), Number(row.total) || 0]));
+    const [hoursResult, partsResult, rotationsResult, ratesResult] = await Promise.allSettled([
+      db
+        .select({
+          workOrderId: workOrderItems.workOrderId,
+          hours: sql<string>`COALESCE(SUM(${workOrderItems.actualHours}), 0)`,
+        })
+        .from(workOrderItems)
+        .where(and(inArray(workOrderItems.workOrderId, ids), sql`${workOrderItems.status} <> 'cancelled'`))
+        .groupBy(workOrderItems.workOrderId),
+      db
+        .select({
+          workOrderId: partsUsed.workOrderId,
+          total: sql<string>`COALESCE(SUM(${partsUsed.unitPrice} * ${partsUsed.quantity}), 0)`,
+        })
+        .from(partsUsed)
+        .where(inArray(partsUsed.workOrderId, ids))
+        .groupBy(partsUsed.workOrderId),
+      db
+        .select({
+          workOrderId: tireRotations.workOrderId,
+          total: sql<string>`COALESCE(SUM(CAST(${tireRotations.cost} AS NUMERIC)), 0)`,
+        })
+        .from(tireRotations)
+        .where(inArray(tireRotations.workOrderId, ids))
+        .groupBy(tireRotations.workOrderId),
+      laborRatesForWorkOrders(ids),
+    ]);
 
-      for (const row of rows) {
-        const partsCost = partsOf.get(row.id) ?? 0;
-        const tiresCost = rotationsOf.get(row.id) ?? 0;
-        const { baseCost, totalCost } = computeWorkOrderCost({
-          baseCost: row.cost,
-          parts: [{ unitPrice: partsCost, quantity: 1 }],
-          tireRotations: [{ cost: tiresCost }],
-          laborHours: hoursOf.get(row.id) ?? 0,
-          laborRate: rates.get(row.id) ?? null,
-        });
-        costs.set(row.id, { baseCost, partsCost, tiresCost, totalCost });
-      }
-      log.debug({ count: rows.length }, "coûts des OT calculés");
-    } catch (error) {
-      log.error({ err: error, workOrderIds: ids }, "calcul du coût des OT impossible");
-      throw new AppError(500, COST_UNAVAILABLE, { cause: error });
+    const settled = <T,>(result: PromiseSettledResult<T>, component: string): T | null => {
+      if (result.status === "fulfilled") return result.value;
+      log.error({ err: result.reason, workOrderIds: ids, component }, "calcul d'une composante du coût des OT impossible");
+      return null;
+    };
+    const hoursRows = settled(hoursResult, "heures");
+    const partsRows = settled(partsResult, "pièces");
+    const rotationsRows = settled(rotationsResult, "pneus");
+    const rates = settled(ratesResult, "taux");
+
+    const hoursOf = hoursRows && new Map(hoursRows.map((row) => [Number(row.workOrderId), row.hours]));
+    const partsOf = partsRows && new Map(partsRows.map((row) => [Number(row.workOrderId), Number(row.total) || 0]));
+    const rotationsOf = rotationsRows && new Map(rotationsRows.map((row) => [Number(row.workOrderId), Number(row.total) || 0]));
+
+    for (const row of rows) {
+      const partsCost = partsOf ? partsOf.get(row.id) ?? 0 : null;
+      const tiresCost = rotationsOf ? rotationsOf.get(row.id) ?? 0 : null;
+      const laborRate = rates ? rates.get(row.id) ?? null : undefined;
+      // Main-d'oeuvre inconnue : taux illisibles, ou taux connu mais heures illisibles.
+      // Sans taux, elle vaut `work_orders.cost` et ne dépend pas des heures.
+      const laborUnknown = laborRate === undefined || (laborRate !== null && !hoursOf);
+      const computed = computeWorkOrderCost({
+        baseCost: row.cost,
+        parts: [{ unitPrice: partsCost ?? 0, quantity: 1 }],
+        tireRotations: [{ cost: tiresCost ?? 0 }],
+        laborHours: hoursOf?.get(row.id) ?? 0,
+        laborRate: laborRate ?? null,
+      });
+      const baseCost = laborUnknown ? null : computed.baseCost;
+      const totalCost = baseCost === null || partsCost === null || tiresCost === null ? null : computed.totalCost;
+      costs.set(row.id, { baseCost, partsCost, tiresCost, totalCost });
     }
+    log.debug({ count: rows.length }, "coûts des OT calculés");
     return costs;
   }
 

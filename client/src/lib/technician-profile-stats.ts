@@ -7,6 +7,8 @@ export interface TechnicianProfileWorkOrder {
   baseCost?: unknown;
   partsCost?: unknown;
   tiresCost?: unknown;
+  /** Le serveur n'a pas pu calculer le coût : `cost` vaut null, jamais 0. */
+  costUnavailable?: boolean;
   createdAt?: string | Date;
   updatedAt?: string | Date | null;
   endDate?: string | Date | null;
@@ -18,11 +20,17 @@ export interface TechnicianProfileStats {
   completed: TechnicianProfileWorkOrder[];
   inProgress: TechnicianProfileWorkOrder[];
   pending: TechnicianProfileWorkOrder[];
-  totalCost: number;
-  averageCost: number;
-  partsCost: number;
-  tiresCost: number;
-  maintenanceCost: number;
+  /** Totaux sur les OT terminés ; `null` dès qu'un de ces OT est sans coût (« Indisponible »). */
+  totalCost: number | null;
+  averageCost: number | null;
+  partsCost: number | null;
+  tiresCost: number | null;
+  maintenanceCost: number | null;
+}
+
+/** Coût inconnu : signalé par le serveur, ou absent. Ne se somme jamais comme un 0. */
+export function isWorkOrderCostUnknown(wo: TechnicianProfileWorkOrder): boolean {
+  return wo.costUnavailable === true || wo.cost === null || wo.cost === undefined;
 }
 
 const toNumber = (value: unknown): number => {
@@ -38,6 +46,21 @@ export function technicianProfileStats(workOrders: TechnicianProfileWorkOrder[])
   const completed = workOrders.filter((wo) => wo.status === "completed");
   const inProgress = workOrders.filter((wo) => wo.status === "in_progress");
   const pending = workOrders.filter((wo) => wo.status === "pending");
+
+  // Une somme partielle présentée comme juste est un coût faux : tout passe à « Indisponible ».
+  if (completed.some(isWorkOrderCostUnknown)) {
+    return {
+      workOrders,
+      completed,
+      inProgress,
+      pending,
+      totalCost: null,
+      averageCost: null,
+      partsCost: null,
+      tiresCost: null,
+      maintenanceCost: null,
+    };
+  }
 
   const totalCost = sumOf(completed, "cost");
   const partsCost = sumOf(completed, "partsCost");
@@ -68,9 +91,29 @@ export function technicianProfileStats(workOrders: TechnicianProfileWorkOrder[])
 export function technicianProfileView(
   query: QueryStatus<unknown>,
 ): QueryView<TechnicianProfileStats> {
+  const view = technicianWorkOrdersView(query);
+  if (view.kind !== "ready") return view;
+  return { kind: "ready", data: technicianProfileStats(view.data.workOrders) };
+}
+
+/**
+ * Vue de `GET /api/technician/my-work-orders` pour le tableau de bord et « Mes OT ».
+ * Une requête en échec sans données, ou une réponse sans liste d'OT, donne `error` :
+ * l'écran affiche un message et « Réessayer », jamais « aucun OT ».
+ */
+export function technicianWorkOrdersView<T = TechnicianProfileWorkOrder>(
+  query: QueryStatus<unknown>,
+): QueryView<{ workOrders: T[]; stats?: Record<string, number | undefined> }> {
   const view = queryView(query);
   if (view.kind !== "ready") return view;
-  const workOrders = (view.data as { workOrders?: unknown } | null)?.workOrders;
-  if (!Array.isArray(workOrders)) return { kind: "error", error: null, isRetrying: query.isFetching };
-  return { kind: "ready", data: technicianProfileStats(workOrders as TechnicianProfileWorkOrder[]) };
+  const data = view.data as { workOrders?: unknown; stats?: Record<string, number | undefined> } | null;
+  if (!Array.isArray(data?.workOrders)) return { kind: "error", error: null, isRetrying: query.isFetching };
+  return { kind: "ready", data: { workOrders: data.workOrders as T[], stats: data.stats } };
 }
+
+/** Coût d'un OT pour l'affichage : « Indisponible » si le serveur n'a pas pu le calculer. */
+export function workOrderCostLabel(wo: TechnicianProfileWorkOrder, format: (amount: number) => string): string {
+  return isWorkOrderCostUnknown(wo) ? UNAVAILABLE_LABEL : format(Number(wo.cost) || 0);
+}
+
+const UNAVAILABLE_LABEL = "Indisponible";

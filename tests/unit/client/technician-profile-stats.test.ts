@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { technicianProfileStats, technicianProfileView } from "../../../client/src/lib/technician-profile-stats";
+import {
+  technicianProfileStats,
+  technicianProfileView,
+  technicianWorkOrdersView,
+  workOrderCostLabel,
+} from "../../../client/src/lib/technician-profile-stats";
 
 /**
  * Profil technicien : un échec de chargement n'est pas un coût nul.
@@ -57,5 +62,55 @@ describe("technicianProfileStats", () => {
   it("sans détail du coût, la maintenance reprend le total", () => {
     const stats = technicianProfileStats([{ status: "completed", cost: 250 }]);
     expect(stats.maintenanceCost).toBe(250);
+  });
+
+  it("un OT terminé sans coût : tous les totaux sont null, jamais une somme partielle", () => {
+    const stats = technicianProfileStats([
+      { status: "completed", cost: 300, baseCost: 300, partsCost: 0, tiresCost: 0 },
+      { status: "completed", cost: null, baseCost: 500, partsCost: null, tiresCost: 0, costUnavailable: true },
+    ]);
+    expect(stats.totalCost).toBeNull();
+    expect(stats.averageCost).toBeNull();
+    expect(stats.partsCost).toBeNull();
+    expect(stats.tiresCost).toBeNull();
+    expect(stats.maintenanceCost).toBeNull();
+    expect(stats.completed).toHaveLength(2);
+  });
+
+  it("un OT non terminé sans coût ne touche pas les totaux (ils ne portent que sur les terminés)", () => {
+    const stats = technicianProfileStats([
+      { status: "completed", cost: 300, baseCost: 300 },
+      { status: "in_progress", cost: null, costUnavailable: true },
+    ]);
+    expect(stats.totalCost).toBe(300);
+  });
+});
+
+describe("technicianWorkOrdersView", () => {
+  it("liste servie : ready avec les OT et les stats", () => {
+    const view = technicianWorkOrdersView({ data: { workOrders: [{ status: "pending" }], stats: { pending: 1 } }, error: null, isFetching: false });
+    expect(view.kind === "ready" && view.data.workOrders).toHaveLength(1);
+    expect(view.kind === "ready" && view.data.stats?.pending).toBe(1);
+  });
+
+  it("échec sans données : error, jamais une liste vide", () => {
+    const failure = new Error("500");
+    expect(technicianWorkOrdersView({ data: undefined, error: failure, isFetching: false })).toEqual({
+      kind: "error",
+      error: failure,
+      isRetrying: false,
+    });
+  });
+});
+
+describe("workOrderCostLabel", () => {
+  const format = (n: number) => `${n} XAF`;
+  it("coût indisponible : « Indisponible », jamais 0", () => {
+    expect(workOrderCostLabel({ status: "completed", cost: null, costUnavailable: true }, format)).toBe("Indisponible");
+    expect(workOrderCostLabel({ status: "completed", cost: null }, format)).toBe("Indisponible");
+  });
+  it("coût connu, y compris 0 réel", () => {
+    expect(workOrderCostLabel({ status: "completed", cost: 1200 }, format)).toBe("1200 XAF");
+    expect(workOrderCostLabel({ status: "pending", cost: 0, costUnavailable: false }, format)).toBe("0 XAF");
   });
 });

@@ -8,7 +8,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { formatPrice, cn } from "@/lib/utils";
 import { HeaderCard, KpiGrid, KpiTile, CardShell, PremiumTabsNav, SectionLabel } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
-import { technicianProfileStats, technicianProfileView } from "@/lib/technician-profile-stats";
+import { technicianProfileStats, technicianProfileView, type TechnicianProfileWorkOrder } from "@/lib/technician-profile-stats";
+import { formatKnownCost } from "@/lib/work-order-tires-cost";
 import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 
@@ -22,29 +23,37 @@ export default function TechnicianProfilePage() {
   const profileView = technicianProfileView(technicianQuery);
   const profile = profileView.kind === "ready" ? profileView.data : technicianProfileStats([]);
 
-  const myWorkOrders: any[] = profile.workOrders;
-  const completedOrders: any[] = profile.completed;
+  const myWorkOrders: TechnicianProfileWorkOrder[] = profile.workOrders;
+  const completedOrders: TechnicianProfileWorkOrder[] = profile.completed;
   const inProgressOrders = profile.inProgress;
   const pendingOrders = profile.pending;
   const { totalCost, averageCost, partsCost, tiresCost, maintenanceCost } = profile;
+  // Un total inconnu (un OT terminé sans coût) s'affiche « Indisponible », jamais une somme partielle.
+  const money = (value: number | null) => formatKnownCost(value, formatPrice, { isError: true });
+  const shareOf = (value: number | null): number | null =>
+    value === null || totalCost === null ? null : totalCost > 0 ? (value / totalCost) * 100 : 0;
+  const shareLabel = (value: number | null) => {
+    const share = shareOf(value);
+    return share === null ? UNAVAILABLE : `${share.toFixed(1)}% du total`;
+  };
   const workloadPercentage = Math.min(100, (inProgressOrders.length + pendingOrders.length) * 20);
 
   const recentActions = [...myWorkOrders]
-    .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime())
     .slice(0, 5);
 
   const thisMonth = new Date();
   thisMonth.setDate(1);
-  const thisMonthOrders = completedOrders.filter((wo: any) => {
-    const completionDate = wo.endDate ? new Date(wo.endDate) : new Date(wo.updatedAt);
+  const thisMonthOrders = completedOrders.filter((wo) => {
+    const completionDate = wo.endDate ? new Date(wo.endDate) : new Date(wo.updatedAt ?? 0);
     return completionDate >= thisMonth;
   });
 
   const lastMonth = new Date();
   lastMonth.setMonth(lastMonth.getMonth() - 1);
   lastMonth.setDate(1);
-  const lastMonthOrders = completedOrders.filter((wo: any) => {
-    const completionDate = wo.endDate ? new Date(wo.endDate) : new Date(wo.updatedAt);
+  const lastMonthOrders = completedOrders.filter((wo) => {
+    const completionDate = wo.endDate ? new Date(wo.endDate) : new Date(wo.updatedAt ?? 0);
     return completionDate >= lastMonth && completionDate < thisMonth;
   });
 
@@ -198,7 +207,7 @@ export default function TechnicianProfilePage() {
           />
           <KpiTile
             label="Coût moyen / OT"
-            value={formatPrice(averageCost)}
+            value={money(averageCost)}
             subValue="Par intervention"
             icon={<Euro className="h-4 w-4" />}
             iconWrapperClassName="bg-purple-50 text-purple-600"
@@ -321,7 +330,7 @@ export default function TechnicianProfilePage() {
             />
             <KpiTile
               label="Coût moyen"
-              value={formatPrice(averageCost)}
+              value={money(averageCost)}
               subValue="Par intervention"
               icon={<Euro className="h-4 w-4" />}
               iconWrapperClassName="bg-purple-50 text-purple-600"
@@ -334,29 +343,29 @@ export default function TechnicianProfilePage() {
           <KpiGrid columns={4} withTopBorder={false}>
             <KpiTile
               label="Total général"
-              value={formatPrice(totalCost)}
+              value={money(totalCost)}
               subValue="Coût total interventions"
               icon={<Euro className="h-4 w-4" />}
               iconWrapperClassName="bg-gray-100 text-gray-600"
             />
             <KpiTile
               label="Pièces"
-              value={formatPrice(partsCost)}
-              subValue={`${totalCost > 0 ? ((partsCost / totalCost) * 100).toFixed(1) : 0}% du total`}
+              value={money(partsCost)}
+              subValue={shareLabel(partsCost)}
               icon={<Package className="h-4 w-4" />}
               iconWrapperClassName="bg-blue-50 text-blue-600"
             />
             <KpiTile
               label="Pneus"
-              value={formatPrice(tiresCost)}
-              subValue={`${totalCost > 0 ? ((tiresCost / totalCost) * 100).toFixed(1) : 0}% du total`}
+              value={money(tiresCost)}
+              subValue={shareLabel(tiresCost)}
               icon={<TrendingUp className="h-4 w-4" />}
               iconWrapperClassName="bg-orange-50 text-orange-600"
             />
             <KpiTile
               label="Maintenance"
-              value={formatPrice(maintenanceCost)}
-              subValue={`${totalCost > 0 ? ((maintenanceCost / totalCost) * 100).toFixed(1) : 0}% du total`}
+              value={money(maintenanceCost)}
+              subValue={shareLabel(maintenanceCost)}
               icon={<Wrench className="h-4 w-4" />}
               iconWrapperClassName="bg-green-50 text-green-600"
             />
@@ -378,14 +387,12 @@ export default function TechnicianProfilePage() {
                         <span className="text-sm text-gray-600">{label}</span>
                       </div>
                       <span className="text-right">
-                        <span className="block text-sm font-semibold text-gray-800">{formatPrice(value)}</span>
-                        <span className="text-[11px] text-gray-400">
-                          {totalCost > 0 ? ((value / totalCost) * 100).toFixed(1) : 0}% du total
-                        </span>
+                        <span className="block text-sm font-semibold text-gray-800">{money(value)}</span>
+                        <span className="text-[11px] text-gray-400">{shareLabel(value)}</span>
                       </span>
                     </div>
                     <Progress
-                      value={totalCost > 0 ? (value / totalCost) * 100 : 0}
+                      value={shareOf(value) ?? 0}
                       className="h-1.5 bg-gray-100"
                       indicatorClassName={color}
                     />

@@ -135,3 +135,18 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - D : un calcul réussi renvoie les mêmes valeurs qu'avant ;
   - E : `AppError`, `moduleLogger`, cliquet resserré d'une entrée ;
   - A, I et le volet rétroactif sont sans objet (aucune écriture, aucun schéma).
+
+## 2026-11-08 23:06 — Coûts technicien, refonte après relecture (#594)
+
+Cette entrée remplace l'approche de l'entrée précédente, refusée en relecture : une AppError 500 sur toute la liste aurait privé le technicien de ses interventions pour un simple coût manquant.
+
+- **Quoi** :
+  - serveur : `GET /api/technician/my-work-orders` reste en 200. `calculateWorkOrderCosts` isole les quatre requêtes du coût (heures, pièces, rotations, taux) par `Promise.allSettled`. Seule la composante en échec passe à `null`, le total aussi, et l'OT porte `costUnavailable: true`. Chaque échec est journalisé par `moduleLogger`. Un OT absent de la table des coûts reçoit la même valeur `null`, plus aucun throw ;
+  - `getPendingWorkOrdersCount` relève toujours une `AppError` (comptage, pas une liste) ;
+  - client : `technicianWorkOrdersView` / `technicianProfileView` (sur `queryView`) et `InlineQueryError` sur le tableau de bord, « Mes OT » (start_url de la PWA) et le profil ; un coût inconnu s'affiche « Indisponible » (`workOrderCostLabel`, `formatKnownCost`). Les totaux du profil passent à `null` dès qu'un OT terminé est sans coût ; les `any[]` du profil sont typés.
+- **Pourquoi** : la liste des OT est l'écran de travail du technicien ; un coût est une donnée annexe. Une panne du coût ne doit ni cacher les OT, ni s'afficher comme 0.
+- **Preuve automatisée** :
+  - `tests/unit/server/technician-work-orders-cost-error.test.ts` : liste servie quand tout échoue ; une requête en échec à la fois (pièces, rotations, taux) ne met à `null` que sa composante ;
+  - `tests/unit/client/technician-profile-stats.test.ts` : un OT terminé sans coût met tous les totaux à `null` ;
+  - `tests/unit/client/technician-pages-query-errors.test.ts` : garde de branchement, rouge sur les trois pages de main (7a5ddefe), verte après ; cliquet sur les pages technicien qui lisent une requête sans traiter l'erreur (`fleet-status.tsx`, `vehicles.tsx` gelées).
+- **Mémoire** : `docs/analysis/LESSONS_LEARNED.md`, entrée du 2026-11-07, complétée avec la troisième occurrence et le contrôle renforcé.
