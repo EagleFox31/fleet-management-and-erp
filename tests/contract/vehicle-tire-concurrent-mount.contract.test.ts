@@ -83,7 +83,10 @@ async function waitForBlocked(holderPid: number, count: number) {
     if (rows[0].n >= count) return;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error(`${count} montage(s) attendus en attente du verrou, délai dépassé`);
+  // Montage absent de l'arbre : souvent faute de connexion (pool plein, attente de 10 s puis 500 sans écriture).
+  throw new Error(
+    `${count} montage(s) attendus en attente du verrou, délai dépassé ; pool : ${pool.totalCount} connexion(s), ${pool.idleCount} libre(s), ${pool.waitingCount} en file`,
+  );
 }
 
 beforeAll(async () => {
