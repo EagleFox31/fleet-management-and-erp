@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatCurrency } from "@/lib/utils";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 import { Fuel, BarChart3, LineChart } from "lucide-react";
 import { 
   BarChart, 
@@ -27,7 +28,7 @@ interface ConsumptionData {
 export function FuelStatistics() {
   const [period, setPeriod] = useState<string>("month");
 
-  const { data: fuelStatistics, isLoading: isLoadingStats } = useQuery<any>({
+  const { data: fuelStatistics, isLoading: isLoadingStats, error: fuelStatisticsError } = useQuery<any>({
     queryKey: ["/api/fuel-records/statistics", { period }],
     staleTime: 0,
     gcTime: 0,
@@ -36,7 +37,7 @@ export function FuelStatistics() {
     refetchInterval: 30000,
   });
 
-  const { data: consumptionHistory, isLoading: isLoadingHistory } = useQuery<any>({
+  const { data: consumptionHistory, isLoading: isLoadingHistory, error: consumptionHistoryError } = useQuery<any>({
     queryKey: ["/api/fuel-records/consumption-history", { period }],
     staleTime: 0,
     gcTime: 0,
@@ -44,6 +45,10 @@ export function FuelStatistics() {
     refetchOnMount: true,
     refetchInterval: 30000,
   });
+
+  // Lecture en échec sans donnée : « Indisponible », jamais 0 L / 0 FCFA / 0 plein.
+  const statsFailed = fuelStatistics === undefined && !!fuelStatisticsError;
+  const historyFailed = consumptionHistory === undefined && !!consumptionHistoryError;
 
   // Formater les données pour les graphiques
   const chartData = consumptionHistory?.map((item: ConsumptionData) => ({
@@ -119,7 +124,9 @@ export function FuelStatistics() {
                 <Fuel className="h-6 w-6 mb-2 text-primary-text" />
                 <div className="text-sm text-muted-foreground mb-1">Total carburant</div>
                 <div className="text-2xl font-bold">
-                  {totalFuel > 0
+                  {statsFailed
+                    ? UNAVAILABLE
+                    : totalFuel > 0
                     ? `${totalFuel.toFixed(2)} L` 
                     : "0 L"}
                 </div>
@@ -129,7 +136,9 @@ export function FuelStatistics() {
                 <div className="h-6 w-6 mb-2 flex items-center justify-center text-primary-text">F</div>
                 <div className="text-sm text-muted-foreground mb-1">Coût total</div>
                 <div className="text-2xl font-bold">
-                  {totalCost > 0
+                  {statsFailed
+                    ? UNAVAILABLE
+                    : totalCost > 0
                     ? formatCurrency(totalCost) 
                     : formatCurrency(0)}
                 </div>
@@ -139,7 +148,9 @@ export function FuelStatistics() {
                 <BarChart3 className="h-6 w-6 mb-2 text-primary-text" />
                 <div className="text-sm text-muted-foreground mb-1">Prix moyen/L</div>
                 <div className="text-2xl font-bold">
-                  {avgCostPerLiter > 0 
+                  {statsFailed
+                    ? UNAVAILABLE
+                    : avgCostPerLiter > 0 
                     ? formatCurrency(avgCostPerLiter)
                     : "N/A"}
                 </div>
@@ -149,7 +160,9 @@ export function FuelStatistics() {
                 <LineChart className="h-6 w-6 mb-2 text-primary-text" />
                 <div className="text-sm text-muted-foreground mb-1">Nb de pleins</div>
                 <div className="text-2xl font-bold">
-                  {consumptionHistory?.reduce((total: number, current: ConsumptionData) => total + current.count, 0) || 0}
+                  {historyFailed
+                    ? UNAVAILABLE
+                    : consumptionHistory?.reduce((total: number, current: ConsumptionData) => total + current.count, 0) || 0}
                 </div>
               </div>
             </div>

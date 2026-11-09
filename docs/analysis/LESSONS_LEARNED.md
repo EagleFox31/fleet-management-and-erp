@@ -3481,3 +3481,21 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - Rejoué sur le `ci.yml` de main (31802e64), il est rouge sur les 4 lignes `54320:5432` et `5433:80`. Il est vert après correction.
   - Preuve de bout en bout : un run vert sur toutes les shards `contract` et sur `integration`.
 - **Leçon généralisée** : un service de CI ne réserve jamais un port hôte fixe. On laisse Docker choisir et on lit le port attribué. Un faux rouge d'infrastructure qui revient se corrige à la source, avec une garde ; une relance ne fait que le masquer.
+
+## 2026-11-09 — Tuile lisant un champ jamais servi : « 0 F » affiché en permanence (#611)
+
+- **Contexte** : tableau de bord secrétaire, tuile « Coûts ». Elle additionnait `c.totalCost || 0` sur les lignes de `GET /api/operations/stats/by-client`. Le serveur sert `totalFuelCost`, jamais `totalCost` : la tuile valait toujours 0 F. La marge affichée (« chiffre d'affaires » moins ce coût nul) était donc égale au CA lui-même. Elle était surévaluée, et le CA n'en était pas un : c'était le carburant estimé des missions.
+- **Cause racine** :
+  - lecture typée `useQuery<any[]>` : aucun contrat ne relie le nom lu côté client au nom servi, et le compilateur ne voit pas la faute ;
+  - `|| 0` transforme un champ absent en zéro plausible. L'écran ne distingue plus « inconnu » de « nul » ;
+  - même classe de défaut, trouvée en même temps : `components/operations/destinations-chart.tsx` lisait `totalCost` (jamais servi) et attendait un objet indexé alors que le serveur sert une liste. Résultat : cartes titrées « 0 », « 1 » et marge NaN, affichée « N/A ».
+- **Classification** : défaut de contrat client/serveur masqué par un repli à zéro ; erreur de données présentée comme valeur.
+- **Résolution** :
+  - #611 : la tuile lit `totalFuelCost` ; les totaux passent par `clientTotals` (null si un terme est illisible) et `statDisplay` (« Indisponible ») ;
+  - la tuile « Chiffre d'affaires » est renommée « Coût carburant estimé (missions) », et la marge est retirée (décision du 2026-11-09) ;
+  - T2 (`c7-ops-fuel-estimate`) : le serveur sert l'alias exact `estimatedFuelCost`, et l'onglet Destinations est réécrit sur la liste servie.
+- **Prévention vérifiée** :
+  - `tests/unit/client/secretary-dashboard-error-states.test.ts`, cas « coûts lus dans totalFuelCost, le champ servi ; plus jamais totalCost » : échoue si `totalCost` réapparaît dans le tableau de bord ;
+  - `tests/unit/client/secretary-dashboard-stats.test.ts` : les totaux valent null dès qu'un terme manque ou n'est pas numérique ; un champ absent n'est jamais compté zéro ;
+  - le contrat serveur des noms servis est figé par `tests/contract/operations-budget-scope.contract.test.ts` (`totalFuelCost`, et `estimatedFuelCost` avec T2).
+- **Leçon généralisée** : un chiffre affiché lit un champ que le contrat serveur sert réellement, sous un type nommé et non `any`. Un repli `|| 0` sur une donnée lue est interdit : un champ absent est « inconnu », jamais zéro. Avant de brancher une tuile, vérifier le nom du champ dans la réponse réelle, par un test de contrat ou un test de rendu sur une réponse de la forme servie.
