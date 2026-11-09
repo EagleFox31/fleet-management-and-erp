@@ -193,6 +193,13 @@ describe("valeur du stock et alertes de réappro : jamais 0 sur une lecture en �
     expect(src).toMatch(/UNAVAILABLE/);
   });
 
+  it("workshop-manager/dashboard : compteur sous seuil « Indisponible » quand les statistiques échouent", () => {
+    const src = read("client/src/pages/workshop-manager/dashboard.tsx");
+    expect(src).toMatch(/const stockStatsFailed = warehouse\.statistics\.data === undefined && !!warehouse\.statistics\.error/);
+    expect(src).toMatch(/subValue=\{stockStatsFailed \? UNAVAILABLE : `\$\{stockRiskCount\} références sous seuil`\}/);
+    expect(src).toMatch(/value=\{stockStatsFailed \? UNAVAILABLE : ofStockParts\(stockRiskCount\)\}/);
+  });
+
   it.each(DASHBOARDS.filter((p) => !p.includes("warehouse/")))("%s : valeur du stock « Indisponible »", (path) => {
     expect(read(path)).toMatch(/warehouse\.inventoryValue\.failed/);
   });

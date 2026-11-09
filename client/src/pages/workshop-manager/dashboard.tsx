@@ -76,6 +76,8 @@ export default function WorkshopManagerDashboard() {
   /** « x/total » seulement si le total des références est connu. */
   const ofStockParts = (count: number) => (stockValueFailed ? String(count) : `${count}/${totalStockParts}`);
   const stockRiskCount = lowStockCount + outOfStockCount;
+  // Statistiques de stock illisibles (et aucun compteur dérivé) : « Indisponible », jamais 0.
+  const stockStatsFailed = warehouse.statistics.data === undefined && !!warehouse.statistics.error;
 
   const cpcTotal = Number(cpcStats?.total || 0);
   const cpcFormed = Number(cpcStats?.forme || 0);
@@ -192,7 +194,7 @@ export default function WorkshopManagerDashboard() {
           <KpiTile
             label="Alertes stock magasin"
             value={reorderFailed ? UNAVAILABLE : reorderAlertsCount}
-            subValue={`${stockRiskCount} références sous seuil`}
+            subValue={stockStatsFailed ? UNAVAILABLE : `${stockRiskCount} références sous seuil`}
             icon={<AlertTriangle className="h-4 w-4" />}
             iconWrapperClassName={reorderAlertsCount > 0 ? "bg-warning/10 text-warning-text" : "bg-gray-100 text-gray-400"}
             valueClassName={reorderAlertsCount > 0 ? "text-warning-text" : undefined}
@@ -411,7 +413,9 @@ export default function WorkshopManagerDashboard() {
                 subValue={
                   stockValueFailed
                     ? userMessageOf(warehouse.inventoryValue.error, "La valeur du stock est momentanément indisponible.")
-                    : `${totalStockParts} références · ${stockRiskCount} sous seuil`
+                    : stockStatsFailed
+                      ? `${totalStockParts} références`
+                      : `${totalStockParts} références · ${stockRiskCount} sous seuil`
                 }
                 icon={<Package className="h-4 w-4" />}
                 iconWrapperClassName="bg-purple-50 text-purple-600"
@@ -441,11 +445,11 @@ export default function WorkshopManagerDashboard() {
                 data-testid="wm-kpi-lowstock"
                 label="Stock bas / épuisé"
                 onClick={() => setLocation("/inventory")}
-                value={ofStockParts(stockRiskCount)}
-                subValue={`${lowStockCount} bas · ${outOfStockCount} épuisés`}
+                value={stockStatsFailed ? UNAVAILABLE : ofStockParts(stockRiskCount)}
+                subValue={stockStatsFailed ? userMessageOf(warehouse.statistics.error, "Les statistiques de stock sont momentanément indisponibles.") : `${lowStockCount} bas · ${outOfStockCount} épuisés`}
                 icon={<Package className="h-4 w-4" />}
-                iconWrapperClassName={stockRiskCount > 0 ? "bg-destructive/10 text-destructive-text" : "bg-gray-100 text-gray-400"}
-                valueClassName={stockRiskCount > 0 ? "text-destructive-text" : undefined}
+                iconWrapperClassName={!stockStatsFailed && stockRiskCount > 0 ? "bg-destructive/10 text-destructive-text" : "bg-gray-100 text-gray-400"}
+                valueClassName={!stockStatsFailed && stockRiskCount > 0 ? "text-destructive-text" : undefined}
               />
             )}
           </KpiGrid>
