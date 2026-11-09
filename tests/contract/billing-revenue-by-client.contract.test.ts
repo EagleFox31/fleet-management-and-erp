@@ -4,6 +4,7 @@ import { db } from "../../server/db";
 import { currentMonthPeriod } from "../../server/services/client-revenue-service";
 import { clientInvoices } from "../../shared/schema";
 import { CLIENT_BILLING_STATS_ROLES } from "../../shared/constants/roles";
+import { leakText } from "../support/api-error";
 import { startContractSession } from "../support/contract-session";
 import { createTestClient, createTestClientInvoice, type TestUserRole } from "../support/factories";
 
@@ -57,7 +58,7 @@ describe("CA réel par client : rôles", { timeout: 120000 }, () => {
   it.each(OTHERS)("%s : 403, aucun nom de client dans la réponse", async (role) => {
     const res = await session.call("GET", `${PATH}?${PERIOD}`, { actor: role });
     expect(res.status).toBe(403);
-    expect(JSON.stringify(res.body)).not.toContain(clientName);
+    expect(leakText(res.body)).not.toContain(clientName);
   });
 
   it("anonyme : 401", async () => {
@@ -82,7 +83,7 @@ describe("CA réel par client : période", { timeout: 120000 }, () => {
     const res = await session.call("GET", `${PATH}?${query}`, { actor: "secretary" });
     expect(res.status).toBe(400);
     expect(res.body.message).toMatch(message);
-    expect(JSON.stringify(res.body)).not.toMatch(/SELECT|stack|at \w+ \(/);
+    expect(leakText(res.body)).not.toMatch(/SELECT|stack|at \w+ \(/);
   });
 
   it("366 jours exactement : accepté", async () => {
