@@ -8,7 +8,8 @@ import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { useEffect } from "react";
 import { queryClient } from "@/lib/queryClient";
 import { Link } from "wouter";
-import { KpiTiles } from "@/components/dashboard/kpi-tiles";
+import { KpiTiles, UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
+import { userMessageOf } from "@/lib/api-error";
 import { OverdueInvoicesAlert } from "@/components/dashboard/overdue-invoices-alert";
 import { VehicleStatusPieChart } from "@/components/dashboard/vehicle-status-pie-chart";
 import { TopPartsChart } from "@/components/dashboard/top-parts-chart";
@@ -40,6 +41,14 @@ import {
 
 export default function AdminDashboard() {
   const warehouse = useWarehouse();
+  const stockValueFailed = warehouse.inventoryValue.failed;
+  const reorderFailed = warehouse.reorderAlerts.failed;
+  const stockValueLabel = stockValueFailed
+    ? UNAVAILABLE
+    : formatPrice(Number(warehouse.inventoryValue.data?.totalValue ?? 0));
+  const reorderCostLabel = reorderFailed
+    ? UNAVAILABLE
+    : formatPrice(Number(warehouse.reorderAlerts.data?.estimatedCost ?? 0));
   const fuelCard = useFuelCard();
 
   useEffect(() => {
@@ -95,6 +104,9 @@ export default function AdminDashboard() {
   const usersCount = Array.isArray(users) ? users.length : 0;
   const activeWorkOrders = Number(workOrderStats?.pending || 0) + Number(workOrderStats?.inProgress || 0);
 
+  // Statistiques de stock illisibles et sans donnée : « Indisponible », jamais 0.
+  const statsFailed = warehouse.statistics.data === undefined && !!warehouse.statistics.error;
+
   return (
     <div className="space-y-5">
       <HeaderCard
@@ -145,8 +157,8 @@ export default function AdminDashboard() {
             <KpiTile
               data-testid="admin-kpi-parts"
               label="Pièces en stock"
-              value={formatNumber(warehouse.statistics.data?.totalParts || 0)}
-              subValue={`${warehouse.statistics.data?.lowStockCount || 0} alertes stock bas`}
+              value={statsFailed ? UNAVAILABLE : formatNumber(warehouse.statistics.data?.totalParts || 0)}
+              subValue={statsFailed ? userMessageOf(warehouse.statistics.error, "Les statistiques de stock sont momentanément indisponibles.") : `${warehouse.statistics.data?.lowStockCount || 0} alertes stock bas`}
               icon={<Package className="h-4 w-4" />}
               iconWrapperClassName="bg-blue-50 text-blue-600"
             />
@@ -167,8 +179,12 @@ export default function AdminDashboard() {
           <KpiTile
             data-testid="admin-kpi-stock-value"
             label="Valeur stock total"
-            value={formatPrice(Number(warehouse.inventoryValue.data?.totalValue || 0))}
-            subValue={`${warehouse.inventoryValue.data?.totalParts || 0} pièces`}
+            value={stockValueLabel}
+            subValue={
+              stockValueFailed
+                ? userMessageOf(warehouse.inventoryValue.error, "La valeur du stock est momentanément indisponible.")
+                : `${warehouse.inventoryValue.data?.totalParts ?? 0} pièces`
+            }
             icon={<Warehouse className="h-4 w-4" />}
             iconWrapperClassName="bg-purple-50 text-purple-600"
           />
@@ -199,8 +215,12 @@ export default function AdminDashboard() {
           <KpiTile
             data-testid="admin-kpi-alerts"
             label="Alertes réapprovisionnement"
-            value={warehouse.reorderAlerts.data?.totalAlerts?.toString() || "0"}
-            subValue={`Réappro: ${formatPrice(warehouse.reorderAlerts.data?.estimatedCost || 0)}`}
+            value={reorderFailed ? UNAVAILABLE : String(warehouse.reorderAlerts.data?.totalAlerts ?? 0)}
+            subValue={
+              reorderFailed
+                ? userMessageOf(warehouse.reorderAlerts.error, "Les alertes de réapprovisionnement sont momentanément indisponibles.")
+                : `Réappro: ${reorderCostLabel}`
+            }
             icon={<AlertTriangle className="h-4 w-4" />}
             iconWrapperClassName="bg-red-50 text-red-600"
           />
@@ -250,11 +270,11 @@ export default function AdminDashboard() {
                 <div className="space-y-3">
                   <div className="flex justify-between py-2 border-b border-gray-50">
                     <span className="text-sm text-gray-500">Valeur totale stock</span>
-                    <span className="text-sm font-semibold">{formatPrice(Number(warehouse.inventoryValue.data?.totalValue || 0))}</span>
+                    <span className="text-sm font-semibold" data-testid="admin-budget-stock-value">{stockValueLabel}</span>
                   </div>
                   <div className="flex justify-between py-2">
                     <span className="text-sm text-gray-500">Coût réapprovisionnement</span>
-                    <span className="text-sm font-semibold text-orange-600">{formatPrice(Number(warehouse.reorderAlerts.data?.estimatedCost || 0))}</span>
+                    <span className="text-sm font-semibold text-orange-600" data-testid="admin-budget-reorder-cost">{reorderCostLabel}</span>
                   </div>
                 </div>
               </div>

@@ -43,6 +43,9 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { readyData } from "@/lib/query-view";
+import { listQueryView } from "@/lib/work-order-tires-cost";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { AlertTriangle, ArrowLeft, TrendingUp, TrendingDown, FileText, Download, Package, Wrench, Calendar, BarChart3, Eye, Pencil, User } from "lucide-react";
 
 interface PartDetailsParams {
@@ -96,11 +99,24 @@ export default function PartDetails({ params }: PartDetailsParams) {
   });
 
   // Fetch stock history
-  const { data: stockHistory = [] } = useQuery<any>({
+  const stockHistoryQuery = useQuery<any>({
     queryKey: [`/api/parts/${partId}/stock-history`],
     enabled: !!partId,
     staleTime: 0, // Force refresh to get enriched data
   });
+  // Échec sans données : encart et « Réessayer », jamais « Aucun mouvement récent ».
+  const stockHistoryView = listQueryView<any>(stockHistoryQuery);
+  const stockHistory = readyData(stockHistoryView, [] as any[]);
+  const stockHistoryError = (testId: string) =>
+    stockHistoryView.kind === "error" ? (
+      <InlineQueryError
+        error={stockHistoryView.error}
+        fallback="L'historique de stock de cette pièce est momentanément indisponible."
+        onRetry={() => void stockHistoryQuery.refetch()}
+        isRetrying={stockHistoryView.isRetrying}
+        data-testid={testId}
+      />
+    ) : null;
   
   const deletePartMutation = useMutation({
     mutationFn: async () => {
@@ -499,7 +515,9 @@ export default function PartDetails({ params }: PartDetailsParams) {
                 <CardDescription>Derniers mouvements enregistrés</CardDescription>
               </CardHeader>
               <CardContent>
-                {stockHistory.length === 0 ? (
+                {stockHistoryView.kind === "error" ? (
+                  stockHistoryError("stock-history-recent-error")
+                ) : stockHistory.length === 0 ? (
                   <div className="text-center py-12">
                     <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-muted mb-4">
                       <BarChart3 className="h-8 w-8 text-muted-foreground" />
@@ -677,7 +695,9 @@ export default function PartDetails({ params }: PartDetailsParams) {
               <CardDescription>Suivi détaillé des entrées et sorties de stock</CardDescription>
             </CardHeader>
             <CardContent>
-              {stockHistory.length === 0 ? (
+              {stockHistoryView.kind === "error" ? (
+                stockHistoryError("stock-history-error")
+              ) : stockHistory.length === 0 ? (
                 <div className="text-center py-12">
                   <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-muted mb-4">
                     <TrendingUp className="h-8 w-8 text-muted-foreground" />

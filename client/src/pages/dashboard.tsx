@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { KpiTiles } from "@/components/dashboard/kpi-tiles";
+import { KpiTiles, UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
+import { userMessageOf } from "@/lib/api-error";
 import { FleetStatusChart } from "@/components/dashboard/fleet-status-chart";
 import { VehicleTable } from "@/components/vehicles/vehicle-table";
 import { useQuery } from "@tanstack/react-query";
@@ -67,7 +68,9 @@ export default function Dashboard() {
   const totalVehicles = operationalVehicles + maintenanceVehicles + outOfServiceVehicles;
   const scheduledCount = Number(scheduledMaintenanceData?.scheduled || 0);
   const fuelConsumedLiters = Number(fuelStats?.totalFuel || 0);
-  const stockAlertsCount = Number(warehouse.reorderAlerts.data?.totalAlerts || 0);
+  const stockAlertsCount = Number(warehouse.reorderAlerts.data?.totalAlerts ?? 0);
+  const stockValueFailed = warehouse.inventoryValue.failed;
+  const reorderFailed = warehouse.reorderAlerts.failed;
   const fuelBalanceAmount = Number(fuelCard.balance.data?.balance || 0);
 
   const periodLabel =
@@ -167,8 +170,12 @@ export default function Dashboard() {
           <KpiTile
             data-testid="kpi-stock-value"
             label="Valeur stock total"
-            value={formatPrice(Number(warehouse.inventoryValue.data?.totalValue || 0))}
-            subValue={`${warehouse.inventoryValue.data?.totalParts || 0} pièces en stock`}
+            value={stockValueFailed ? UNAVAILABLE : formatPrice(Number(warehouse.inventoryValue.data?.totalValue ?? 0))}
+            subValue={
+              stockValueFailed
+                ? userMessageOf(warehouse.inventoryValue.error, "La valeur du stock est momentanément indisponible.")
+                : `${warehouse.inventoryValue.data?.totalParts ?? 0} pièces en stock`
+            }
             icon={<Package className="h-4 w-4" />}
             iconWrapperClassName="bg-purple-50 text-purple-600"
           />
@@ -199,8 +206,12 @@ export default function Dashboard() {
           <KpiTile
             data-testid="kpi-stock-alerts"
             label="Alertes réapprovisionnement"
-            value={stockAlertsCount}
-            subValue={`Coût estimé: ${formatPrice(warehouse.reorderAlerts.data?.estimatedCost || 0)}`}
+            value={reorderFailed ? UNAVAILABLE : stockAlertsCount}
+            subValue={
+              reorderFailed
+                ? userMessageOf(warehouse.reorderAlerts.error, "Les alertes de réapprovisionnement sont momentanément indisponibles.")
+                : `Coût estimé: ${formatPrice(warehouse.reorderAlerts.data?.estimatedCost ?? 0)}`
+            }
             icon={<AlertTriangle className="h-4 w-4" />}
             iconWrapperClassName="bg-red-50 text-red-600"
           />

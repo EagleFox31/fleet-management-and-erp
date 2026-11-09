@@ -16,24 +16,10 @@ import { stampPreventiveDue } from "../lib/preventive-due";
 
 import { PART_CATALOG_EVENT_ROLES, STAFF_ROLES } from "@shared/constants/roles";
 import { jsonRowOf, rowFromJson } from "../lib/json-table-row";
+import type { CriticalWearInspection, RotationVehicle, TireRequiredActions, TireStatisticsAdvanced } from "@shared/contracts/tire-statistics-advanced";
 const log = moduleLogger("tires");
 
 /** Ligne unique de la requête de `getTireStatisticsAdvanced` (types tels que livrés par le pilote). */
-interface CriticalWearInspectionRow {
-  inspectionId: number;
-  treadDepth: number | null;
-  vehicleRegistration: string | null;
-  tireBrand: string | null;
-  tireModel: string | null;
-  position: string | null;
-}
-interface RotationVehicleRow {
-  vehicleId: number;
-  vehicleRegistration: string;
-  currentMileage: number;
-  lastRotationMileage: number | null;
-  nextRotationMileage: number | null;
-}
 interface TireStatisticsAdvancedRow {
   /** SUM d'un integer : bigint, livré en texte par le pilote (contrat de réponse inchangé). */
   total_quantity: string | null;
@@ -41,8 +27,8 @@ interface TireStatisticsAdvancedRow {
   total_value: string | null;
   average_wear: number | null;
   low_stock_tires: Record<string, unknown>[];
-  critical_wear_inspections: CriticalWearInspectionRow[];
-  vehicles_with_rotations: RotationVehicleRow[];
+  critical_wear_inspections: CriticalWearInspection[];
+  vehicles_with_rotations: RotationVehicle[];
 }
 
 function rowsOf<T>(result: unknown): T[] {
@@ -924,7 +910,7 @@ export class TiresService {
   }
 
   // Statistiques avancées avec données réelles
-  async getTireStatisticsAdvanced(): Promise<any> {
+  async getTireStatisticsAdvanced(): Promise<TireStatisticsAdvanced> {
     try {
       // Une seule requête, donc une seule connexion du pool : les cinq lectures parallèles
       // d'avant pouvaient saturer le pool et faire attendre la page jusqu'au plafond de connexion.
@@ -1000,15 +986,15 @@ export class TiresService {
   // Calcul des actions requises, à partir des lignes lues par getTireStatisticsAdvanced
   private buildRequiredActions(
     lowStockTires: Tire[],
-    criticalWearInspections: CriticalWearInspectionRow[],
-    vehiclesWithRotations: RotationVehicleRow[],
-  ): any {
-    const actions = {
-      lowStock: [] as any[],
-      outOfStock: [] as any[],
-      criticalWear: [] as any[],
-      rotationDue: [] as any[],
-      rotationApproaching: [] as any[]
+    criticalWearInspections: CriticalWearInspection[],
+    vehiclesWithRotations: RotationVehicle[],
+  ): TireRequiredActions {
+    const actions: TireRequiredActions = {
+      lowStock: [],
+      outOfStock: [],
+      criticalWear: [],
+      rotationDue: [],
+      rotationApproaching: []
     };
 
     for (const tire of lowStockTires) {

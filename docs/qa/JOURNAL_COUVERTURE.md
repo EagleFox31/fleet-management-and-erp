@@ -2669,6 +2669,41 @@ soumission sans doublon.
   Ne s'appliquent pas : A, I, Retroactive (aucune donnée ni schéma touchés).
 - **Reste / risques** : `warehouse.reorderAlerts` (`useWarehouse.ts`) expose une erreur que 5 tableaux de bord ignorent (`|| 0`) ; `/api/part-requirements/active-by-part` garde un `= {}` par défaut (lecture hors de ce lot). Revue sécurité requise (argent/stock).
 
+## 2026-11-09T14:29:18+01:00 — Argent et stock, suite : rapport complet, valeur du stock, alertes de réappro, historique
+
+- **Statut** : fait (PR brouillon)
+- **Quoi** :
+  - rapport PDF des coûts de maintenance : `GET /api/work-orders` était appelé sans `limit` (50 par défaut), le rapport ne comptait que les 50 premiers OT. `fetchAllWorkOrders` lit par pages de 500 jusqu'au total ; échec, forme invalide, liste incomplète ou plus de 20 pages → rapport refusé avec un message clair ;
+  - même rapport : véhicules ou utilisateurs illisibles → refus ; lecture de `/api/parts/used` retirée (elle ne nourrissait aucun calcul) ;
+  - `useWarehouse` : plus d'alertes de réappro calculées sur le stock bas seul quand les demandes de pièce sont illisibles ; `inventoryValue` et `reorderAlerts` exposent `view` / `failed` ;
+  - tableaux de bord admin, accueil, chef d'atelier, magasin, panneau d'alertes : « Indisponible » et encart au lieu de 0, « Aucune alerte » ou « Tout est à jour » ;
+  - catalogue pièces (statut des demandes), fiche pièce (historique de stock), fiche OT (demandes en attente, compte de l'onglet Pièces) : encart au lieu d'un vide.
+- **Comment tester (QA)** :
+  - `tests/unit/client/fetch-all-work-orders.test.ts` : 8 cas sur fetch simulé (120 OT sur 3 pages, échec en page 2, page vide avant le total, forme invalide, borne de 20 pages) ;
+  - `tests/unit/client/money-stock-reads-error-states.test.ts` : 33 cas, chaque ajout rouge sur le code d'avant puis vert ;
+  - campagnes : tsc 0, check:tests 0, unitaires 319 fichiers / 3325 tests. Aucun fichier serveur modifié.
+- **RAIDER** :
+  - R : `queryView`, `listQueryView`, `InlineQueryError`, `UNAVAILABLE` existants ; `fetchAllWorkOrders` réutilisable par les autres rapports ;
+  - D : réponses API inchangées ; pour moins de 500 OT, le rapport fait un seul appel comme avant ;
+  - dérogation : le `console.log` des pièces utilisées part avec le fetch inutile qu'il décrivait (accord de l'orchestrateur, écrit dans la PR).
+
+  Ne s'appliquent pas : A, I, Retroactive (aucune donnée ni schéma touchés).
+- **Reste / risques** : solde de carte carburant (`|| 0`) sur les tableaux de bord admin et accueil ; `/api/alerts` du panneau d'alertes sans état d'erreur ; véhicules du rapport lus avec `limit=1000`. Revue sécurité requise (argent/stock).
+
+## 2026-11-09T15:04:00+01:00 — Rapport des coûts : OT répétés ou sautés entre deux pages (réserve de relecture #599)
+
+- **Statut** : fait (PR brouillon #599)
+- **Quoi** :
+  - `getWorkOrders` et `getWorkOrdersForTechnician` triaient par `createdAt` seul. À date de création égale (import en masse), un OT pouvait revenir sur deux pages et un autre être sauté, sans que le compte change. Départage par `id` décroissant ;
+  - `fetchAllWorkOrders` dédoublonne par id, refuse si le nombre d'OT distincts ≠ total ou si le total change d'une page à l'autre, et formate le total en fr-FR ;
+  - `useWarehouse` : l'échec de l'agrégat `/api/warehouse/reorder-alerts` (403 selon le rôle) n'affiche plus « Indisponible » pendant le chargement des deux sources.
+- **Comment tester (QA)** :
+  - `tests/integration/work-orders-pagination-tiebreak.test.ts` : 6 OT de même date lus page par page. Rouge avant : `[755, 755, 755, 755, 755, 760]` ; vert après ;
+  - `tests/unit/client/fetch-all-work-orders.test.ts` : +3 cas (doublon entre pages, total qui change, format fr-FR), rouges puis verts ;
+  - campagnes : tsc 0, check:tests 0, unitaires 319 fichiers / 3329 tests, contrats OT 20 fichiers / 255 tests sur Postgres local.
+- **RAIDER** : D : contrat de `GET /api/work-orders` inchangé, l'ordre à date égale était indéterminé ; aucune donnée touchée.
+- **Reste / risques** : `getWorkOrdersByOwner` et les autres listes paginées ne sont pas revues.
+
 ## 2026-11-09T14:31:03+01:00 — Alertes, demandes de pièces, catalogue de pannes, maintenance : une lecture en échec n'est plus un vide (6 lectures)
 - **Quoi** : `getPartRequirements`, `getFaultCatalogs`, `getMaintenanceCompliance`, `getScheduledMaintenanceCount`, `getAlertsByUserId`, `getUnreadAlertsByUserId` levaient `[]`, `0` ou `{0,0,0}` en cas d'erreur de base ; elles lèvent désormais une `AppError` 500 journalisée (`storageLog`, `{ err }`).
 - **Comment** : les deux appelants situés dans une mutation (`missions.routes.ts` demande de renouvellement, `routes.ts` déclenchement de maintenance par date) lisent les alertes non lues en meilleur effort (catch local, `log.warn` avec `requestId`, anti-doublon ignoré) : la mutation reste en 2xx. Écrans : badge et panneau des alertes (topnav), catalogue de pannes, tuile « Maintenances planifiées », tuile et compteur de conformité (tableau de bord atelier), encart des OT en attente de pièces affichent « Indisponible » ou un encart d'erreur, jamais 0.
