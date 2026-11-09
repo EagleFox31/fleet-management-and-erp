@@ -1328,7 +1328,7 @@ export default function LandingPage() {
                         </div>
                         <span className="text-[11px] font-semibold text-slate-400 group-hover:text-emerald-300 flex items-center gap-1 transition-colors">
                           {PROFILE_DEMO_VIDEOS[profile.id] && (
-                            <span className="flex items-center gap-1 mr-1.5 text-emerald-400" data-testid={`badge-video-${profile.id}`}>
+                            <span className="flex items-center gap-1 mr-1.5 text-primary" data-testid={`badge-video-${profile.id}`}>
                               <PlayCircle className="h-3.5 w-3.5" /> Vidéo
                             </span>
                           )}
@@ -1544,7 +1544,7 @@ export default function LandingPage() {
                 {PROFILE_DEMO_VIDEOS[selectedProfile] && (
                   <div>
                     <h4 className="font-semibold text-lg mb-3 flex items-center gap-2">
-                      <PlayCircle className="h-5 w-5 text-emerald-400" /> Vidéo de démonstration
+                      <PlayCircle className="h-5 w-5 text-primary" /> Vidéo de démonstration
                     </h4>
                     <video
                       key={selectedProfile}
