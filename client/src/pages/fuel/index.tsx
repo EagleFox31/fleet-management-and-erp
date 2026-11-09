@@ -1,4 +1,5 @@
 import { userMessageOf } from "@/lib/api-error";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 import React, { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -120,7 +121,7 @@ export default function FuelPage() {
   const vehicles = vehiclesData?.vehicles || [];
 
   // Fetch all fuel records
-  const { data: fuelRecordsData, isLoading } = useQuery<FuelRecord[]>({
+  const { data: fuelRecordsData, isLoading, error: fuelRecordsError } = useQuery<FuelRecord[]>({
     queryKey: [
       "/api/fuel-records", 
       {
@@ -129,12 +130,15 @@ export default function FuelPage() {
     ],
   });
   const fuelRecords = fuelRecordsData || [];
+  // Lecture en échec sans donnée : « Indisponible », jamais 0 plein / 0 L / 0 FCFA.
+  const fuelRecordsFailed = fuelRecordsData === undefined && !!fuelRecordsError;
 
-  const { data: fuelCardBalance } = useQuery<any>({
+  const { data: fuelCardBalance, error: fuelCardBalanceError } = useQuery<any>({
     queryKey: ["/api/fuel-card/balance"],
     enabled: canManageFuelCard,
     retry: false,
   });
+  const fuelCardFailed = fuelCardBalance === undefined && !!fuelCardBalanceError;
 
   const { data: fuelCardRechargeHistoryData, isLoading: isLoadingRechargeHistory } = useQuery<FuelCardHistoryRecord[]>({
     queryKey: ["/api/fuel-card/history", { type: "credit" }],
@@ -699,8 +703,12 @@ export default function FuelPage() {
             {canManageFuelCard && (
               <KpiTile
                 label="Solde carte carburant"
-                value={formatCurrency(Number(fuelCardBalance?.balance || 0))}
-                subValue={`Prix moyen : ${Number(fuelCardBalance?.averagePricePerLiter || 0)} FCFA/L`}
+                value={fuelCardFailed ? UNAVAILABLE : formatCurrency(Number(fuelCardBalance?.balance || 0))}
+                subValue={
+                  fuelCardFailed
+                    ? userMessageOf(fuelCardBalanceError, "Le solde de la carte carburant est momentanément indisponible.")
+                    : `Prix moyen : ${Number(fuelCardBalance?.averagePricePerLiter || 0)} FCFA/L`
+                }
                 icon={<Wallet className="h-4 w-4" />}
                 iconWrapperClassName="bg-violet-50 text-violet-600"
                 onClick={() => {
@@ -712,7 +720,7 @@ export default function FuelPage() {
             )}
             <KpiTile
               label="Pleins enregistrés"
-              value={filteredFuelRecords.length}
+              value={fuelRecordsFailed ? UNAVAILABLE : filteredFuelRecords.length}
               subValue="Historique filtré"
               icon={<CalendarDays className="h-4 w-4" />}
               iconWrapperClassName="bg-blue-50 text-blue-600"
@@ -724,14 +732,14 @@ export default function FuelPage() {
             />
             <KpiTile
               label="Litres consommés"
-              value={`${totalLiters.toFixed(2)} L`}
-              subValue={`${fullTankCount} pleins complets`}
+              value={fuelRecordsFailed ? UNAVAILABLE : `${totalLiters.toFixed(2)} L`}
+              subValue={fuelRecordsFailed ? "Historique des pleins indisponible" : `${fullTankCount} pleins complets`}
               icon={<Fuel className="h-4 w-4" />}
               iconWrapperClassName="bg-emerald-50 text-emerald-600"
             />
             <KpiTile
               label="Coût total"
-              value={formatCurrency(totalCost)}
+              value={fuelRecordsFailed ? UNAVAILABLE : formatCurrency(totalCost)}
               subValue="Dépense carburant"
               icon={<Wallet className="h-4 w-4" />}
               iconWrapperClassName="bg-amber-50 text-amber-600"
@@ -1026,7 +1034,7 @@ export default function FuelPage() {
             </div>
 
             <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-              Solde actuel: <span className="font-semibold">{formatCurrency(Number(fuelCardBalance?.balance || 0))}</span>
+              Solde actuel: <span className="font-semibold">{fuelCardFailed ? UNAVAILABLE : formatCurrency(Number(fuelCardBalance?.balance || 0))}</span>
             </div>
 
             <div className="flex justify-end gap-2 pt-1">
