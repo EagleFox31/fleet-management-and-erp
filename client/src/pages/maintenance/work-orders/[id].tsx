@@ -357,15 +357,16 @@ export default function WorkOrderDetails({
   const partsUsed = readyData(partsUsedView, [] as any[]);
   const partsUsedFailed = partsUsedView.kind === "error";
 
-  const {
-    data: pendingPartRequirements = [],
-    refetch: refetchPendingPartRequirements,
-  } = useQuery<any[]>({
+  const pendingPartRequirementsQuery = useQuery<any[]>({
     queryKey: [`/api/work-orders/${workOrderId}/pending-part-requirements`],
     enabled: !!workOrderId,
     staleTime: 0,
     gcTime: 0,
   });
+  const refetchPendingPartRequirements = pendingPartRequirementsQuery.refetch;
+  // Demandes en attente illisibles : encart, et pas de compte de pièces faux sur l'onglet.
+  const pendingPartRequirementsView = listQueryView<any>(pendingPartRequirementsQuery);
+  const pendingPartRequirements = readyData(pendingPartRequirementsView, [] as any[]);
 
   // Rotations de pneus de l'OT. Pas de `= []` par défaut : une lecture en échec n'est pas
   // « aucune rotation », sinon le coût de l'OT est sous-évalué sans signal (#592).
@@ -1190,6 +1191,8 @@ export default function WorkOrderDetails({
   const pendingPartsCount = Array.isArray(pendingPartRequirements) ? pendingPartRequirements.length : 0;
   const usedPartsCount = Array.isArray(partsUsed) ? partsUsed.length : 0;
   const displayedPartsCount = usedPartsCount + pendingPartsCount;
+  /** Le compte de l'onglet n'est affiché que si les deux listes sont lues. */
+  const partsCountKnown = partsUsedView.kind === "ready" && pendingPartRequirementsView.kind === "ready";
 
 
   return (
@@ -1509,7 +1512,7 @@ export default function WorkOrderDetails({
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <PremiumTabsNav tabs={[
           { value: "details", label: "Détails", icon: <TabIcon icon={Wrench} />, helpTarget: "wo-tab-details" },
-          { value: "parts", label: displayedPartsCount > 0 ? `Pièces (${displayedPartsCount})` : "Pièces", icon: <TabIcon icon={Package} />, helpTarget: "wo-tab-parts" },
+          { value: "parts", label: partsCountKnown && displayedPartsCount > 0 ? `Pièces (${displayedPartsCount})` : "Pièces", icon: <TabIcon icon={Package} />, helpTarget: "wo-tab-parts" },
           { value: "work", label: workItemsCount > 0 ? `Travaux (${workItemsCount})` : "Travaux", icon: <TabIcon icon={Hammer} /> },
           { value: "tires", label: "Pneus", icon: <TabIcon icon={Circle} /> },
           ...(workOrder.status === 'completed' ? [{ value: "report", label: "Rapport", icon: <TabIcon icon={FileText} /> }] : []),
@@ -1751,6 +1754,16 @@ export default function WorkOrderDetails({
                   onRetry={() => void refetchPartsUsed()}
                   isRetrying={partsUsedView.isRetrying}
                   data-testid="parts-used-error"
+                />
+              )}
+              {pendingPartRequirementsView.kind === "error" && (
+                <InlineQueryError
+                  className="m-4"
+                  error={pendingPartRequirementsView.error}
+                  fallback="Les demandes de pièce en attente sont momentanément indisponibles."
+                  onRetry={() => void refetchPendingPartRequirements()}
+                  isRetrying={pendingPartRequirementsView.isRetrying}
+                  data-testid="pending-requirements-error"
                 />
               )}
               {(Array.isArray(partsUsed) && partsUsed.length > 0) || (Array.isArray(pendingPartRequirements) && pendingPartRequirements.length > 0) ? (

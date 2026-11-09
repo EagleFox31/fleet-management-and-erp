@@ -67,8 +67,12 @@ const SCREENS: Array<{ path: string; queryKeys: string[]; shows: RegExp[] }> = [
   },
   {
     path: "client/src/pages/maintenance/work-orders/[id].tsx",
-    queryKeys: ["`/api/work-orders/${workOrderId}/parts`", "`/api/part-requirements/by-part/"],
-    shows: [/data-testid="parts-used-error"/, /data-testid="existing-requests-error"/],
+    queryKeys: [
+      "`/api/work-orders/${workOrderId}/parts`",
+      "`/api/part-requirements/by-part/",
+      "`/api/work-orders/${workOrderId}/pending-part-requirements`",
+    ],
+    shows: [/data-testid="parts-used-error"/, /data-testid="existing-requests-error"/, /data-testid="pending-requirements-error"/],
   },
 ];
 
@@ -119,6 +123,11 @@ describe("fiche OT : pièces non lues", () => {
 
   it("le coût passe « inconnu » au calcul, pas une liste vide", () => {
     expect(src).toMatch(/parts:\s*partsUsedView\.kind === "ready" \? partsUsed : undefined/);
+  });
+
+  it("onglet Pièces : pas de compte tant que pièces utilisées et demandes en attente ne sont pas lues", () => {
+    expect(src).toMatch(/const partsCountKnown = partsUsedView\.kind === "ready" && pendingPartRequirementsView\.kind === "ready"/);
+    expect(src).toMatch(/label: partsCountKnown && displayedPartsCount > 0 \?/);
   });
 
   it("l'impression est refusée tant que les pièces ne sont pas lues", () => {
