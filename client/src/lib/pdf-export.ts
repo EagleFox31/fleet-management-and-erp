@@ -2,6 +2,8 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import headerImage from '@assets/TAY-header-final.png';
 import { fetchAllWorkOrders, ReportRefusedError } from '@/lib/fetch-all-work-orders';
+import { fetchAllVehicles, fetchFuelRecords, reportErrorContext } from '@/lib/fetch-all-pages';
+import { clientLogger } from '@/lib/logger';
 
 // Configuration de l'en-tête officiel
 const COMPANY_INFO = {
@@ -57,7 +59,7 @@ export class PDFExporter {
       
       return headerY + headerHeight + 15; // Position Y après l'en-tête
     } catch (error) {
-      console.error('Erreur lors du chargement de l\'image d\'en-tête:', error);
+      clientLogger.error("Image d'en-tête du PDF non chargée, repli sur le texte", { err: error });
       
       // Fallback en cas d'erreur : utiliser le texte
       this.doc.setFontSize(14);
@@ -452,7 +454,7 @@ function addCompanyHeader(doc: jsPDF): number {
     return headerY + headerHeight + 10; // Position Y après l'image
   } catch (error) {
     // Fallback si l'image ne charge pas
-    console.warn('Logo non disponible, utilisation du texte:', error);
+    clientLogger.warn("Logo du PDF non disponible, repli sur le texte", { err: error });
     doc.setFontSize(16);
     doc.setFont("helvetica", "bold");
     doc.text("Société de Transport ABOUBAKAR Yaroro", pageWidth / 2, 20, { align: 'center' });
@@ -487,27 +489,12 @@ function addFooter(doc: jsPDF): void {
 // Rapports spécialisés pour la page Reports
 export async function exportVehicleUsageReport(startDate: Date, endDate: Date) {
   try {
-    // Récupérer les données des véhicules
-    const vehiclesResponse = await fetch('/api/vehicles?limit=1000');
-    if (!vehiclesResponse.ok) {
-      throw new Error(`Erreur API véhicules: ${vehiclesResponse.status}`);
-    }
-    const vehiclesData = await vehiclesResponse.json();
-    const vehicles = vehiclesData.vehicles || [];
+    // Tous les véhicules, page par page : échec ou liste incomplète refusent le rapport.
+    const vehicles = await fetchAllVehicles();
 
-    // Récupérer les données de carburant pour la période
-    let fuelRecords: any[] = [];
-    try {
-      const fuelResponse = await fetch('/api/fuel-records');
-      if (fuelResponse.ok) {
-        const fuelData = await fuelResponse.json();
-        fuelRecords = Array.isArray(fuelData) ? fuelData : [];
-      } else {
-        console.warn('API fuel-records non disponible, rapport sans données de carburant');
-      }
-    } catch (error) {
-      console.warn('Erreur accès API fuel-records:', error);
-    }
+    // Pleins de carburant : une lecture en échec refuse le rapport. Avant, il sortait sans
+    // carburant (0 litre) ; l'échec reste journalisé par le `catch` ci-dessous.
+    const fuelRecords = await fetchFuelRecords();
 
     // Filtrer les données par période
     const filteredFuelRecords = fuelRecords.filter((record: any) => {
@@ -516,10 +503,12 @@ export async function exportVehicleUsageReport(startDate: Date, endDate: Date) {
       return recordDate >= startDate && recordDate <= endDate;
     });
 
-    // Debug: afficher les données pour diagnostic
-    console.log('Données carburant récupérées:', fuelRecords.length, 'enregistrements');
-    console.log('Données filtrées par période:', filteredFuelRecords.length, 'enregistrements');
-    console.log('Période de filtrage:', startDate.toISOString(), 'à', endDate.toISOString());
+    clientLogger.debug("Rapport d'utilisation : pleins lus", {
+      total: fuelRecords.length,
+      inPeriod: filteredFuelRecords.length,
+      from: startDate.toISOString(),
+      to: endDate.toISOString(),
+    });
 
     const doc = new jsPDF();
     let yPosition = addCompanyHeader(doc);
@@ -595,7 +584,8 @@ export async function exportVehicleUsageReport(startDate: Date, endDate: Date) {
     doc.save(`rapport_utilisation_vehicules_${new Date().toISOString().split('T')[0]}.pdf`);
     return true;
   } catch (error) {
-    console.error('Erreur lors de la génération du rapport:', error);
+    clientLogger.error("Rapport d'utilisation des véhicules en échec", reportErrorContext(error));
+    if (error instanceof ReportRefusedError) throw error;
     throw new Error('Erreur lors de la génération du rapport d\'utilisation des véhicules');
   }
 }
@@ -607,12 +597,8 @@ export async function exportMaintenanceCostReport(startDate: Date, endDate: Date
     const workOrders = await fetchAllWorkOrders();
 
     // Véhicules et utilisateurs illisibles : refus, plutôt que des lignes « N/A » sans le dire.
-    const vehiclesResponse = await fetch('/api/vehicles?limit=1000');
-    const vehiclesData = vehiclesResponse.ok ? await vehiclesResponse.json() : null;
-    if (!Array.isArray(vehiclesData?.vehicles)) {
-      throw new ReportRefusedError("Les véhicules n'ont pas pu être lus : le rapport n'a pas été généré. Réessayez.");
-    }
-    const vehicles = vehiclesData.vehicles;
+    // Véhicules lus page par page : `limit=1000` omettait les suivants.
+    const vehicles = await fetchAllVehicles();
 
     const usersResponse = await fetch('/api/users');
     const users = usersResponse.ok ? await usersResponse.json() : null;
@@ -621,9 +607,11 @@ export async function exportMaintenanceCostReport(startDate: Date, endDate: Date
     }
     const usersList = users;
 
-    // Debug: vérifier le format des données
-    console.log('Données work orders reçues:', workOrders);
-    console.log('Données users reçues:', usersList);
+    // Volumes seulement : des milliers d'OT resteraient dans le tampon de `clientLogger`.
+    clientLogger.debug("Rapport des coûts : données lues", {
+      workOrders: workOrders.length,
+      users: usersList.length,
+    });
     
     // Filtrer par période
     const filteredWorkOrders = Array.isArray(workOrders) ? workOrders.filter((order: any) => {
@@ -721,7 +709,7 @@ export async function exportMaintenanceCostReport(startDate: Date, endDate: Date
     doc.save(`rapport_couts_maintenance_${new Date().toISOString().split('T')[0]}.pdf`);
     return true;
   } catch (error) {
-    console.error('Erreur lors de la génération du rapport:', error);
+    clientLogger.error("Rapport des coûts de maintenance en échec", reportErrorContext(error));
     if (error instanceof ReportRefusedError) throw error;
     throw new Error('Erreur lors de la génération du rapport des coûts de maintenance');
   }
@@ -729,15 +717,10 @@ export async function exportMaintenanceCostReport(startDate: Date, endDate: Date
 
 export async function exportFuelConsumptionReport(startDate: Date, endDate: Date) {
   try {
-    // Récupérer les données de carburant
-    const fuelResponse = await fetch('/api/fuel-records');
-    const fuelData = await fuelResponse.json();
-    const allFuelRecords = Array.isArray(fuelData) ? fuelData : [];
-
-    // Récupérer les véhicules
-    const vehiclesResponse = await fetch('/api/vehicles?limit=1000');
-    const vehiclesData = await vehiclesResponse.json();
-    const vehicles = vehiclesData.vehicles || [];
+    // Pleins et véhicules lus en entier : une lecture en échec refuse le rapport, jamais un
+    // rapport de carburant à 0.
+    const allFuelRecords = await fetchFuelRecords();
+    const vehicles = await fetchAllVehicles();
 
     // Filtrer par période
     const filteredFuelRecords = allFuelRecords.filter((record: any) => {
@@ -819,7 +802,8 @@ export async function exportFuelConsumptionReport(startDate: Date, endDate: Date
     doc.save(`rapport_consommation_carburant_${new Date().toISOString().split('T')[0]}.pdf`);
     return true;
   } catch (error) {
-    console.error('Erreur lors de la génération du rapport:', error);
+    clientLogger.error("Rapport de consommation de carburant en échec", reportErrorContext(error));
+    if (error instanceof ReportRefusedError) throw error;
     throw new Error('Erreur lors de la génération du rapport de consommation de carburant');
   }
 }
@@ -828,7 +812,7 @@ export async function exportPartsInventoryReport(startDate: Date, endDate: Date)
   try {
     // Utiliser le nouvel endpoint dédié aux rapports
     const reportUrl = `/api/reports/inventory?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}`;
-    console.log('Fetching inventory report from:', reportUrl);
+    clientLogger.debug("Rapport d'inventaire : lecture", { url: reportUrl });
     
     const reportResponse = await fetch(reportUrl);
     if (!reportResponse.ok) {
@@ -840,10 +824,10 @@ export async function exportPartsInventoryReport(startDate: Date, endDate: Date)
     const allMovements = reportData.movements || [];
     const statistics = reportData.statistics || {};
     
-    console.log('Rapport données reçues:', { 
-      partsCount: parts.length, 
+    clientLogger.debug("Rapport d'inventaire : données lues", {
+      partsCount: parts.length,
       movementsCount: allMovements.length,
-      totalMovements: statistics.totalMovements 
+      totalMovements: statistics.totalMovements,
     });
 
     const doc = new jsPDF();
@@ -921,7 +905,7 @@ export async function exportPartsInventoryReport(startDate: Date, endDate: Date)
     doc.save(`rapport_inventaire_pieces_${new Date().toISOString().split('T')[0]}.pdf`);
     return true;
   } catch (error) {
-    console.error('Erreur lors de la génération du rapport:', error);
+    clientLogger.error("Rapport d'inventaire des pièces en échec", { err: error });
     throw new Error('Erreur lors de la génération du rapport d\'inventaire des pièces');
   }
 }
@@ -930,7 +914,7 @@ export async function exportTechnicianPerformanceReport(startDate: Date, endDate
   try {
     // Utiliser le nouvel endpoint dédié aux rapports de performance des techniciens
     const reportUrl = `/api/reports/technician-performance?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}`;
-    console.log('Fetching technician performance report from:', reportUrl);
+    clientLogger.debug("Rapport de performance des techniciens : lecture", { url: reportUrl });
     
     const reportResponse = await fetch(reportUrl);
     if (!reportResponse.ok) {
@@ -941,7 +925,7 @@ export async function exportTechnicianPerformanceReport(startDate: Date, endDate
     const technicians = reportData.technicians || [];
     const statistics = reportData.statistics || {};
     
-    console.log('Technician performance report data received:', {
+    clientLogger.debug("Rapport de performance des techniciens : données lues", {
       techniciansCount: technicians.length,
       totalWorkOrders: statistics.totalWorkOrders,
       totalCompleted: statistics.totalCompletedWorkOrders
@@ -1015,7 +999,7 @@ export async function exportTechnicianPerformanceReport(startDate: Date, endDate
     doc.save(`rapport_performance_techniciens_${new Date().toISOString().split('T')[0]}.pdf`);
     return true;
   } catch (error) {
-    console.error('Erreur lors de la génération du rapport:', error);
+    clientLogger.error("Rapport de performance des techniciens en échec", { err: error });
     throw new Error('Erreur lors de la génération du rapport de performance des techniciens');
   }
 }
