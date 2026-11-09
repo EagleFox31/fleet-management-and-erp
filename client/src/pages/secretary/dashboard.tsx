@@ -1,4 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
+import { listQueryView, readyData } from "@/lib/query-view";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 import { Link } from "wouter";
 import {
   Plus, FileText, Bell, ClipboardList, Car, Fuel,
@@ -39,7 +41,7 @@ export default function SecretaryDashboard() {
   const { user } = useAuth();
   const canAddVehicle = canManageFleetVehicles(user);
   const { data: vehicles } = useQuery<SecretaryVehicle[]>({ queryKey: ["/api/vehicles/all"] });
-  const { data: alerts } = useQuery<any[]>({ queryKey: ["/api/alerts"] });
+  const alertsQuery = useQuery<unknown>({ queryKey: ["/api/alerts"] });
   const { data: documentStats } = useQuery<any>({ queryKey: ["/api/vehicles/document-stats"] });
   const { data: cpcStats } = useQuery<any>({ queryKey: ["/api/drivers/cpc-statistics"] });
   const { data: driversStatus } = useQuery<any[]>({ queryKey: ["/api/drivers/cpc-status"] });
@@ -50,7 +52,10 @@ export default function SecretaryDashboard() {
   const totalRevenue = clientsData.reduce((s: number, c: any) => s + (c.totalRevenue || 0), 0);
   const totalCost = clientsData.reduce((s: number, c: any) => s + (c.totalCost || 0), 0);
   const totalMissions = clientsData.reduce((s: number, c: any) => s + (c.totalMissions || 0), 0);
-  const alertsCount = Array.isArray(alerts) ? alerts.length : 0;
+  // Alertes illisibles : « Indisponible », jamais 0 alerte.
+  const alertsView = listQueryView<unknown>(alertsQuery);
+  const alertsFailed = alertsView.kind === "error";
+  const alertsCount = readyData(alertsView, []).length;
   const vehiclesCount = Array.isArray(vehicles) ? vehicles.length : 0;
   const expiringDocumentsSoon =
     Number(documentStats?.expiringCarteGrise || 0) +
@@ -81,7 +86,7 @@ export default function SecretaryDashboard() {
           <KpiTile
             data-testid="secretary-kpi-alerts"
             label="Alertes actives"
-            value={alertsCount}
+            value={alertsFailed ? UNAVAILABLE : alertsCount}
             subValue="À traiter"
             icon={<Bell className="h-4 w-4" />}
             iconWrapperClassName={alertsCount > 0 ? "bg-orange-50 text-orange-600" : "bg-gray-100 text-gray-400"}
@@ -183,7 +188,11 @@ export default function SecretaryDashboard() {
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 py-1.5 border-b border-gray-50">
                     <Bell className="h-3.5 w-3.5 text-orange-500" />
-                    <span className="text-sm text-gray-600">{alertsCount} alerte(s) à traiter</span>
+                    {alertsFailed ? (
+                      <span className="text-sm text-gray-600" data-testid="secretary-alerts-unavailable">Alertes indisponibles</span>
+                    ) : (
+                      <span className="text-sm text-gray-600">{alertsCount} alerte(s) à traiter</span>
+                    )}
                   </div>
                   <div className="flex items-center gap-2 py-1.5 border-b border-gray-50">
                     <Car className="h-3.5 w-3.5 text-blue-500" />

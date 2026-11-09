@@ -2744,6 +2744,13 @@ soumission sans doublon.
 - **RAIDER** : R : `InlineQueryError`, `AppError`, `storageLog` existants ; D : réponses de succès inchangées ; failure memory : leçon du 2026-11-07 appliquée. Ne s'appliquent pas : A, I, Retroactive (aucune donnée ni schéma touchés).
 - **Reste** : ~34 cas gelés ; `getUsersByRole` (notification de renouvellement) à traiter avec son appelant en meilleur effort.
 
+## 2026-11-09T16:05:00+01:00 — Carte carburant et pleins : une lecture en échec lit Indisponible, jamais 0
+- **Statut** : fait (PR brouillon)
+- **Quoi** : `useFuelCard().balance.failed` (data indéfinie et erreur) ; `dashboard.tsx`, `logistics/dashboard.tsx` (en-tête et onglet Carburant), `client/dashboard.tsx`, `fuel/index.tsx` (solde, prix moyen, « Solde actuel » de la recharge, et pleins/litres/coût issus de `/api/fuel-records`), `fuel-statistics.tsx` (litres, coût, prix moyen, nb de pleins) affichent « Indisponible » avec une sous-ligne `userMessageOf`. Aucune somme partielle.
+- **Comment tester (QA)** : `tests/unit/client/fuel-card-render-error-states.test.ts` (12 tests, rendu `react-dom/server`, erreur et témoin 12 345 par écran) + regex dans `money-stock-reads-error-states.test.ts`. Rouge avec chaque garde forcé à `false` (5 écrans), vert restauré.
+- **RAIDER** : D : contrats et données saines inchangés, aucune dépendance. Ne s'appliquent pas : A, I, Retroactive.
+- **Reste / risques** : `logistics/dashboard.tsx` « Volume consommé » (`/api/fuel-records/statistics`) et `client/dashboard.tsx` « Volume carburant » affichent encore 0 L sur échec de cette requête (hors liste du brief).
+
 ## 2026-11-09T15:19:00+01:00 — Rapports PDF : véhicules lus en entier, carburant sans repli à 0, logs migrés
 
 - **Statut** : fait (PR brouillon)
@@ -2773,3 +2780,19 @@ soumission sans doublon.
   - campagnes : unitaires 323 fichiers / 3369 tests ; tsc 0 ; check:tests 0 ; contrats `work-order` + `client-scope` 25 fichiers verts ; intégration verte (Postgres local).
 - **RAIDER** : D : contrats d'API inchangés, `routes.ts` non touché ; dans `storage.ts`, seul l'`orderBy` change.
 - **Reste / risques** : `/api/users` reste non paginé côté serveur. Les 7 lectures plafonnées gelées par `capped-list-reads-hygiene` sont à résorber écran par écran.
+
+## 2026-11-09T15:37:39+01:00 — Alertes : une lecture de `/api/alerts` en échec n'est plus « 0 alerte »
+
+- **Statut** : fait (PR brouillon #607)
+- **Quoi** :
+  - trois écrans lisaient `GET /api/alerts` sans état d'erreur : tableau de bord secrétaire, centre d'alertes, résumé des alertes du tableau de bord. En échec, ils affichaient « 0 alerte », « Aucune alerte récente » ou « Tout est à jour » ;
+  - secrétaire : tuile « Alertes actives » à « Indisponible », rappel « Alertes indisponibles », bannière masquée ;
+  - centre d'alertes : encart d'erreur, compteurs à « Indisponible » (total, critiques et stock aussi quand la réappro échoue : pas de compte partiel), état vide présenté comme partiel, couleurs des compteurs conditionnées à leur disponibilité ;
+  - résumé : encart avec « Réessayer », « Voir toutes » sans compte ;
+  - `listQueryView` rejoint `client/src/lib/query-view.ts` ; `work-order-tires-cost.ts` le ré-exporte (importeurs inchangés).
+- **Comment tester (QA)** :
+  - `tests/unit/client/alerts-reads-error-states.test.ts` : 9 cas, 7 rouges sur main (7053ecda), 9 verts sur la branche ;
+  - `tests/unit/client/money-stock-reads-error-states.test.ts` : la garde de #599 accepte `reorderAlertsFailed || alertsFailed ?` et exige toujours la condition réappro ;
+  - campagnes : tsc 0, check:tests 0, unitaires verts (hors `db-pool-options`, échec local connu, vert en CI). Aucun fichier serveur modifié.
+- **RAIDER** : R : un helper générique pour les trois écrans ; D : ré-export à signature identique, aucun `data-testid` retiré. Ne s'appliquent pas : A, I, Retroactive (client seul, lecture seule).
+- **Reste / risques** : le reste du tableau de bord secrétaire (factures, documents, CPC, statistiques par client) traité dans la PR suivante, empilée sur #607.

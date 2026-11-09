@@ -273,6 +273,37 @@ describe("valeur du stock et alertes de réappro : jamais 0 sur une lecture en �
     const src = read("client/src/components/alerts/alerts-panel.tsx");
     expect(src).toMatch(/const reorderAlertsView = queryView\(reorderAlertsQuery\)/);
     expect(src).toMatch(/data-testid="alerts-reorder-error"/);
-    expect(src).toMatch(/emptyState=\{\s*reorderAlertsFailed \?/);
+    expect(src).toMatch(/emptyState=\{\s*reorderAlertsFailed( \|\| alertsFailed)? \?/);
+  });
+});
+
+describe("carte carburant et pleins : jamais 0 sur une lecture en échec", () => {
+  it("le hook expose `failed` sur le solde", () => {
+    expect(read("client/src/hooks/useFuelCard.ts")).toMatch(/failed: balanceQuery\.data === undefined && !!balanceQuery\.error/);
+  });
+
+  it.each(["client/src/pages/dashboard.tsx", "client/src/pages/logistics/dashboard.tsx", "client/src/pages/client/dashboard.tsx"])(
+    "%s : le solde en échec lit UNAVAILABLE",
+    (path) => {
+      const src = read(path);
+      expect(src).toMatch(/fuelCard\.balance\.failed/);
+      expect(src).toMatch(/(fuelCardFailed|fuelCard\.balance\.failed) \? UNAVAILABLE : formatPrice\(/);
+    },
+  );
+
+  it("fuel/index : solde, pleins et « Solde actuel » gardés par l'échec", () => {
+    const src = read("client/src/pages/fuel/index.tsx");
+    expect(src).toMatch(/const fuelRecordsFailed = fuelRecordsData === undefined && !!fuelRecordsError/);
+    expect(src).toMatch(/const fuelCardFailed = fuelCardBalance === undefined && !!fuelCardBalanceError/);
+    expect(src).toMatch(/fuelRecordsFailed \? UNAVAILABLE : formatCurrency\(totalCost\)/);
+    expect(src).toMatch(/fuelCardFailed \? UNAVAILABLE : formatCurrency\(Number\(fuelCardBalance\?\.balance/);
+  });
+
+  it("fuel-statistics : litres, coût, prix moyen et nb de pleins gardés par l'échec", () => {
+    const src = read("client/src/components/fuel/fuel-statistics.tsx");
+    expect(src).toMatch(/const statsFailed = fuelStatistics === undefined && !!fuelStatisticsError/);
+    expect(src).toMatch(/const historyFailed = consumptionHistory === undefined && !!consumptionHistoryError/);
+    expect((src.match(/statsFailed\s*\? UNAVAILABLE/g) ?? []).length).toBe(3);
+    expect(src).toMatch(/historyFailed\s*\? UNAVAILABLE/);
   });
 });

@@ -26,7 +26,8 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { cn, formatDate } from "@/lib/utils";
 import { userMessageOf } from "@/lib/api-error";
-import { queryView } from "@/lib/query-view";
+import { listQueryView, queryView } from "@/lib/query-view";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { ALERT_READ_ALL_PATH } from "@shared/contracts/alerts";
 import {
@@ -233,9 +234,13 @@ export function AlertsPanel() {
     "workshop_manager",
   ].includes(user?.role || "");
 
-  const { data: allDatabaseAlerts, isLoading: alertsLoading, refetch: refetchAlerts } = useQuery<DatabaseAlert[]>({
+  const alertsQuery = useQuery<DatabaseAlert[]>({
     queryKey: ["/api/alerts"],
   });
+  const { data: allDatabaseAlerts, isLoading: alertsLoading, refetch: refetchAlerts } = alertsQuery;
+  // Alertes enregistrées illisibles : encart et compteurs « Indisponible », pas « Tout est à jour ».
+  const alertsView = listQueryView<DatabaseAlert>(alertsQuery);
+  const alertsFailed = alertsView.kind === "error";
 
   const reorderAlertsQuery = useQuery<any>({
     queryKey: ["/api/warehouse/reorder-alerts"],
@@ -432,6 +437,13 @@ export function AlertsPanel() {
       byCategory,
     };
   }, [allAlerts]);
+
+  /** Compteur affiché : inconnu si sa source a échoué (un compte partiel serait un faux chiffre). */
+  const countText = (value: number, includesStock = false) =>
+    alertsFailed || (includesStock && reorderAlertsFailed) ? UNAVAILABLE : value;
+  // Couleur d'alerte seulement sur un compte disponible et non nul.
+  const countTone = (value: number, className: string, includesStock = false) =>
+    countText(value, includesStock) !== UNAVAILABLE && value > 0 ? className : undefined;
 
   const filteredAlerts = useMemo(() => {
     const searchLower = search.trim().toLowerCase();
@@ -817,7 +829,7 @@ export function AlertsPanel() {
               setCategoryFilter("all");
               setPriorityFilter("all");
             }}
-            value={counts.total}
+            value={countText(counts.total, true)}
             icon={<AlertCircle className="h-4 w-4" />}
             iconWrapperClassName="bg-blue-50 text-blue-600"
           />
@@ -827,10 +839,10 @@ export function AlertsPanel() {
               setPriorityFilter((actuel) => (actuel === "critical" ? "all" : "critical"))
             }
             className={priorityFilter === "critical" ? "ring-2 ring-red-300" : undefined}
-            value={counts.critical}
+            value={countText(counts.critical, true)}
             icon={<AlertTriangle className="h-4 w-4" />}
             iconWrapperClassName="bg-red-50 text-red-600"
-            valueClassName={counts.critical > 0 ? "text-red-700" : undefined}
+            valueClassName={countTone(counts.critical, "text-red-700", true)}
           />
           <KpiTile
             label="Documents"
@@ -838,7 +850,7 @@ export function AlertsPanel() {
               setCategoryFilter((actuel) => (actuel === "document" ? "all" : "document"))
             }
             className={categoryFilter === "document" ? "ring-2 ring-gray-300" : undefined}
-            value={counts.byCategory.document}
+            value={countText(counts.byCategory.document)}
             icon={<FileWarning className="h-4 w-4" />}
             iconWrapperClassName="bg-amber-50 text-amber-600"
           />
@@ -848,7 +860,7 @@ export function AlertsPanel() {
               setCategoryFilter((actuel) => (actuel === "maintenance" ? "all" : "maintenance"))
             }
             className={categoryFilter === "maintenance" ? "ring-2 ring-gray-300" : undefined}
-            value={counts.byCategory.maintenance}
+            value={countText(counts.byCategory.maintenance)}
             icon={<Gauge className="h-4 w-4" />}
             iconWrapperClassName="bg-sky-50 text-sky-600"
           />
@@ -858,7 +870,7 @@ export function AlertsPanel() {
               setCategoryFilter((actuel) => (actuel === "work_order" ? "all" : "work_order"))
             }
             className={categoryFilter === "work_order" ? "ring-2 ring-gray-300" : undefined}
-            value={counts.byCategory.work_order}
+            value={countText(counts.byCategory.work_order)}
             icon={<Clock className="h-4 w-4" />}
             iconWrapperClassName="bg-orange-50 text-orange-600"
           />
@@ -868,7 +880,7 @@ export function AlertsPanel() {
               setCategoryFilter((actuel) => (actuel === "fuel" ? "all" : "fuel"))
             }
             className={categoryFilter === "fuel" ? "ring-2 ring-gray-300" : undefined}
-            value={counts.byCategory.fuel}
+            value={countText(counts.byCategory.fuel)}
             icon={<Gauge className="h-4 w-4" />}
             iconWrapperClassName="bg-orange-50 text-orange-600"
           />
@@ -878,7 +890,7 @@ export function AlertsPanel() {
               setCategoryFilter((actuel) => (actuel === "stock" ? "all" : "stock"))
             }
             className={categoryFilter === "stock" ? "ring-2 ring-gray-300" : undefined}
-            value={counts.byCategory.stock}
+            value={countText(counts.byCategory.stock, true)}
             icon={<Package className="h-4 w-4" />}
             iconWrapperClassName="bg-yellow-50 text-yellow-600"
           />
@@ -888,7 +900,7 @@ export function AlertsPanel() {
               setCategoryFilter((actuel) => (actuel === "tire" ? "all" : "tire"))
             }
             className={categoryFilter === "tire" ? "ring-2 ring-gray-300" : undefined}
-            value={counts.byCategory.tire}
+            value={countText(counts.byCategory.tire)}
             icon={<AlertTriangle className="h-4 w-4" />}
             iconWrapperClassName="bg-rose-50 text-rose-600"
           />
@@ -898,10 +910,10 @@ export function AlertsPanel() {
               setCategoryFilter((actuel) => (actuel === "mission" ? "all" : "mission"))
             }
             className={categoryFilter === "mission" ? "ring-2 ring-gray-300" : undefined}
-            value={counts.byCategory.mission}
+            value={countText(counts.byCategory.mission)}
             icon={<Truck className="h-4 w-4" />}
             iconWrapperClassName="bg-purple-50 text-purple-600"
-            valueClassName={counts.byCategory.mission > 0 ? "text-purple-700" : undefined}
+            valueClassName={countTone(counts.byCategory.mission, "text-purple-700")}
           />
         </div>
       </HeaderCard>
@@ -964,6 +976,16 @@ export function AlertsPanel() {
         </div>
       </CardShell>
 
+      {alertsView.kind === "error" && (
+        <InlineQueryError
+          error={alertsView.error}
+          fallback="Les alertes enregistrées sont momentanément indisponibles : la liste ci-dessous ne les contient pas."
+          onRetry={() => void refetchAlerts()}
+          isRetrying={alertsView.isRetrying}
+          data-testid="alerts-db-error"
+        />
+      )}
+
       {reorderAlertsFailed && reorderAlertsView.kind === "error" && (
         <InlineQueryError
           error={reorderAlertsView.error}
@@ -986,7 +1008,7 @@ export function AlertsPanel() {
         }
         toolbar={<div className="text-sm text-gray-500">Liste des alertes ({filteredAlerts.length})</div>}
         emptyState={
-          reorderAlertsFailed ? (
+          reorderAlertsFailed || alertsFailed ? (
             <p className="text-xs text-gray-400 text-center py-6" data-testid="alerts-empty-partial">
               Aucune autre alerte ne correspond aux filtres.
             </p>
