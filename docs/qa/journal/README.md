@@ -43,7 +43,7 @@ grep -rl "T7" docs/qa/journal    # entrées qui parlent d'un code de test
 
 ## Migration du 9 novembre 2026
 
-Les 171 entrées de l'ancien fichier ont été découpées par `scripts/doc-fragments.ts migrate`.
+Les 167 entrées de l'ancien fichier ont été découpées par `scripts/doc-fragments.ts migrate`.
 Pour les titres sans date, l'horodatage vient du commit qui a écrit le titre (`git blame`).
 
 `_migration-2026-11-09.json` est le manifeste **figé** de cette migration : préambule

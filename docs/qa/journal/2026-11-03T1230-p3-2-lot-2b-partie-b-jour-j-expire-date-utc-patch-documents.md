@@ -1,7 +1,0 @@
-## 2026-11-03 12:30 — P3-2 lot 2b partie B : jour J expiré, date UTC, PATCH documents, téléversement
-
-- **Quoi** : D1/D2 le jour J est expiré partout ; D4 date du jour UTC unique (`shared/constants/expiry-day.ts` sur `shared/lib/utc-day.ts`) pour éligibilité, statistiques, alertes et lancement de mission ; D3 `PATCH /api/documents/:id` déplacé dans `vehicle-documents.routes.ts`, miroir recalé sur la plus lointaine échéance des documents du type ; M2 erreurs de téléversement génériques (détail dans `cause` et le journal), `EACCES|ENOSPC|EPERM` dans `looksTechnical` ; M3 extension confrontée au MIME.
-- **Comment** : les `it.fails` D1, D2, D3, D4 de #135 passent en `it` ; `document-expiry-day-j.test.ts` rejoue D4 sous Africa/Douala et UTC (23:30Z le 3 : non expiré partout, 00:00Z le 4 : expiré partout) ; liste gelée du scan d'hygiène du miroir vidée ; nouveaux tests `upload-extension-and-technical-errors` (unitaire) et `vehicle-documents-upload-errors` (contrat).
-- **Pourquoi** : une règle, une source ; décisions produit D2 (jour J expiré) et D4 (UTC partout). Décalage accepté : de 00:00 à 01:00 à Douala, le jour J est encore la veille.
-- **Preuves** : rouge avant (code de #135 restauré) : 7 échecs sur day-j et règle, 16 échecs unitaires et 4 contrats (M3 x2, M2 tronqué, D3). Vert après : `tsc` 0 erreur, `npm test` 1629/1629, contrats voisins 83/83 sur fleet_test_p32c (supprimée par dropdb).
-

@@ -1,7 +1,0 @@
-## 2026-11-03 12:10 — Cloison chauffeur sur les GET de /api/operations (DRV2-3, suite)
-
-- **Quoi** : un chauffeur lisait toutes les missions et leurs coûts par `/api/operations/*`, ce qui contournait le `router.param` de missions.routes.ts. Listes (`/missions`, `/missions/upcoming`, `/missions/active`) filtrées sur ses affectations (`driverScopeOf`, `assignments.driver_id`, fiche liée par `drivers.user_id`) ; `/missions/:id/costs`, `/missions/by-client/:clientName`, `/stats/by-client` et `/stats/by-destination` refusés en 403 (`AppError`). Personnel inchangé ; le client reste fermé par `isStaff` au montage (`STAFF_ROLES` exclut `client`), rien changé pour lui.
-- **Comment** : `refuseDriver` dans operations.routes.ts ; paramètre `driverScope` optionnel dans `operations-service` (sous-requête `missions.id IN assignments`). Règle de portée réutilisée depuis `server/lib/driver-scope.ts`, aucune duplication. Les coûts sont refusés même sur sa propre mission : ils embarquent un amortissement tiré du prix d'achat du véhicule et les agrégats couvrent toute la flotte.
-- **Pourquoi** : AGENTS.md §11, défaut DRV2-3 resté ouvert sur ce routeur.
-- **Preuves** : `tests/contract/operations-driver-scope.contract.test.ts`, 7 cas, une fiche chauffeur par compte. Rouge sur main (262b4a9) : 4 échecs / 3 verts (liste avec la mission de B, upcoming/active, costs en 200, agrégats en 200). Vert après : 7/7 sur fleet_test.
-
