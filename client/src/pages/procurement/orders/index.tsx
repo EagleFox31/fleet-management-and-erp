@@ -20,6 +20,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { ProcurementTutorialModal } from "@/components/procurement/procurement-tutorial-modal";
 import { formatPrice } from "@/lib/utils";
+import { listQueryView, queryView, readyData } from "@/lib/query-view";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 
 interface PurchaseOrder {
   id: number;
@@ -70,13 +72,20 @@ export default function PurchaseOrdersListPage() {
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [, setLocation] = useLocation();
 
-  const { data: orders = [], isLoading } = useQuery<PurchaseOrder[]>({
+  const ordersQuery = useQuery<PurchaseOrder[]>({
     queryKey: ["/api/purchase-orders", { status: statusFilter }],
   });
+  // Échec sans données : message et « Réessayer », jamais « Aucune commande » ni « 0 commande ».
+  const ordersView = listQueryView<PurchaseOrder>(ordersQuery);
+  const orders = readyData(ordersView, [] as PurchaseOrder[]);
+  const ordersFailed = ordersView.kind === "error";
+  const isLoading = ordersQuery.isLoading;
 
-  const { data: stats } = useQuery<OrderStatistics>({
+  const statsQuery = useQuery<OrderStatistics>({
     queryKey: ["/api/purchase-orders/statistics"],
   });
+  const statsView = queryView(statsQuery);
+  const stats = readyData(statsView, undefined);
 
   const filteredOrders = orders.filter(order => {
     const matchesSearch = !searchQuery ||
@@ -127,6 +136,15 @@ export default function PurchaseOrdersListPage() {
             </div>
           </div>
 
+          {statsView.kind === "error" && (
+            <div className="mt-5 pt-5 border-t border-gray-100" data-testid="orders-stats-error">
+              <InlineQueryError
+                error={statsView.error}
+                fallback="Les totaux des commandes sont momentanément indisponibles."
+                onRetry={() => void statsQuery.refetch()}
+              />
+            </div>
+          )}
           {stats && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5 pt-5 border-t border-gray-100">
               {[
@@ -180,9 +198,11 @@ export default function PurchaseOrdersListPage() {
               <SelectItem value="cancelled">Annulée</SelectItem>
             </SelectContent>
           </Select>
-          <span className="text-xs text-gray-400 ml-auto">
-            {filteredOrders.length} commande{filteredOrders.length > 1 ? 's' : ''}
-          </span>
+          {!ordersFailed && (
+            <span className="text-xs text-gray-400 ml-auto" data-testid="orders-count">
+              {filteredOrders.length} commande{filteredOrders.length > 1 ? 's' : ''}
+            </span>
+          )}
         </div>
 
         {/* Table */}
@@ -208,6 +228,16 @@ export default function PurchaseOrdersListPage() {
                     ))}
                   </tr>
                 ))
+              ) : ordersFailed ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-10" data-testid="orders-error">
+                    <InlineQueryError
+                      error={ordersView.kind === "error" ? ordersView.error : null}
+                      fallback="La liste des commandes est momentanément indisponible."
+                      onRetry={() => void ordersQuery.refetch()}
+                    />
+                  </td>
+                </tr>
               ) : filteredOrders.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-4 py-16 text-center">

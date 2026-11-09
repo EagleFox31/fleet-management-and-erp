@@ -12,6 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatPrice } from "@/lib/utils";
+import { listQueryView, readyData } from "@/lib/query-view";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 
 interface GroupSuggestion {
   supplierId: number;
@@ -53,9 +55,14 @@ export default function GroupPurchaseOrdersPage() {
   const [selectedGroup, setSelectedGroup] = useState<number | null>(null);
 
   // Charger les suggestions de regroupement
-  const { data: suggestions = [], isLoading } = useQuery<GroupSuggestion[]>({
+  const suggestionsQuery = useQuery<GroupSuggestion[]>({
     queryKey: ["/api/purchase-orders/group-suggestions", { minRequirements, maxDaysOld, urgencyThreshold }],
   });
+  // Échec sans données : message et « Réessayer », jamais « Aucune suggestion » ni « (0) ».
+  const suggestionsView = listQueryView<GroupSuggestion>(suggestionsQuery);
+  const suggestions = readyData(suggestionsView, [] as GroupSuggestion[]);
+  const suggestionsFailed = suggestionsView.kind === "error";
+  const isLoading = suggestionsQuery.isLoading;
 
   // Charger l'optimisation de timing pour le groupe sélectionné
   const { data: optimization } = useQuery<OptimizationResult>({
@@ -206,11 +213,19 @@ export default function GroupPurchaseOrdersPage() {
       {/* Suggestions de regroupement */}
       <div className="space-y-4">
         <h2 className="text-xl font-semibold">
-          Suggestions de Commandes Groupées ({suggestions.length})
+          Suggestions de Commandes Groupées{suggestionsFailed ? "" : ` (${suggestions.length})`}
         </h2>
 
         {isLoading ? (
           <div className="text-center py-12">Chargement des suggestions...</div>
+        ) : suggestionsView.kind === "error" ? (
+          <div data-testid="group-suggestions-error">
+            <InlineQueryError
+              error={suggestionsView.error}
+              fallback="Les suggestions de regroupement sont momentanément indisponibles."
+              onRetry={() => void suggestionsQuery.refetch()}
+            />
+          </div>
         ) : suggestions.length === 0 ? (
           <Card>
             <CardContent className="py-12">
