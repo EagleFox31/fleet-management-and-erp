@@ -1,0 +1,22 @@
+## 2026-11-09T16:45:02+01:00 — Lectures paginées par défaut, lot 1 : listes complètes et trois écrans lus dans la mauvaise forme
+- **Statut** : fait (PR)
+- **Quoi** :
+  - Trois bugs de forme sur `GET /api/vehicles` (`{ vehicles, total }`, 10 lignes sans `limit`) :
+    - `maintenance/preventive` : `vehicles.map` sur l'objet, le dialogue de création plantait ;
+    - `client/dashboard` : la tuile « Mes véhicules » restait à 0 ; elle lit désormais `total` (`limit: 1`) ;
+    - `vehicles/immatriculation/[registration]` : `registrationNumber` était ignoré par la route, d'où un chargement sans fin hors des 10 véhicules récents. La fiche passe par `search=` (route existante), et une immatriculation inconnue donne « Véhicule non trouvé ».
+  - Listes complètes : `useAllVehicles` / `useAllWorkOrders` (nouveaux hooks, staleTime 30 s, clé `[route, "all"]` sous le préfixe invalidé) dans l'export Excel des véhicules, documents, carburant, maintenance-simple, maintenance-planner, technicien/véhicules et date-based-alerts. `fetchAllTires` est utilisé dans l'inventaire des pneus.
+  - Serveur : le `total` de `GET /api/tires` passe de texte à nombre (`count(*)` Postgres), sinon la lecture page par page refusait la liste.
+  - Mineurs #614 : l'export PDF des OT est extrait dans `lib/work-orders-export.ts` et testé en l'exécutant ; date-based-alerts lit les OT avec un staleTime de 30 s.
+- **Comment tester (QA)** :
+  - `tests/unit/client/vehicle-list-shape-render.test.ts` : rendu serveur avec un faux serveur fidèle à la route. Les 4 cas sont rouges sur l'ancien code (`vehicles.map is not a function`, `0` au lieu de `37`, deux « Chargement... ») et verts après.
+  - `tests/unit/client/work-orders-full-reads.test.ts` : les 4 gardes regex de l'export sont remplacés par 3 cas exécutés (succès, liste vide, refus journalisé), et un cas « flotte illisible » est ajouté aux alertes.
+  - `tests/unit/client/default-paginated-reads-hygiene.test.ts` : nouveau cliquet. 8 routes à défaut sont visées, avec `queryKey: ["<route>"]` lu par `useQuery` et `fetch`/`apiRequest GET` sans `?`. 18 lecteurs restent gelés par fichier (lot 2 sélecteurs, lot 3 tuiles, `getAll` sans appelant). Un second bloc aligne les défauts sur `server/routes.ts` et `VEHICLE_LIST_DEFAULT_LIMIT`, et vérifie que les tailles de page ne dépassent pas les plafonds serveur.
+  - `tests/contract/tires-list-pagination.contract.test.ts` : total numérique et lecture complète sur deux pages ; rouge sans le correctif serveur (2 échecs), vert après.
+  - Campagnes : tsc 0, check:tests 0, unitaires 342 fichiers / 3 513 tests verts, contrat pneus 2/2 (Postgres local).
+- **Pourquoi** : une route paginée lue sans `limit` rend une page sans le dire. Le technicien ne voyait que 10 véhicules, un OT ancien était ignoré, les échéances des autres véhicules n'étaient jamais affichées.
+- **RAIDER** : R : hooks et `fetchAllPages` partagés, aucune lecture maison ; A : défauts lus dans le source serveur, non supposés ; D : aucune route ni réponse modifiée (hors type du `total` des pneus) ; E : aucun `console.*`, `routes.ts` intact, aucun code mort supprimé. Ne s'appliquent pas : I et Retroactive (lecture seule).
+- **Reste / risques** :
+  - Lot 2 : sélecteurs, dont celui des rotations de pneus, qui écrit un tableau sous `["/api/vehicles"]`, clé lue ailleurs comme objet.
+  - Lot 3 : tuiles et agrégat d'OT par technicien.
+  - La recherche `/api/tires?search=` combine marque ET modèle ET dimension : elle ne trouve presque rien (hors lot).

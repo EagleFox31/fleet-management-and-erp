@@ -172,7 +172,9 @@ export class TiresService {
         .select({ count: sql<number>`count(*)` })
         .from(tires)
         .where(whereClause);
-      const total = countResult[0]?.count || 0;
+      // `count(*)` arrive en texte (bigint Postgres) : converti, sinon une lecture page par page
+      // (`fetchAllPages`) refuse la liste.
+      const total = Number(countResult[0]?.count ?? 0);
 
       // Get paginated results
       const baseQuery = db

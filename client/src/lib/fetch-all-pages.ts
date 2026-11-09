@@ -110,16 +110,37 @@ export const VEHICLES_PAGE_SIZE = 1000;
 
 export function fetchAllVehicles<T = any>(
   fetchFn: FetchLike = defaultFetch,
-  { pageSize = VEHICLES_PAGE_SIZE, maxPages = REPORT_MAX_PAGES } = {},
+  {
+    pageSize = VEHICLES_PAGE_SIZE,
+    maxPages = REPORT_MAX_PAGES,
+    unreadable = "Les véhicules n'ont pas pu être lus en entier : le rapport n'a pas été généré. Réessayez.",
+    tooMany = (total: string, limit: string) =>
+      `Trop de véhicules pour un seul rapport (${total}, limite ${limit}) : le rapport n'a pas été généré.`,
+  }: {
+    pageSize?: number;
+    maxPages?: number;
+    unreadable?: string;
+    tooMany?: (total: string, limit: string) => string;
+  } = {},
+): Promise<T[]> {
+  return fetchAllPages<T>(fetchFn, { path: "/api/vehicles", listKey: "vehicles", pageSize, maxPages, unreadable, tooMany });
+}
+
+/** `GET /api/tires` n'a pas de plafond serveur : pages de 500, comme les OT. */
+export const TIRES_PAGE_SIZE = 500;
+
+/** Stock de pneus complet (20 par défaut sans `limit`). */
+export function fetchAllTires<T = any>(
+  fetchFn: FetchLike = defaultFetch,
+  { pageSize = TIRES_PAGE_SIZE, maxPages = REPORT_MAX_PAGES } = {},
 ): Promise<T[]> {
   return fetchAllPages<T>(fetchFn, {
-    path: "/api/vehicles",
-    listKey: "vehicles",
+    path: "/api/tires",
+    listKey: "tires",
     pageSize,
     maxPages,
-    unreadable: "Les véhicules n'ont pas pu être lus en entier : le rapport n'a pas été généré. Réessayez.",
-    tooMany: (total, limit) =>
-      `Trop de véhicules pour un seul rapport (${total}, limite ${limit}) : le rapport n'a pas été généré.`,
+    unreadable: "Le stock de pneus n'a pas pu être lu en entier. Réessayez.",
+    tooMany: (total, limit) => `Trop de pneus à afficher (${total}, limite ${limit}).`,
   });
 }
 

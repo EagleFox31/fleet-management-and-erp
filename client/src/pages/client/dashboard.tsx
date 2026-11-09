@@ -16,12 +16,18 @@ export default function ClientDashboard() {
   const { user } = useAuth();
   const fuelCard = useFuelCard();
 
-  const { data: vehicles } = useQuery<any>({ queryKey: ["/api/vehicles"] });
+  // Compteur servi par le serveur (`total`, déjà restreint aux véhicules du client) : une seule
+  // ligne lue. L'ancien code testait `Array.isArray` sur la réponse `{ vehicles, total }` et
+  // affichait toujours 0.
+  const vehiclesCountQuery = useQuery<{ vehicles: unknown[]; total: number }>({
+    queryKey: ["/api/vehicles", { limit: 1 }],
+  });
   const { data: fuelStats, error: fuelStatsError } = useQuery<any>({
     queryKey: ["/api/fuel-records/statistics", { period: "month" }],
   });
 
-  const vehiclesCount = Array.isArray(vehicles) ? vehicles.length : 0;
+  const vehiclesTotal = vehiclesCountQuery.data?.total;
+  const vehiclesCountFailed = vehiclesCountQuery.isError || (vehiclesCountQuery.isSuccess && typeof vehiclesTotal !== "number");
   const totalDebits = Number(fuelCard.balance.data?.totalDebits || 0);
   const totalFuelLiters = Number(fuelStats?.totalFuel || 0);
   const fuelStatsFailed = fuelStats === undefined && !!fuelStatsError;
@@ -40,8 +46,14 @@ export default function ClientDashboard() {
             data-testid="client-kpi-vehicles"
             label="Mes véhicules"
             featured // son parc, la raison de sa connexion
-            value={vehiclesCount}
-            subValue="Total flotte"
+            value={
+              vehiclesCountFailed ? UNAVAILABLE : vehiclesCountQuery.isLoading ? "…" : vehiclesTotal
+            }
+            subValue={
+              vehiclesCountFailed
+                ? userMessageOf(vehiclesCountQuery.error, "Le nombre de vos véhicules est momentanément indisponible.")
+                : "Total flotte"
+            }
             icon={<Truck className="h-4 w-4" />}
             iconWrapperClassName="bg-blue-50 text-blue-600"
           />
@@ -121,7 +133,11 @@ export default function ClientDashboard() {
             <div className="px-5 py-4">
               <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">Ma Flotte</p>
               <p className="text-sm text-gray-600 mb-4">
-                {vehiclesCount} véhicule{vehiclesCount > 1 ? "s" : ""} enregistré{vehiclesCount > 1 ? "s" : ""} à votre compte.
+                {vehiclesCountFailed
+                  ? userMessageOf(vehiclesCountQuery.error, "Le nombre de vos véhicules est momentanément indisponible.")
+                  : typeof vehiclesTotal !== "number"
+                    ? "…"
+                    : `${vehiclesTotal} véhicule${vehiclesTotal > 1 ? "s" : ""} enregistré${vehiclesTotal > 1 ? "s" : ""} à votre compte.`}
               </p>
               <Link href="/vehicles">
                 <Button size="sm" variant="outline" className="gap-2" data-testid="btn-view-vehicles">

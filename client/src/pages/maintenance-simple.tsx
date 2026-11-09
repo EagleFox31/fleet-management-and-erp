@@ -3,6 +3,8 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { ALL_VEHICLES_UNREADABLE, useAllVehicles } from "@/hooks/use-all-vehicles";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 
@@ -78,10 +80,9 @@ export default function MaintenanceSchedulesPage() {
     queryKey: ['/api/maintenance-schedules'],
   }) as { data: any[], isLoading: boolean, error: any };
 
-  // Charger les véhicules pour le filtrage
-  const { data: vehiclesData } = useQuery<any>({
-    queryKey: ['/api/vehicles'],
-  }) as { data: { vehicles: any[] } };
+  // Flotte complète (libellés et filtre) : sans `limit`, `/api/vehicles` ne rend que 10 véhicules.
+  const vehiclesQuery = useAllVehicles();
+  const vehicles = vehiclesQuery.data ?? [];
 
   // Mutation pour supprimer une planification
   const deleteMutation = useMutation({
@@ -148,8 +149,7 @@ export default function MaintenanceSchedulesPage() {
 
   // Trouver le véhicule correspondant
   const findVehicle = (vehicleId: number) => {
-    if (!vehiclesData?.vehicles) return null;
-    return vehiclesData.vehicles.find((v: any) => v.id === vehicleId);
+    return vehicles.find((v: any) => v.id === vehicleId) ?? null;
   };
 
   return (
@@ -194,6 +194,16 @@ export default function MaintenanceSchedulesPage() {
             {userMessageOf(error, "Le planning de maintenance est momentanément indisponible.")}
           </AlertDescription>
         </Alert>
+      )}
+
+      {vehiclesQuery.isError && (
+        <InlineQueryError
+          className="mb-4"
+          error={vehiclesQuery.error}
+          fallback={ALL_VEHICLES_UNREADABLE}
+          onRetry={() => vehiclesQuery.refetch()}
+          isRetrying={vehiclesQuery.isFetching}
+        />
       )}
 
       {/* Indicateur de chargement */}
