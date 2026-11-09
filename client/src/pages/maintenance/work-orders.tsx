@@ -1,12 +1,16 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useLocation } from "wouter";
 import { WorkOrderTable } from "@/components/maintenance/work-order-table";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Clock, PlayCircle, CheckCircle, XCircle, Package, Wrench, Download } from "lucide-react";
+import { Plus, Clock, PlayCircle, CheckCircle, XCircle, Package, Wrench, Download, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { exportWorkOrdersToPDF } from "@/lib/pdf-export";
+import { fetchAllWorkOrders } from "@/lib/fetch-all-work-orders";
+import { reportErrorContext } from "@/lib/fetch-all-pages";
+import { userMessageOf } from "@/lib/api-error";
+import { clientLogger } from "@/lib/logger";
 import { RoleExplanationCard } from "@/components/RoleExplanationCard";
 import { cn } from "@/lib/utils";
 import { HeaderCard, KpiGrid, KpiTile } from "@/components/design-system";
@@ -33,24 +37,39 @@ export default function WorkOrdersIndex() {
     refetchIntervalInBackground: true,
   });
 
-  const { data: allWorkOrders } = useQuery<any>({
-    queryKey: ["/api/work-orders", { limit: 300, offset: 0 }],
-    staleTime: 0,
-    refetchInterval: 7000,
-    refetchIntervalInBackground: true,
-  });
+  // Export PDF : la liste complète est lue au clic (`fetchAllWorkOrders`, toutes les pages).
+  // L'ancienne lecture des 300 derniers OT, relue toutes les 7 s pour ce seul bouton, tronquait le
+  // rapport au-delà de 300 OT, et une liste pas encore lue donnait un PDF vide annoncé réussi.
+  const [isExporting, setIsExporting] = useState(false);
+  const exportingRef = useRef(false);
 
   const handleAddWorkOrder = () => {
     setLocation("/maintenance/work-orders/new");
   };
 
   const handleExport = async () => {
+    // Un second clic pendant la lecture lancerait un second export (l'état ne change qu'au rendu suivant).
+    if (exportingRef.current) return;
+    exportingRef.current = true;
+    setIsExporting(true);
     try {
-      const workOrdersData = allWorkOrders?.workOrders || [];
-      await exportWorkOrdersToPDF(workOrdersData);
+      const workOrders = await fetchAllWorkOrders();
+      if (workOrders.length === 0) {
+        toast({ title: "Aucun ordre de travail à exporter", description: "Le rapport n'a pas été généré." });
+        return;
+      }
+      await exportWorkOrdersToPDF(workOrders);
       toast({ title: "Export réussi", description: "Le rapport des ordres de travail a été téléchargé." });
-    } catch {
-      toast({ title: "Erreur d'export", description: "Une erreur est survenue lors de l'export.", variant: "destructive" });
+    } catch (error) {
+      clientLogger.error("Export PDF des ordres de travail non généré", reportErrorContext(error));
+      toast({
+        title: "Erreur d'export",
+        description: userMessageOf(error, "Une erreur est survenue lors de l'export."),
+        variant: "destructive",
+      });
+    } finally {
+      exportingRef.current = false;
+      setIsExporting(false);
     }
   };
 
@@ -78,8 +97,8 @@ export default function WorkOrdersIndex() {
                 <SelectItem value="year">Cette année</SelectItem>
               </SelectContent>
             </Select>
-            <Button variant="outline" size="sm" onClick={handleExport} className="gap-2 h-8 text-xs">
-              <Download className="h-3.5 w-3.5" />
+            <Button variant="outline" size="sm" onClick={handleExport} disabled={isExporting} className="gap-2 h-8 text-xs">
+              {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
               Export PDF
             </Button>
             <Button size="sm" onClick={handleAddWorkOrder} className="gap-2 h-8 text-xs" data-help-target="wo-new">

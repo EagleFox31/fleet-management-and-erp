@@ -10,6 +10,7 @@ import type {
   TireRequiredActionsJson as TireRequiredActions,
   TireStatisticsAdvancedJson as TireStatisticsAdvanced,
 } from "@shared/contracts/tire-statistics-advanced";
+import { parseStatNumber } from "@/lib/stat-number";
 import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 
 export type ActionLists = { [K in keyof TireRequiredActions]: TireRequiredActions[K] | null };
@@ -24,14 +25,8 @@ export interface TireStatisticsView {
   requiredActions: ActionLists;
 }
 
-const NUMERIC_TEXT = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
-
-export function parseStatNumber(value: unknown): number | null {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value !== "string") return null;
-  const text = value.trim();
-  return NUMERIC_TEXT.test(text) ? Number(text) : null;
-}
+// Générique, partagé avec d'autres écrans : ré-exporté pour les importeurs existants.
+export { parseStatNumber };
 
 function listOrNull<T>(value: T[] | undefined): T[] | null {
   return Array.isArray(value) ? value : null;
