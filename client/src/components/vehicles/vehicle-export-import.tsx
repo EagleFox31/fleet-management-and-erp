@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { useQuery } from '@tanstack/react-query';
 import { vehiclesToExcel, excelToVehicles, downloadExcel } from '@/lib/excel-utils';
 import { queryClient } from '@/lib/queryClient';
+import { defaultFetch, fetchAllVehicles, reportErrorContext } from '@/lib/fetch-all-pages';
+import { userMessageOf } from '@/lib/api-error';
+import { clientLogger } from '@/lib/logger';
 import { Vehicle, InsertVehicle } from '@shared/schema';
-import { Download, Upload, FileText, CheckCircle, AlertCircle, FileDown } from 'lucide-react';
+import { Download, Upload, FileText, CheckCircle, AlertCircle, FileDown, Loader2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -23,19 +25,38 @@ export function VehicleExportButton() {
   const { toast } = useToast();
   const { showError } = useErrorHandler();
 
-  // Récupérer tous les véhicules pour l'export
-  const { data, isLoading } = useQuery<any>({
-    queryKey: ['/api/vehicles'],
-    staleTime: 1000 * 60 * 5, // 5 minutes
-    refetchOnWindowFocus: false,
-  });
-  
-  // Extraire les véhicules à partir de la réponse (structure { vehicles: Vehicle[], total: number })
-  const vehicles = data?.vehicles || [];
+  // Flotte complète lue au clic (toutes les pages). L'ancienne lecture `['/api/vehicles']` sans
+  // `limit` rendait 10 véhicules : l'export s'arrêtait aux 10 plus récents en annonçant un succès,
+  // et une lecture en échec devenait « Aucun véhicule à exporter ».
+  const [isExporting, setIsExporting] = useState(false);
+  const exportingRef = useRef(false);
 
   const handleExport = async () => {
+    // Un second clic pendant la lecture lancerait un second export (l'état ne change qu'au rendu suivant).
+    if (exportingRef.current) return;
+    exportingRef.current = true;
+    setIsExporting(true);
+    let vehicles: Vehicle[];
+    try {
+      vehicles = await fetchAllVehicles<Vehicle>(defaultFetch, {
+        unreadable: "Les véhicules n'ont pas pu être lus en entier : l'export n'a pas été généré. Réessayez.",
+        tooMany: (total, limit) => `Trop de véhicules pour un seul export (${total}, limite ${limit}).`,
+      });
+    } catch (error) {
+      clientLogger.error("Export Excel des véhicules non généré", reportErrorContext(error));
+      toast({
+        title: "Erreur d'export",
+        description: userMessageOf(error, "Les véhicules n'ont pas pu être lus. Réessayez."),
+        variant: "destructive",
+      });
+      exportingRef.current = false;
+      setIsExporting(false);
+      return;
+    }
+    exportingRef.current = false;
+    setIsExporting(false);
     // Si nous avons des véhicules dans la base de données, les exporter normalement
-    if (vehicles && vehicles.length > 0) {
+    if (vehicles.length > 0) {
       try {
         const excelData = vehiclesToExcel(vehicles);
         downloadExcel(excelData, `export_vehicules_${new Date().toLocaleDateString('fr-FR').replace(/\//g, '-')}.xlsx`);
@@ -72,10 +93,10 @@ export function VehicleExportButton() {
       variant="outline" 
       size="sm" 
       className="mr-2" 
-      onClick={handleExport} 
-      disabled={isLoading}
+      onClick={handleExport}
+      disabled={isExporting}
     >
-      <Download className="mr-2 h-4 w-4" />
+      {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
       Exporter
     </Button>
   );

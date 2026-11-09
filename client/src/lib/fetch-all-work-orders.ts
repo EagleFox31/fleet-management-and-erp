@@ -16,15 +16,18 @@ export const WORK_ORDERS_MAX_PAGES = REPORT_MAX_PAGES;
 
 export function fetchAllWorkOrders<T = any>(
   fetchFn: FetchLike = defaultFetch,
-  { pageSize = WORK_ORDERS_PAGE_SIZE, maxPages = WORK_ORDERS_MAX_PAGES } = {},
-): Promise<T[]> {
-  return fetchAllPages<T>(fetchFn, {
-    path: "/api/work-orders",
-    listKey: "workOrders",
-    pageSize,
-    maxPages,
-    unreadable: "Les ordres de travail n'ont pas pu être lus en entier : le rapport n'a pas été généré. Réessayez.",
-    tooMany: (total, limit) =>
+  {
+    pageSize = WORK_ORDERS_PAGE_SIZE,
+    maxPages = WORK_ORDERS_MAX_PAGES,
+    unreadable = "Les ordres de travail n'ont pas pu être lus en entier : le rapport n'a pas été généré. Réessayez.",
+    tooMany = (total: string, limit: string) =>
       `Trop d'ordres de travail pour un seul rapport (${total}, limite ${limit}) : le rapport n'a pas été généré.`,
-  });
+  }: {
+    pageSize?: number;
+    maxPages?: number;
+    unreadable?: string;
+    tooMany?: (total: string, limit: string) => string;
+  } = {},
+): Promise<T[]> {
+  return fetchAllPages<T>(fetchFn, { path: "/api/work-orders", listKey: "workOrders", pageSize, maxPages, unreadable, tooMany });
 }
