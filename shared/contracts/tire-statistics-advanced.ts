@@ -7,8 +7,7 @@
  * aucun pneu (repli `|| 0`).
  */
 import type { Tire } from "../schema";
-
-export const TIRE_STATISTICS_ADVANCED_PATH = "/api/tires/statistics-advanced";
+import type { Serialized } from "./serialized";
 
 /** Inspection active sous 3 mm de profondeur de bande. */
 export interface CriticalWearInspection {
@@ -68,3 +67,7 @@ export interface TireStatisticsAdvanced {
   lowStockCount: number;
   requiredActions: TireRequiredActions;
 }
+
+/** Réponse HTTP lue par le client : `tire.createdAt`, `updatedAt`, `deletedAt` en texte ISO. */
+export type TireStatisticsAdvancedJson = Serialized<TireStatisticsAdvanced>;
+export type TireRequiredActionsJson = Serialized<TireRequiredActions>;
