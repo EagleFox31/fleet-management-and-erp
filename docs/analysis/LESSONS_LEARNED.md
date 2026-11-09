@@ -3458,3 +3458,26 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - Ces 7 cas sont gelés par fichier, en cliquet : le compte ne peut que baisser, et une entrée corrigée doit sortir de la liste. Il s'agit de l'export PDF de l'inventaire, des interventions, des alertes par date, de la liste des OT de maintenance, du sélecteur de pièces de l'OT et du dialogue de montage pneu.
   - `tests/unit/client/fetch-all-pages.test.ts` couvre le doublon, le total qui change, la page vide, la borne, le statut HTTP gardé dans `detail` et l'absence de détail technique dans le message.
 - **Leçon généralisée** : une liste paginée ne se lit jamais en une page présentée comme le tout. Soit l'écran pagine, soit la lecture va jusqu'à `total` et refuse quand elle ne l'atteint pas. Un correctif local ne suffit pas pour un motif : il faut chercher les autres occurrences dans tout le code et poser une garde qui les compte.
+
+## 2026-11-09 — CI : port hôte fixe d'un service déjà pris sur la VM, le job meurt avant les tests (récidive)
+
+- **Contexte** : deux runs CI rouges en moins de 20 minutes, sans aucun test exécuté :
+  - run 42636230900 (#609), job `contract (2)`, 14:36 UTC ;
+  - run 42638967437 (#609), job `contract (3)`, 14:53 UTC.
+  Les deux échouent à l'étape « Initialize containers » : `failed to bind host port 0.0.0.0:54320/tcp: address already in use`. Les runners sont ceux hébergés par GitHub (`ubuntu-latest`), pas une machine locale.
+- **Cause racine** :
+  - `ci.yml` publiait les services de test sur des ports hôte fixes (`54320:5432` pour Postgres, `5433:80` pour wsproxy) dans les jobs `integration` et `contract`. Le port 54320 venait du docker-compose local, où il est voulu.
+  - Sur une VM partagée, rien ne garantit qu'un port fixe soit libre. Quand il est pris, Docker refuse de démarrer le service et le job tombe avant son premier test.
+  - Le rouge ne dit rien du code, mais il bloque la file de fusion.
+- **Classification** : défaut d'infrastructure de CI, récidive le même jour. Faux rouge, non lié au code testé.
+- **Résolution** :
+  - services en port hôte dynamique (`- 5432`, `- 80`) ;
+  - adresses construites par étape avec le port attribué : `DATABASE_URL` du schéma Drizzle avec `job.services.postgres.ports['5432']`, `DATABASE_WS_PROXY` avec `job.services.wsproxy.ports['80']`. Le contexte `job` n'existe qu'au niveau des étapes ;
+  - le schéma passe par `npx drizzle-kit push --force`, la même commande que `npm run test:db:schema` sans le port codé en dur ;
+  - le docker-compose local et `test:db:schema` gardent 54320 ;
+  - pas de relance pour débloquer : un échec répété appelle un contrôle plus fort.
+- **Prévention vérifiée** : `tests/unit/ci-service-ports-hygiene.test.ts`.
+  - Il échoue sur tout mappage de port hôte fixe (`NNNN:NNNN`, avec ou sans IP ni guillemets) dans `.github/workflows/*.yml`.
+  - Rejoué sur le `ci.yml` de main (31802e64), il est rouge sur les 4 lignes `54320:5432` et `5433:80`. Il est vert après correction.
+  - Preuve de bout en bout : un run vert sur toutes les shards `contract` et sur `integration`.
+- **Leçon généralisée** : un service de CI ne réserve jamais un port hôte fixe. On laisse Docker choisir et on lit le port attribué. Un faux rouge d'infrastructure qui revient se corrige à la source, avec une garde ; une relance ne fait que le masquer.
