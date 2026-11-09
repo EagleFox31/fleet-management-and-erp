@@ -145,6 +145,15 @@ describe("rapport PDF des coûts de maintenance", () => {
     expect(report).not.toMatch(/fetch\(['"`]\/api\/work-orders['"`]\)/);
   });
 
+  it("véhicules ou utilisateurs illisibles : refus, pas des lignes « N/A »", () => {
+    expect(report).toMatch(/if \(!Array\.isArray\(vehiclesData\?\.vehicles\)\) \{\s*throw new ReportRefusedError/);
+    expect(report).toMatch(/if \(!Array\.isArray\(users\)\) \{\s*throw new ReportRefusedError/);
+  });
+
+  it("plus de lecture de /api/parts/used, qui ne nourrissait aucun calcul", () => {
+    expect(report).not.toMatch(/\/api\/parts\/used/);
+  });
+
   it("un refus de rapport garde son message lisible", () => {
     expect(report).toMatch(/if \(error instanceof ReportRefusedError\) throw error;/);
   });
