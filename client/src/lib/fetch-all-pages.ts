@@ -9,12 +9,30 @@
  * ou volume au-delà de la borne.
  */
 
-/** Refus de rapport : le message est destiné à l'utilisateur. */
+/** Pourquoi la lecture a été refusée : pour les logs, jamais affiché. */
+export interface ReportRefusalDetail {
+  path: string;
+  reason: "http" | "shape" | "total-changed" | "missing-id" | "incomplete" | "too-many";
+  /** Statut HTTP de la réponse en échec (`reason: "http"`). */
+  status?: number;
+  offset?: number;
+  total?: number;
+  received?: number;
+}
+
+/** Refus de rapport : le message est destiné à l'utilisateur, `detail` aux logs. */
 export class ReportRefusedError extends Error {
-  constructor(message: string) {
+  readonly detail?: ReportRefusalDetail;
+  constructor(message: string, detail?: ReportRefusalDetail) {
     super(message);
     this.name = "ReportRefusedError";
+    this.detail = detail;
   }
+}
+
+/** Contexte de log d'un échec de rapport : l'erreur, et le détail du refus s'il y en a un. */
+export function reportErrorContext(error: unknown): Record<string, unknown> {
+  return error instanceof ReportRefusedError && error.detail ? { err: error, refusal: error.detail } : { err: error };
 }
 
 export type FetchLike = (url: string) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
@@ -49,32 +67,41 @@ export async function fetchAllPages<T = any>(
   let total: number | null = null;
 
   for (let page = 0; page < maxPages; page++) {
-    const response = await fetchFn(`${path}${separator}limit=${pageSize}&offset=${page * pageSize}`);
-    if (!response.ok) throw new ReportRefusedError(unreadable);
+    const offset = page * pageSize;
+    const response = await fetchFn(`${path}${separator}limit=${pageSize}&offset=${offset}`);
+    if (!response.ok) throw new ReportRefusedError(unreadable, { path, reason: "http", status: response.status, offset });
     const body = (await response.json()) as Record<string, unknown> | null;
     const list = body?.[listKey];
     if (!body || !Array.isArray(list) || typeof body.total !== "number") {
-      throw new ReportRefusedError(unreadable);
+      throw new ReportRefusedError(unreadable, { path, reason: "shape", offset });
     }
     if (total === null) {
       total = body.total;
       if (total > limit) {
-        throw new ReportRefusedError(tooMany(total.toLocaleString("fr-FR"), limit.toLocaleString("fr-FR")));
+        throw new ReportRefusedError(tooMany(total.toLocaleString("fr-FR"), limit.toLocaleString("fr-FR")), {
+          path,
+          reason: "too-many",
+          total,
+        });
       }
     } else if (body.total !== total) {
       // Ligne créée ou supprimée pendant la lecture : les pages ne décrivent plus la même liste.
-      throw new ReportRefusedError(unreadable);
+      throw new ReportRefusedError(unreadable, { path, reason: "total-changed", offset, total, received: body.total });
     }
     for (const item of list as T[]) {
       const id = (item as { id?: unknown } | null)?.id;
-      if (id === undefined || id === null) throw new ReportRefusedError(unreadable);
+      if (id === undefined || id === null) {
+        throw new ReportRefusedError(unreadable, { path, reason: "missing-id", offset });
+      }
       byId.set(id, item);
     }
     if ((page + 1) * pageSize >= total || list.length === 0) break;
   }
 
   // Page vide avant `total`, élément répété ou sauté : liste incomplète.
-  if (total === null || byId.size !== total) throw new ReportRefusedError(unreadable);
+  if (total === null || byId.size !== total) {
+    throw new ReportRefusedError(unreadable, { path, reason: "incomplete", total: total ?? undefined, received: byId.size });
+  }
   return [...byId.values()];
 }
 
@@ -102,9 +129,10 @@ export function fetchAllVehicles<T = any>(
  */
 export async function fetchFuelRecords<T = any>(fetchFn: FetchLike = defaultFetch): Promise<T[]> {
   const unreadable = "Les pleins de carburant n'ont pas pu être lus : le rapport n'a pas été généré. Réessayez.";
-  const response = await fetchFn("/api/fuel-records");
-  if (!response.ok) throw new ReportRefusedError(unreadable);
+  const path = "/api/fuel-records";
+  const response = await fetchFn(path);
+  if (!response.ok) throw new ReportRefusedError(unreadable, { path, reason: "http", status: response.status });
   const body = await response.json();
-  if (!Array.isArray(body)) throw new ReportRefusedError(unreadable);
+  if (!Array.isArray(body)) throw new ReportRefusedError(unreadable, { path, reason: "shape" });
   return body as T[];
 }

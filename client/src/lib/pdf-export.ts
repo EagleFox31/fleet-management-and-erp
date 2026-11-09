@@ -2,7 +2,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import headerImage from '@assets/TAY-header-final.png';
 import { fetchAllWorkOrders, ReportRefusedError } from '@/lib/fetch-all-work-orders';
-import { fetchAllVehicles, fetchFuelRecords } from '@/lib/fetch-all-pages';
+import { fetchAllVehicles, fetchFuelRecords, reportErrorContext } from '@/lib/fetch-all-pages';
 import { clientLogger } from '@/lib/logger';
 
 // Configuration de l'en-tête officiel
@@ -584,7 +584,7 @@ export async function exportVehicleUsageReport(startDate: Date, endDate: Date) {
     doc.save(`rapport_utilisation_vehicules_${new Date().toISOString().split('T')[0]}.pdf`);
     return true;
   } catch (error) {
-    clientLogger.error("Rapport d'utilisation des véhicules en échec", { err: error });
+    clientLogger.error("Rapport d'utilisation des véhicules en échec", reportErrorContext(error));
     if (error instanceof ReportRefusedError) throw error;
     throw new Error('Erreur lors de la génération du rapport d\'utilisation des véhicules');
   }
@@ -709,7 +709,7 @@ export async function exportMaintenanceCostReport(startDate: Date, endDate: Date
     doc.save(`rapport_couts_maintenance_${new Date().toISOString().split('T')[0]}.pdf`);
     return true;
   } catch (error) {
-    clientLogger.error("Rapport des coûts de maintenance en échec", { err: error });
+    clientLogger.error("Rapport des coûts de maintenance en échec", reportErrorContext(error));
     if (error instanceof ReportRefusedError) throw error;
     throw new Error('Erreur lors de la génération du rapport des coûts de maintenance');
   }
@@ -802,7 +802,7 @@ export async function exportFuelConsumptionReport(startDate: Date, endDate: Date
     doc.save(`rapport_consommation_carburant_${new Date().toISOString().split('T')[0]}.pdf`);
     return true;
   } catch (error) {
-    clientLogger.error("Rapport de consommation de carburant en échec", { err: error });
+    clientLogger.error("Rapport de consommation de carburant en échec", reportErrorContext(error));
     if (error instanceof ReportRefusedError) throw error;
     throw new Error('Erreur lors de la génération du rapport de consommation de carburant');
   }

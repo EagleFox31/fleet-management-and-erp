@@ -171,7 +171,12 @@ describe("rapport PDF des coûts de maintenance", () => {
 
 describe("rapports PDF : véhicules lus en entier, logs migrés", () => {
   const src = read("client/src/lib/pdf-export.ts");
-  const section = (start: string, end: string) => src.slice(src.indexOf(start), src.indexOf(end));
+  const section = (start: string, end: string) => {
+    // Repère absent : indexOf rend -1 et la section courrait jusqu'à la fin du fichier.
+    expect(src.indexOf(start)).toBeGreaterThanOrEqual(0);
+    expect(src.indexOf(end)).toBeGreaterThan(src.indexOf(start));
+    return src.slice(src.indexOf(start), src.indexOf(end));
+  };
 
   it("aucun console.* : tout passe par clientLogger", () => {
     expect(src).not.toMatch(/\bconsole\./);
@@ -191,9 +196,11 @@ describe("rapports PDF : véhicules lus en entier, logs migrés", () => {
 
   it.each([
     ["utilisation", "export async function exportVehicleUsageReport", "export async function exportMaintenanceCostReport"],
-    ["carburant", "export async function exportFuelConsumptionReport", "export async function exportInventoryReport"],
-  ])("rapport %s : un refus garde son message lisible", (_, start, end) => {
+    ["carburant", "export async function exportFuelConsumptionReport", "export async function exportPartsInventoryReport"],
+    ["coûts", "export async function exportMaintenanceCostReport", "export async function exportFuelConsumptionReport"],
+  ])("rapport %s : un refus garde son message lisible, son détail est journalisé", (_, start, end) => {
     expect(section(start, end)).toMatch(/if \(error instanceof ReportRefusedError\) throw error;/);
+    expect(section(start, end)).toMatch(/clientLogger\.error\([^)]*, reportErrorContext\(error\)\);/);
   });
 });
 

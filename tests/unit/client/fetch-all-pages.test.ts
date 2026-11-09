@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { fetchAllPages, fetchAllVehicles, fetchFuelRecords, ReportRefusedError } from "@/lib/fetch-all-pages";
+import {
+  fetchAllPages,
+  fetchAllVehicles,
+  fetchFuelRecords,
+  ReportRefusedError,
+  reportErrorContext,
+} from "@/lib/fetch-all-pages";
 import { userMessageOf } from "@/lib/api-error";
 
 /**
@@ -37,6 +43,10 @@ describe("lecture complète des véhicules pour un rapport", () => {
     const error = await fetchAllVehicles(fetchFn).catch((e) => e);
     expect(error).toBeInstanceOf(ReportRefusedError);
     expect(userMessageOf(error, "repli")).toMatch(/Les véhicules n'ont pas pu être lus en entier/);
+    // Statut HTTP gardé pour les logs (`reportErrorContext`), jamais dans le message affiché.
+    expect(error.detail).toEqual({ path: "/api/vehicles", reason: "http", status: 500, offset: 1000 });
+    expect(reportErrorContext(error)).toEqual({ err: error, refusal: error.detail });
+    expect(userMessageOf(error, "repli")).not.toMatch(/500/);
   });
 
   it("véhicule répété d'une page à l'autre : refus", async () => {
@@ -46,7 +56,9 @@ describe("lecture complète des véhicules pour un rapport", () => {
       const page = offset === 0 ? all.slice(0, 1000) : [all[999], ...all.slice(1001)];
       return { ok: true, status: 200, json: async () => ({ vehicles: page, total: 1500 }) };
     };
-    await expect(fetchAllVehicles(fetchFn)).rejects.toBeInstanceOf(ReportRefusedError);
+    const error = await fetchAllVehicles(fetchFn).catch((e) => e);
+    expect(error).toBeInstanceOf(ReportRefusedError);
+    expect(error.detail).toMatchObject({ reason: "incomplete", total: 1500, received: 1499 });
   });
 
   it("total qui change en cours de lecture : refus", async () => {
@@ -93,6 +105,13 @@ describe("pleins de carburant pour un rapport", () => {
       expect(error).toBeInstanceOf(ReportRefusedError);
       expect(userMessageOf(error, "repli")).toMatch(/Les pleins de carburant n'ont pas pu être lus/);
     }
+    const error = await fetchFuelRecords(failed).catch((e) => e);
+    expect(error.detail).toEqual({ path: "/api/fuel-records", reason: "http", status: 500 });
+  });
+
+  it("autre erreur qu'un refus : seule l'erreur est journalisée", () => {
+    const error = new Error("x");
+    expect(reportErrorContext(error)).toEqual({ err: error });
   });
 });
 
