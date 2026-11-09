@@ -40,6 +40,8 @@ import {
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { cn, formatPrice } from "@/lib/utils";
 import { useFuelCard } from "@/hooks/useFuelCard";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
+import { userMessageOf } from "@/lib/api-error";
 import { differenceInCalendarDays, startOfDay, format } from "date-fns";
 import { fr } from "date-fns/locale";
 
@@ -185,6 +187,8 @@ export default function LogisticsDashboard() {
   const totalFuelConsumed = Number(fuelCard.balance.data?.totalDebits || 0);
   const totalFuelRecharged = Number(fuelCard.balance.data?.totalCredits || 0);
   const totalFuelLiters = Number(fuelStats?.totalFuel || 0);
+  const fuelCardFailed = fuelCard.balance.failed;
+  const fuelCardFailedText = userMessageOf(fuelCard.balance.error, "Le solde de la carte carburant est momentanément indisponible.");
 
   // ── Derived: fleet ──
   const fleetOperational = Number.parseInt(fleetStats?.operational || "0", 10) || 0;
@@ -272,15 +276,19 @@ export default function LogisticsDashboard() {
                 data-testid="logistics-kpi-balance"
                 label="Solde carte carburant"
                 featured // a zero, les camions s'arretent
-                value={formatPrice(fuelBalanceAmount)}
-                subValue={`${Math.round(fuelCard.balance.data?.fuelBalance || 0)} L disponibles`}
+                value={fuelCardFailed ? UNAVAILABLE : formatPrice(fuelBalanceAmount)}
+                subValue={
+                  fuelCardFailed
+                    ? fuelCardFailedText
+                    : `${Math.round(fuelCard.balance.data?.fuelBalance || 0)} L disponibles`
+                }
                 icon={<Fuel className="h-4 w-4" />}
                 iconWrapperClassName="bg-blue-50 text-blue-600"
               />
               <KpiTile
                 data-testid="logistics-kpi-consumption"
                 label="Total consommé"
-                value={formatPrice(totalFuelConsumed)}
+                value={fuelCardFailed ? UNAVAILABLE : formatPrice(totalFuelConsumed)}
                 subValue="Ce mois"
                 icon={<TrendingDown className="h-4 w-4" />}
                 iconWrapperClassName="bg-red-50 text-red-600"
@@ -288,7 +296,7 @@ export default function LogisticsDashboard() {
               <KpiTile
                 data-testid="logistics-kpi-recharge"
                 label="Total rechargé"
-                value={formatPrice(totalFuelRecharged)}
+                value={fuelCardFailed ? UNAVAILABLE : formatPrice(totalFuelRecharged)}
                 subValue="Total des recharges"
                 icon={<TrendingUp className="h-4 w-4" />}
                 iconWrapperClassName="bg-green-50 text-green-600"
@@ -790,16 +798,18 @@ export default function LogisticsDashboard() {
                   id: "balance",
                   testId: "logistics-kpi-balance",
                   label: "Solde carte",
-                  value: formatPrice(fuelBalanceAmount),
-                  tone: fuelBalanceAmount > 0 ? "info" : "warning",
+                  value: fuelCardFailed ? UNAVAILABLE : formatPrice(fuelBalanceAmount),
+                  tone: fuelCardFailed ? "neutral" : fuelBalanceAmount > 0 ? "info" : "warning",
                   icon: <Fuel className="h-4 w-4" />,
-                  detail: `${Math.round(fuelCard.balance.data?.fuelBalance || 0)} L disponibles`,
+                  detail: fuelCardFailed
+                    ? fuelCardFailedText
+                    : `${Math.round(fuelCard.balance.data?.fuelBalance || 0)} L disponibles`,
                 },
                 {
                   id: "consumed",
                   testId: "logistics-kpi-consumption",
                   label: "Total consommé",
-                  value: formatPrice(totalFuelConsumed),
+                  value: fuelCardFailed ? UNAVAILABLE : formatPrice(totalFuelConsumed),
                   tone: "neutral",
                   icon: <TrendingDown className="h-4 w-4" />,
                   detail: "Ce mois",
@@ -808,7 +818,7 @@ export default function LogisticsDashboard() {
                   id: "recharged",
                   testId: "logistics-kpi-recharge",
                   label: "Total rechargé",
-                  value: formatPrice(totalFuelRecharged),
+                  value: fuelCardFailed ? UNAVAILABLE : formatPrice(totalFuelRecharged),
                   tone: "success",
                   icon: <TrendingUp className="h-4 w-4" />,
                   detail: "Total des recharges",
@@ -865,7 +875,9 @@ export default function LogisticsDashboard() {
                   <div className="flex items-center justify-between py-1.5 border-b border-gray-50">
                     <span className="text-sm text-gray-500">Prix moyen / litre</span>
                     <span className="text-sm font-semibold text-gray-800">
-                      {fuelCard.balance.data?.averagePricePerLiter
+                      {fuelCardFailed
+                        ? UNAVAILABLE
+                        : fuelCard.balance.data?.averagePricePerLiter
                         ? `${formatPrice(fuelCard.balance.data.averagePricePerLiter)}/L`
                         : "—"}
                     </span>
@@ -873,7 +885,9 @@ export default function LogisticsDashboard() {
                   <div className="flex items-center justify-between py-1.5">
                     <span className="text-sm text-gray-500">Solde en litres</span>
                     <span className="text-sm font-semibold text-gray-800">
-                      {fuelCard.balance.data?.fuelBalance
+                      {fuelCardFailed
+                        ? UNAVAILABLE
+                        : fuelCard.balance.data?.fuelBalance
                         ? `${Math.round(fuelCard.balance.data.fuelBalance)} L`
                         : "0 L"}
                     </span>

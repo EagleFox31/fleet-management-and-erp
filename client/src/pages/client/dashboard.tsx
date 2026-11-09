@@ -9,6 +9,8 @@ import { TabIcon } from "@/lib/premium-tab-icons";
 import { formatPrice } from "@/lib/utils";
 import { useFuelCard } from "@/hooks/useFuelCard";
 import { useAuth } from "@/hooks/useAuth";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
+import { userMessageOf } from "@/lib/api-error";
 
 export default function ClientDashboard() {
   const { user } = useAuth();
@@ -51,8 +53,12 @@ export default function ClientDashboard() {
             <KpiTile
               data-testid="client-kpi-fuel"
               label="Dépense carburant"
-              value={formatPrice(totalDebits)}
-              subValue="Total consommé ce mois"
+              value={fuelCard.balance.failed ? UNAVAILABLE : formatPrice(totalDebits)}
+              subValue={
+                fuelCard.balance.failed
+                  ? userMessageOf(fuelCard.balance.error, "Le solde de la carte carburant est momentanément indisponible.")
+                  : "Total consommé ce mois"
+              }
               icon={<Fuel className="h-4 w-4" />}
               iconWrapperClassName="bg-red-50 text-red-600"
             />

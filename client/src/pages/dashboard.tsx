@@ -72,6 +72,7 @@ export default function Dashboard() {
   const stockValueFailed = warehouse.inventoryValue.failed;
   const reorderFailed = warehouse.reorderAlerts.failed;
   const fuelBalanceAmount = Number(fuelCard.balance.data?.balance || 0);
+  const fuelCardFailed = fuelCard.balance.failed;
 
   const periodLabel =
     period === "week"
@@ -190,8 +191,12 @@ export default function Dashboard() {
           <KpiTile
             data-testid="kpi-fuel-balance"
             label="Solde carte carburant"
-            value={formatPrice(fuelBalanceAmount)}
-            subValue={`Consommé: ${formatPrice(fuelCard.balance.data?.totalDebits || 0)}`}
+            value={fuelCardFailed ? UNAVAILABLE : formatPrice(fuelBalanceAmount)}
+            subValue={
+              fuelCardFailed
+                ? userMessageOf(fuelCard.balance.error, "Le solde de la carte carburant est momentanément indisponible.")
+                : `Consommé: ${formatPrice(fuelCard.balance.data?.totalDebits || 0)}`
+            }
             icon={<CreditCard className="h-4 w-4" />}
             iconWrapperClassName="bg-blue-50 text-blue-600"
           />
