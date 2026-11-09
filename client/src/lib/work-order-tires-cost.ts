@@ -1,5 +1,8 @@
 import { computeWorkOrderCost, type WorkOrderCost, type WorkOrderCostInput } from "@shared/work-order-cost";
-import { queryView, type QueryStatus, type QueryView } from "@/lib/query-view";
+import { listQueryView } from "@/lib/query-view";
+
+/** Déplacé dans `@/lib/query-view` ; ré-exporté pour les importeurs existants. */
+export { listQueryView };
 
 export type WorkOrderDisplayCost = Omit<WorkOrderCost, "partsCost" | "tiresCost" | "totalCost"> & {
   /** `null` tant que les pièces de l'OT n'ont jamais été lues : inconnu, pas zéro. */
@@ -9,18 +12,6 @@ export type WorkOrderDisplayCost = Omit<WorkOrderCost, "partsCost" | "tiresCost"
   /** `null` dès que le coût pièces ou pneus est inconnu : un total sans eux serait sous-évalué. */
   totalCost: number | null;
 };
-
-/**
- * `queryView` pour une liste : une réponse 200 qui n'est pas une liste est une erreur
- * (sinon l'écran resterait sur « Chargement… » sans fin). L'erreur vaut `null` :
- * `userMessageOf` affiche alors le message de repli.
- */
-export function listQueryView<T>(query: QueryStatus<unknown>): QueryView<T[]> {
-  if (query.data !== undefined && !Array.isArray(query.data)) {
-    return { kind: "error", error: null, isRetrying: query.isFetching };
-  }
-  return queryView(query as QueryStatus<T[]>);
-}
 
 /**
  * Coût d'OT pour l'écran et le PDF. Pièces ou rotations non lues (chargement, ou échec sans

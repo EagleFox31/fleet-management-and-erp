@@ -29,6 +29,8 @@ export function useFuelCard() {
       data: balanceQuery.data,
       isLoading: balanceQuery.isLoading,
       error: balanceQuery.error,
+      // Lecture en échec sans donnée : l'écran affiche « Indisponible », jamais 0.
+      failed: balanceQuery.data === undefined && !!balanceQuery.error,
       refetch: balanceQuery.refetch,
     },
     fullHistory: {
