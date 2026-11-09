@@ -58,16 +58,22 @@ describe("documentRenewals", () => {
 describe("clientTotals", () => {
   it("coût lu dans totalFuelCost, le champ servi par la route", () => {
     const list = [
-      { totalMissions: 2, totalRevenue: 1000, totalFuelCost: 400 },
-      { totalMissions: 1, totalRevenue: 500, totalFuelCost: 100 },
+      { totalMissions: 2, estimatedFuelCost: 1000, totalFuelCost: 400 },
+      { totalMissions: 1, estimatedFuelCost: 500, totalFuelCost: 100 },
     ];
     expect(clientTotals(list)).toEqual({ missions: 3, estimatedFuelCost: 1500, fuelCost: 500 });
   });
 
-  it("totalRevenue (somme des carburants estimés) n'est jamais exposé comme chiffre d'affaires", () => {
-    const totals = clientTotals([{ totalMissions: 1, totalRevenue: 700, totalFuelCost: 650 }]);
+  it("carburant estimé lu dans estimatedFuelCost, jamais dans le champ déprécié totalRevenue", () => {
+    const totals = clientTotals([{ totalMissions: 1, totalRevenue: 999, estimatedFuelCost: 700, totalFuelCost: 650 }]);
     expect(totals.estimatedFuelCost).toBe(700);
     expect(Object.keys(totals)).not.toContain("revenue");
+  });
+
+  it("carburant estimé masqué (Q19, null) : inconnu, pas 0 F", () => {
+    const totals = clientTotals([{ totalMissions: 1, totalRevenue: null, estimatedFuelCost: null, totalFuelCost: 650 }]);
+    expect(totals.estimatedFuelCost).toBeNull();
+    expect(totals.fuelCost).toBe(650);
   });
 
   it("liste illisible : tout inconnu, pas 0 F", () => {

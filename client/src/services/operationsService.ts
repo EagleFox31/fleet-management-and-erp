@@ -30,22 +30,27 @@ export interface MissionsByClientResponse {
   statistics: MissionStatistics;
 }
 
+/**
+ * Ligne de `GET /api/operations/stats/by-client`. `estimatedFuelCost` est la somme des carburants
+ * estimés des missions, pas un chiffre d'affaires ; null hors lecteurs du budget (Q19).
+ * `totalRevenue`, `margin` et `marginPercentage`, encore servis une version, sont dépréciés : ne pas les lire.
+ */
 export interface ClientSummary {
   clientName: string;
+  clientId?: number;
   totalMissions: number;
   totalFuelConsumed: number;
-  totalCost: number;
-  totalRevenue: number;
-  margin: number;
-  marginPercentage: number;
+  totalFuelCost: number;
+  estimatedFuelCost: number | null;
 }
 
+/** Ligne de `GET /api/operations/stats/by-destination` (liste). Même règle pour `estimatedFuelCost`. */
 export interface DestinationStats {
   destination: string;
   count: number;
   totalFuel: number;
-  totalCost: number;
-  totalRevenue: number;
+  totalFuelCost: number;
+  estimatedFuelCost: number | null;
 }
 
 export interface MissionCosts {
@@ -88,18 +93,13 @@ export interface ActiveMission {
 
 export const operationsService = {
   async getStatsByClient(): Promise<ClientSummary[]> {
+    // apiRequest lève déjà une ApiError lisible sur toute réponse >= 400.
     const response = await apiRequest("GET", "/api/operations/stats/by-client");
-    if (!response.ok) {
-      throw new Error("Failed to fetch stats by client");
-    }
     return await response.json();
   },
 
-  async getStatsByDestination(): Promise<Record<string, DestinationStats>> {
+  async getStatsByDestination(): Promise<DestinationStats[]> {
     const response = await apiRequest("GET", "/api/operations/stats/by-destination");
-    if (!response.ok) {
-      throw new Error("Failed to fetch stats by destination");
-    }
     return await response.json();
   },
 
