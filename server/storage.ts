@@ -1386,9 +1386,10 @@ export class DatabaseStorage implements IStorage {
       const filteredCountQuery = conditions.length > 0 ? countQuery.where(and(...conditions)) : countQuery;
       const [{ count: totalCount }] = await filteredCountQuery;
       
-      // Appliquer la pagination et l'ordre
+      // Appliquer la pagination et l'ordre. `id` départage les dates de création égales
+      // (import en masse) : sans lui, un OT peut revenir sur deux pages et un autre être sauté.
       const allWorkOrders = await filteredQuery
-        .orderBy(desc(workOrders.createdAt))
+        .orderBy(desc(workOrders.createdAt), desc(workOrders.id))
         .limit(limit || 50)
         .offset(offset || 0);
       
@@ -1508,9 +1509,10 @@ export class DatabaseStorage implements IStorage {
 
       const [{ count: totalCount }] = await countQuery.where(and(...conditions));
       
-      // Appliquer la pagination et l'ordre
+      // Appliquer la pagination et l'ordre. `id` départage les dates de création égales
+      // (import en masse) : sans lui, un OT peut revenir sur deux pages et un autre être sauté.
       const allWorkOrders = await filteredQuery
-        .orderBy(desc(workOrders.createdAt))
+        .orderBy(desc(workOrders.createdAt), desc(workOrders.id))
         .limit(limit || 50)
         .offset(offset || 0);
       

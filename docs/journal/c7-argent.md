@@ -150,3 +150,24 @@ Cette entrée remplace l'approche de l'entrée précédente, refusée en relectu
   - `tests/unit/client/technician-profile-stats.test.ts` : un OT terminé sans coût met tous les totaux à `null` ;
   - `tests/unit/client/technician-pages-query-errors.test.ts` : garde de branchement, rouge sur les trois pages de main (7a5ddefe), verte après ; cliquet sur les pages technicien qui lisent une requête sans traiter l'erreur (`fleet-status.tsx`, `vehicles.tsx` gelées).
 - **Mémoire** : `docs/analysis/LESSONS_LEARNED.md`, entrée du 2026-11-07, complétée avec la troisième occurrence et le contrôle renforcé.
+
+## 2026-11-08 23:31 — Statistiques avancées des pneus en une seule requête
+
+- **Quoi** :
+  - `getTireStatisticsAdvanced` envoie une seule requête SQL (sous-requêtes scalaires et `json_agg`) au lieu de 5 en parallèle, qui prenaient 5 places du pool par appel de `GET /api/tires/statistics-advanced` ;
+  - `server/lib/json-table-row.ts` (nouveau) : `jsonRowOf(table, alias)` agrège une ligne entière en JSON avec les colonnes texte du pilote (numeric, bigint, dates) castées en `::text`, et `rowFromJson` la décode avec le décodeur Drizzle de chaque colonne : même objet qu'un `select()` ;
+  - les actions requises sont calculées par une méthode pure (`buildRequiredActions`), même logique qu'avant ;
+  - l'erreur reste une `AppError(500, …, { cause })`. Contrat d'API inchangé (forme et types).
+- **Écart assumé** : l'ancien calcul rendait toujours vides les alertes « rotation dépassée / en approche » (colonne externe non qualifiée dans une sous-requête corrélée, voir LESSONS_LEARNED du 2026-11-08). Le nouveau calcul les rend justes.
+- **Pourquoi** : sous charge, les 5 requêtes saturaient le pool et la page /inventory/tires attendait jusqu'au plafond de connexion.
+- **Preuve automatisée** :
+  - `tests/integration/tire-statistics-advanced-sql.test.ts` (Postgres local) : ancien calcul copié tel quel identique hors rotations ; ancien calcul avec la seule référence qualifiée identique en tout (objets et JSON servi) ; une seule requête (`db.execute` une fois, `db.select` jamais) ;
+  - `tests/unit/server/correlated-subquery-hygiene.test.ts` : garde, rouge sur le service de main, verte après ;
+  - `tests/unit/server/tire-select-hygiene.test.ts` : `jsonRowOf(tires, …)` compte comme une lecture entière (prix d'achat) ; l'entrée gelée #6 est justifiée (route refusée au chauffeur). Sans l'extension du détecteur, la nouvelle lecture passait inaperçue (vu rouge) ;
+  - `tests/unit/server/tire-statistics-advanced-error.test.ts` : l'échec reste une AppError 5xx.
+- **RAIDER** :
+  - R : `jsonRowOf` / `rowFromJson` génériques (toute table de 50 colonnes au plus) ;
+  - D : résultat identique hors correction prouvée, contrat inchangé ;
+  - E : `AppError`, garde automatique, leçon consignée ;
+  - Reuse-first : aucun helper équivalent dans le dépôt ni dans Drizzle (pas de décodage public d'une ligne JSON) : Build, petit et testé ;
+  - A, I et le volet rétroactif sont sans objet (lecture seule, aucun schéma).
