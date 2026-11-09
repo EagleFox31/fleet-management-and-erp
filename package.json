@@ -17,6 +17,7 @@
     "backfill:procurement-auto-invoices": "tsx --env-file=.env scripts/backfill-procurement-auto-invoices.ts",
     "benchmark:management-dashboard": "tsx --env-file=.env scripts/benchmark-management-dashboard.ts",
     "test": "node ./node_modules/vitest/vitest.mjs run",
+    "journal:index": "tsx scripts/doc-fragments.ts index",
     "test:watch": "node ./node_modules/vitest/vitest.mjs",
     "test:integration": "node ./node_modules/vitest/vitest.mjs run --config vitest.integration.config.ts",
     "test:contract": "node ./node_modules/vitest/vitest.mjs run --config vitest.contract.config.ts",

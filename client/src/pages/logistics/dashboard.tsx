@@ -150,7 +150,7 @@ export default function LogisticsDashboard() {
     refetchIntervalInBackground: true,
   });
 
-  const { data: fuelStats } = useQuery<any>({
+  const { data: fuelStats, error: fuelStatsError } = useQuery<any>({
     queryKey: ["/api/fuel-records/statistics", { period: "month" }],
     staleTime: 0,
     refetchInterval: 15_000,
@@ -187,6 +187,8 @@ export default function LogisticsDashboard() {
   const totalFuelConsumed = Number(fuelCard.balance.data?.totalDebits || 0);
   const totalFuelRecharged = Number(fuelCard.balance.data?.totalCredits || 0);
   const totalFuelLiters = Number(fuelStats?.totalFuel || 0);
+  const fuelStatsFailed = fuelStats === undefined && !!fuelStatsError;
+  const fuelStatsFailedText = userMessageOf(fuelStatsError, "Les statistiques de carburant sont momentanément indisponibles.");
   const fuelCardFailed = fuelCard.balance.failed;
   const fuelCardFailedText = userMessageOf(fuelCard.balance.error, "Le solde de la carte carburant est momentanément indisponible.");
 
@@ -304,8 +306,8 @@ export default function LogisticsDashboard() {
               <KpiTile
                 data-testid="logistics-kpi-liters"
                 label="Volume consommé"
-                value={`${totalFuelLiters.toFixed(0)} L`}
-                subValue="Ce mois"
+                value={fuelStatsFailed ? UNAVAILABLE : `${totalFuelLiters.toFixed(0)} L`}
+                subValue={fuelStatsFailed ? fuelStatsFailedText : "Ce mois"}
                 icon={<Droplets className="h-4 w-4" />}
                 iconWrapperClassName="bg-orange-50 text-orange-600"
               />
@@ -827,10 +829,10 @@ export default function LogisticsDashboard() {
                   id: "liters",
                   testId: "logistics-kpi-liters",
                   label: "Volume consommé",
-                  value: `${totalFuelLiters.toFixed(0)} L`,
-                  tone: "warning",
+                  value: fuelStatsFailed ? UNAVAILABLE : `${totalFuelLiters.toFixed(0)} L`,
+                  tone: fuelStatsFailed ? "neutral" : "warning",
                   icon: <Droplets className="h-4 w-4" />,
-                  detail: "Ce mois",
+                  detail: fuelStatsFailed ? fuelStatsFailedText : "Ce mois",
                 },
               ]}
             />

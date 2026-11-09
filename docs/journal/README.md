@@ -16,7 +16,7 @@ Règle fixée par l'ADR 0001 §13 (`docs/adr/0001-lot-recette-2026-11-02.md`).
 | Produit | `pe.md` |
 | c7, métier argent | `c7-argent.md` |
 | c7, déploiement et exploitation | `c7-deploiement.md` |
-| Agent de test (session tests) | `docs/qa/JOURNAL_COUVERTURE.md` (son journal existant) |
+| Agent de test (session tests) | `docs/qa/journal/<AAAA-MM-JJTHHMM>-<slug>.md`, un fichier par entrée (voir son README) |
 
 Un agent n'écrit que dans son fichier, déjà créé avec son en-tête : il y ajoute ses entrées à
 partir du modèle ci-dessous. Le nom du fichier reprend le suffixe du worktree

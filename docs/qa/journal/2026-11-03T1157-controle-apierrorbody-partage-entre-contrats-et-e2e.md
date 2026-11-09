@@ -1,0 +1,8 @@
+## 2026-11-03 11:57 — Contrôle ApiErrorBody partagé entre contrats et e2e
+
+- **Quoi** : `TECHNICAL` et le contrôle du corps d'erreur vivent dans `tests/support/api-error.ts` (`apiErrorProblems`). Le contrat PRT1 (`parts-catalog-access-errors`) et la spec 13 l'importent. Leurs deux copies du filtre et de la fonction sont retirées.
+- **Comment** : la fonction ne dépend d'aucun framework. Elle renvoie la liste des écarts, et chaque appelant garde un `expect(...).toEqual([])` d'une ligne avec son propre `expect` (Vitest ou Playwright). Le code attendu par défaut est `codeForStatus`, un code explicite le remplace. Corps décodé ou texte brut ; un corps non JSON ou vide est signalé, il ne lève pas d'exception.
+- **Pourquoi** : les deux copies étaient identiques ; une troisième aurait pu diverger, comme les tables de libellés de statut (AGENTS.md §1). Rien à faire côté `playwright.config.ts` : `trace: "retain-on-failure"` y est déjà, ce qui garde la trace d'un échec rare comme DRV2-1 (rouge non reproduit en 3 passages complets de la spec 19).
+- **Preuves** : test unitaire `tests/unit/e2e/api-error-support.test.ts` (conforme, code par défaut ou explicite, statut, message vide, détail technique, corps non JSON ou absent) ; unit 1614/1614 ; tsc 0 ; contrat PRT1 14/14 sur le Postgres local `fleet_test`. Spec 13 non rejouée au navigateur : seul le corps de son assertion change, et le fichier compile.
+- **Piège** : sur la base partagée `fleet_test`, `cleanupOrphanTestRows` (`tests/support/cleanup.ts:193`) échoue sur `status_history_updated_by_id_users_id_fk` quand une autre session a laissé un historique de statut lié à un utilisateur de test. Le fichier est alors marqué en échec alors que ses 14 cas passent. À corriger à part.
+
