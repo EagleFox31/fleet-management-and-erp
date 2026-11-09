@@ -55,7 +55,7 @@ describe("tableau de bord secrétaire : une lecture en échec n'est pas un zéro
       "secretary-kpi-vehicles", "secretary-kpi-documents", "secretary-kpi-missions",
       "secretary-kpi-fuel-estimated", "secretary-kpi-costs", "secretary-kpi-invoices",
       "secretary-kpi-pending", "secretary-kpi-paid", "secretary-kpi-cpc-formed",
-      "secretary-kpi-cpc-to-form", "secretary-kpi-cpc-not-formed",
+      "secretary-kpi-cpc-to-form", "secretary-kpi-cpc-not-formed", "secretary-ops-kpi-missions",
     ];
     for (const id of tiles) {
       const at = src.indexOf(`data-testid="${id}"`);
@@ -63,6 +63,12 @@ describe("tableau de bord secrétaire : une lecture en échec n'est pas un zéro
       const tile = src.slice(at, src.indexOf("/>", at));
       expect(tile, id).toMatch(/value=\{statDisplay\(/);
     }
+  });
+
+  it("chaque data-testid est unique : un sélecteur e2e ne vise jamais deux tuiles", () => {
+    const ids = [...src.matchAll(/data-testid="([^"$]+)"/g)].map((m) => m[1]);
+    const duplicates = ids.filter((id, i) => ids.indexOf(id) !== i);
+    expect(duplicates).toEqual([]);
   });
 
   it("carburant estimé jamais présenté comme chiffre d'affaires, ni marge qui en découle", () => {

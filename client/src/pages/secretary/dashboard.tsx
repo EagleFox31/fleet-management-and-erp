@@ -259,7 +259,7 @@ export default function SecretaryDashboard() {
         <TabsContent value="operations" className="space-y-4">
           <KpiGrid columns={3}>
             <KpiTile
-              data-testid="secretary-kpi-missions"
+              data-testid="secretary-ops-kpi-missions"
               label="Missions totales"
               value={statDisplay(clientsView, totals.missions)}
               subValue="Toutes missions"
