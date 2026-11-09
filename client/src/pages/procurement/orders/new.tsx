@@ -22,6 +22,8 @@ import { cn, formatPrice } from "@/lib/utils";
 import { useFormDraft } from "@/hooks/use-form-draft";
 import { FormDraftBadge, FormDraftDiscardButton } from "@/components/form-draft/form-draft-indicator";
 import { purchaseOrderDraft } from "@/lib/form-drafts";
+import { queryView, readyData } from "@/lib/query-view";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 
 interface Supplier {
   id: number;
@@ -205,13 +207,20 @@ export default function NewPurchaseOrderPage() {
     enabled: !!selectedSupplier,
   });
 
-  const { data: allRequirements = [], isFetched: isAllRequirementsFetched, isLoading: allRequirementsLoading } = useQuery<PartRequirement[]>({
+  const allRequirementsQuery = useQuery<PartRequirement[]>({
     queryKey: ["/api/part-requirements"],
     // Forcer un rafraîchissement en arrivant sur la page,
     // sinon on peut garder un cache ancien sans la demande juste validée.
     staleTime: 0,
     refetchOnMount: "always",
   });
+  // Échec sans données : message et « Réessayer », jamais « Aucune demande approuvée ». Le
+  // préremplissage attend des demandes lues : sur un échec, il consommerait le contexte de l'URL
+  // sans demande et ne la reprendrait pas après « Réessayer ».
+  const allRequirementsView = queryView(allRequirementsQuery);
+  const allRequirements = readyData(allRequirementsView, [] as PartRequirement[]);
+  const isAllRequirementsFetched = allRequirementsView.kind === "ready";
+  const allRequirementsLoading = allRequirementsQuery.isLoading;
 
   const approvedRequirements = useMemo(
     () => allRequirements.filter((req) => req.status === "approved"),
@@ -920,7 +929,15 @@ export default function NewPurchaseOrderPage() {
                     Ce profil peut créer des commandes, mais ne convertit pas directement les demandes pièces atelier.
                   </div>
                 )}
-                {requirements.length === 0 ? (
+                {allRequirementsView.kind === "error" ? (
+                  <InlineQueryError
+                    error={allRequirementsView.error}
+                    fallback="Les demandes de pièces sont momentanément indisponibles."
+                    onRetry={() => void allRequirementsQuery.refetch()}
+                    isRetrying={allRequirementsView.isRetrying}
+                    data-testid="order-requirements-error"
+                  />
+                ) : requirements.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     {canSelectApprovedRequirements
                       ? "Aucune demande approuvée disponible pour ce fournisseur"

@@ -603,6 +603,10 @@ export async function exportMaintenanceCostReport(startDate: Date, endDate: Date
   try {
     // Récupérer les ordres de travail
     const workOrdersResponse = await fetch('/api/work-orders');
+    // Échec : pas de rapport plutôt qu'un rapport à « 0 intervention, 0 FCFA ».
+    if (!workOrdersResponse.ok) {
+      throw new Error(`Erreur API ordres de travail: ${workOrdersResponse.status}`);
+    }
     const workOrdersData = await workOrdersResponse.json();
     const workOrders = workOrdersData.workOrders || workOrdersData || [];
 
@@ -669,22 +673,20 @@ export async function exportMaintenanceCostReport(startDate: Date, endDate: Date
     doc.text(periodText, (pageWidth - periodWidth) / 2, yPosition);
     yPosition += 15;
 
-    // Calculer le coût total réel avec les pièces
-    let realTotalCost = 0;
-    for (const order of filteredWorkOrders) {
-      try {
-        const orderPartsResponse = await fetch(`/api/work-orders/${order.id}/parts`);
-        if (orderPartsResponse.ok) {
-          const orderParts = await orderPartsResponse.json();
-          const partsCost = orderParts.reduce((sum: any, part: any) => 
-            sum + ((part.quantity || 0) * (part.unitPrice || 0)), 0);
-          realTotalCost += partsCost;
-        }
-      } catch (error) {
-        console.warn(`Erreur coût pour OT ${order.id}:`, error);
-        realTotalCost += order.estimatedCost || 0;
+    // Coût réel de chaque OT = ses pièces. Une lecture en échec arrête le rapport : remplacer
+    // le coût par 0 ou par l'estimation produirait un total faux sans le dire.
+    const partsCostByOrder = new Map<unknown, number>();
+    await Promise.all(filteredWorkOrders.map(async (order: any) => {
+      const orderPartsResponse = await fetch(`/api/work-orders/${order.id}/parts`);
+      const orderParts = orderPartsResponse.ok ? await orderPartsResponse.json() : null;
+      if (!Array.isArray(orderParts)) {
+        throw new Error(`Erreur coût pour OT ${order.id}: ${orderPartsResponse.status}`);
       }
-    }
+      partsCostByOrder.set(order.id, orderParts.reduce((sum: number, part: any) =>
+        sum + ((part.quantity || 0) * (part.unitPrice || 0)), 0));
+    }));
+    let realTotalCost = 0;
+    partsCostByOrder.forEach((cost) => { realTotalCost += cost; });
 
     // Statistiques
     const completedOrders = filteredWorkOrders.filter((order: any) => order.status === 'completed');
@@ -707,19 +709,8 @@ export async function exportMaintenanceCostReport(startDate: Date, endDate: Date
     const tableData = await Promise.all(filteredWorkOrders.map(async (order: any) => {
       const vehicle = vehicles.find((v: any) => v.id === order.vehicleId);
       
-      // Récupérer le coût réel depuis les pièces utilisées pour cet ordre
-      let realCost = order.estimatedCost || 0;
-      try {
-        const orderPartsResponse = await fetch(`/api/work-orders/${order.id}/parts`);
-        if (orderPartsResponse.ok) {
-          const orderParts = await orderPartsResponse.json();
-          const partsCost = orderParts.reduce((sum: any, part: any) => 
-            sum + ((part.quantity || 0) * (part.unitPrice || 0)), 0);
-          realCost = partsCost; // Utiliser le coût total des pièces
-        }
-      } catch (error) {
-        console.warn(`Erreur récupération pièces pour OT ${order.id}:`, error);
-      }
+      // Coût réel = pièces utilisées sur l'OT, lues une seule fois plus haut.
+      const realCost = partsCostByOrder.get(order.id) ?? 0;
       
       return [
         order.id?.toString() || 'N/A',

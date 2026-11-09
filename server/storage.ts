@@ -598,8 +598,9 @@ export class DatabaseStorage implements IStorage {
 
       return Number(row?.total || 0);
     } catch (error) {
-      console.error('Error getting maintenance cost:', error);
-      return 0;
+      storageLog.error({ err: error, period }, "Error getting maintenance cost");
+      // 0 passerait pour « aucune dépense de maintenance sur la période ».
+      throw new AppError(500, "Le coût de maintenance est momentanément indisponible.", { cause: error });
     }
   }
 
@@ -1653,7 +1654,7 @@ export class DatabaseStorage implements IStorage {
   
   async getParts(search?: string, limit?: number, offset?: number): Promise<{ parts: Part[], total: number }> { 
     try {
-      console.log('getParts called - fetching from PostgreSQL...');
+      storageLog.debug("Lecture de la liste des pièces");
       
       const conditions: SQL<unknown>[] = [];
       
@@ -1685,12 +1686,13 @@ export class DatabaseStorage implements IStorage {
         : db.select({ count: count() }).from(parts);
       const [{ count: total }] = await countQuery;
       
-      console.log(`Parts retrieved from DB: ${allParts.length} items, total: ${total}`);
+      storageLog.debug({ count: allParts.length, total }, "Pièces récupérées");
       
       return { parts: allParts, total };
     } catch (error) {
-      console.error('Error getting parts:', error);
-      return { parts: [], total: 0 };
+      storageLog.error({ err: error }, "Error getting parts");
+      // Une liste vide passerait pour « aucune pièce en stock » (valeur du stock à 0).
+      throw new AppError(500, "La liste des pièces est momentanément indisponible.", { cause: error });
     }
   }
   
@@ -1773,8 +1775,9 @@ export class DatabaseStorage implements IStorage {
       
       return allPartsUsed as PartUsed[];
     } catch (error) {
-      console.error('Error getting all parts used:', error);
-      return [];
+      storageLog.error({ err: error }, "Error getting all parts used");
+      // Une liste vide passerait pour « aucune pièce consommée » (coûts à 0).
+      throw new AppError(500, "Les pièces utilisées sont momentanément indisponibles.", { cause: error });
     }
   }
 
@@ -1799,11 +1802,13 @@ export class DatabaseStorage implements IStorage {
         .where(eq(partsUsed.workOrderId, workOrderId))
         .orderBy(partsUsed.createdAt);
       
-      console.log(`Pièces récupérées pour l'ordre ${workOrderId}:`, partsUsedInOrder);
+      // Identifiants et nombre seulement : les lignes portent le prix des pièces.
+      storageLog.debug({ workOrderId, count: partsUsedInOrder.length, partUsedIds: partsUsedInOrder.map((p) => p.id) }, "Pièces récupérées pour l'ordre");
       return partsUsedInOrder as PartUsed[];
     } catch (error) {
-      console.error('Error getting parts used for work order:', error);
-      return [];
+      storageLog.error({ err: error, workOrderId }, "Error getting parts used for work order");
+      // Une liste vide passerait pour « aucune pièce sur cet OT » (coût pièces à 0).
+      throw new AppError(500, "Les pièces de l'ordre de travail sont momentanément indisponibles.", { cause: error });
     }
   }
 
@@ -1855,8 +1860,9 @@ export class DatabaseStorage implements IStorage {
       
       return stockMovements;
     } catch (error) {
-      console.error('Error getting part stock history:', error);
-      return [];
+      storageLog.error({ err: error, partId }, "Error getting part stock history");
+      // Une liste vide passerait pour « aucun mouvement de stock ».
+      throw new AppError(500, "L'historique de stock de la pièce est momentanément indisponible.", { cause: error });
     }
   }
 
@@ -1887,11 +1893,12 @@ export class DatabaseStorage implements IStorage {
         .leftJoin(users, eq(partsStockMovements.createdBy, users.id))
         .orderBy(desc(partsStockMovements.createdAt));
       
-      console.log(`Retrieved ${stockMovements.length} total stock movements`);
+      storageLog.debug({ count: stockMovements.length }, "Mouvements de stock récupérés");
       return stockMovements;
     } catch (error) {
-      console.error('Error getting all stock movements:', error);
-      return [];
+      storageLog.error({ err: error }, "Error getting all stock movements");
+      // Une liste vide passerait pour « aucun mouvement de stock ».
+      throw new AppError(500, "Les mouvements de stock sont momentanément indisponibles.", { cause: error });
     }
   }
 

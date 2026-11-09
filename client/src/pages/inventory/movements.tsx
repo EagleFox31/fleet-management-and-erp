@@ -19,6 +19,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
+import { queryView, readyData } from "@/lib/query-view";
 import {
   CardShell,
   HeaderCard,
@@ -96,12 +98,16 @@ export default function InventoryMovementsPage() {
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [periodFilter, setPeriodFilter] = useState<string>("all");
 
-  const { data: movements = [], isLoading } = useQuery<StockMovement[]>({
+  const movementsQuery = useQuery<StockMovement[]>({
     queryKey: ["/api/parts/stock-movements"],
     staleTime: 0,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
   });
+  // Échec sans données : message et « Réessayer », jamais « Aucun mouvement » ni des compteurs à 0.
+  const movementsView = queryView(movementsQuery);
+  const movements = readyData(movementsView, [] as StockMovement[]);
+  const isLoading = movementsView.kind === "loading";
 
   const filteredMovements = useMemo(() => {
     return movements
@@ -281,6 +287,15 @@ export default function InventoryMovementsPage() {
           </Button>
         }
       >
+        {movementsView.kind === "error" ? (
+          <InlineQueryError
+            error={movementsView.error}
+            fallback="Les mouvements de stock sont momentanément indisponibles."
+            onRetry={() => void movementsQuery.refetch()}
+            isRetrying={movementsView.isRetrying}
+            data-testid="movements-error"
+          />
+        ) : (
         <KpiGrid columns={4}>
           <KpiTile
             label="Entrees"
@@ -315,8 +330,11 @@ export default function InventoryMovementsPage() {
             valueClassName={stats.quantityOut > 0 ? "text-orange-700" : undefined}
           />
         </KpiGrid>
+        )}
       </HeaderCard>
 
+      {movementsView.kind === "ready" && (
+      <>
       <CardShell>
         <div className="px-5 py-4">
           <SectionLabel className="mb-3 inline-block">Filtres</SectionLabel>
@@ -372,6 +390,8 @@ export default function InventoryMovementsPage() {
         }
         emptyState="Aucun mouvement trouve pour cette periode."
       />
+      </>
+      )}
     </div>
   );
 }

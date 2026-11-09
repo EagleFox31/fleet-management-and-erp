@@ -18,9 +18,10 @@ import { HeaderCard, KpiGrid, KpiTile, CardShell, AlertBannerCard, PremiumTabsNa
 import { formatPrice } from "@/lib/utils";
 import { useWarehouse } from "@/hooks/useWarehouse";
 import { usedTiresLabel } from "@shared/constants/tire-stock";
-import { queryView } from "@/lib/query-view";
+import { queryView, readyData } from "@/lib/query-view";
 import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
+import { userMessageOf } from "@/lib/api-error";
 
 type StockMovement = {
   movementType?: string | null;
@@ -80,9 +81,22 @@ export default function WarehouseDashboard() {
   });
   const lowStockTiresView = queryView(lowStockTiresQuery);
   const lowStockTiresCount = lowStockTiresView.kind === "ready" ? lowStockTiresView.data.length : 0;
-  const { data: stockMovements = [], isLoading: stockMovementsLoading } = useQuery<StockMovement[]>({
+  const stockMovementsQuery = useQuery<StockMovement[]>({
     queryKey: ["/api/parts/stock-movements"],
   });
+  // Échec sans données : encart d'erreur dans les graphiques, jamais « Aucun mouvement récent ».
+  const stockMovementsView = queryView(stockMovementsQuery);
+  const stockMovements = readyData(stockMovementsView, [] as StockMovement[]);
+  const stockMovementsLoading = stockMovementsView.kind === "loading";
+  const stockMovementsError = stockMovementsView.kind === "error" ? (
+    <InlineQueryError
+      error={stockMovementsView.error}
+      fallback="Les mouvements de stock sont momentanément indisponibles."
+      onRetry={() => void stockMovementsQuery.refetch()}
+      isRetrying={stockMovementsView.isRetrying}
+      data-testid="warehouse-movements-error"
+    />
+  ) : null;
 
   const alertSummaryData = useMemo(() => [
     { name: "Rupture", value: warehouse.statistics.data?.outOfStockCount || 0 },
@@ -136,7 +150,14 @@ export default function WarehouseDashboard() {
     ].filter((item) => item.value > 0);
   }, [stockMovements]);
 
-  const totalStockValue = Number(warehouse.inventoryValue.data?.totalValue || 0);
+  // Valeur du stock en échec : « Indisponible », jamais 0.
+  const inventoryValueView = queryView({
+    data: warehouse.inventoryValue.data,
+    error: warehouse.inventoryValue.error,
+    isFetching: warehouse.inventoryValue.isFetching,
+  });
+  const inventoryValueFailed = inventoryValueView.kind === "error";
+  const totalStockValue = Number(readyData(inventoryValueView, undefined)?.totalValue ?? 0);
   const totalPartsCount = Number(warehouse.statistics.data?.totalParts || 0);
   // Unités physiques (somme des quantités), distinct du nombre de références.
   const totalUnitsCount = Number(warehouse.statistics.data?.totalQuantity || 0);
@@ -166,13 +187,17 @@ export default function WarehouseDashboard() {
               data-testid="warehouse-kpi-value"
               label="Valeur stock total"
               featured // c'est ce dont le magasinier repond a l'inventaire
-              value={formatPrice(totalStockValue)}
+              value={inventoryValueFailed ? UNAVAILABLE : formatPrice(totalStockValue)}
               // Le nombre de pièces est déjà la valeur de la tuile suivante:
               // on affiche ici la valeur moyenne, qui n'apparaît nulle part ailleurs.
               // Moyenne par unité physique, cohérent avec la tuile suivante qui
               // compte désormais des unités.
               subValue={
-                totalUnitsCount > 0
+                inventoryValueFailed
+                  ? userMessageOf(inventoryValueView.error, "La valeur du stock est momentanément indisponible.")
+                  : warehouse.statistics.error
+                  ? undefined
+                  : totalUnitsCount > 0
                   ? `${formatPrice(Math.round(totalStockValue / totalUnitsCount))} en moyenne par pièce`
                   : "Aucune pièce en stock"
               }
@@ -360,6 +385,8 @@ export default function WarehouseDashboard() {
               <div className="h-[180px]">
                 {stockMovementsLoading ? (
                   <Skeleton className="h-full w-full" />
+                ) : stockMovementsError ? (
+                  stockMovementsError
                 ) : movements7DaysData.some((d) => d.in > 0 || d.out > 0) ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={movements7DaysData} margin={{ top: 4, right: 12, left: 0, bottom: 4 }}>
@@ -638,6 +665,7 @@ export default function WarehouseDashboard() {
                 <p className="text-xs text-gray-400 mb-3">Entrées vs sorties (quantité)</p>
                 <div className="h-[220px]">
                   {stockMovementsLoading ? <Skeleton className="h-full w-full" />
+                    : stockMovementsError ? stockMovementsError
                     : movements7DaysData.some((d) => d.in > 0 || d.out > 0) ? (
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={movements7DaysData} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
@@ -659,6 +687,7 @@ export default function WarehouseDashboard() {
                 <p className="text-xs text-gray-400 mb-3">Répartition des opérations enregistrées</p>
                 <div className="h-[220px]">
                   {stockMovementsLoading ? <Skeleton className="h-full w-full" />
+                    : stockMovementsError ? stockMovementsError
                     : movementTypesData.length > 0 ? (
                       <ResponsiveContainer width="100%" height="100%">
                         <PieChart>

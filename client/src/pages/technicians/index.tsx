@@ -31,6 +31,8 @@ import {
 } from "lucide-react";
 import { roleLabelOf } from "@/lib/contextual-help/roles";
 import { apiRequest } from "@/lib/queryClient";
+import { queryView, readyData } from "@/lib/query-view";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
 import {
   CardShell,
@@ -134,9 +136,12 @@ export default function TechniciansIndex() {
   });
 
   // Fetch parts used for cost calculations
-  const { data: partsUsed = [] } = useQuery<any>({
+  const partsUsedQuery = useQuery<any[]>({
     queryKey: ["/api/parts-used"],
   });
+  // Échec sans données : coût pièces « Indisponible », jamais 0 F CFA.
+  const partsUsedView = queryView(partsUsedQuery);
+  const partsUsed = readyData(partsUsedView, [] as any[]);
 
   // Calculate KPI metrics based on filters
   const kpiMetrics = useMemo(() => {
@@ -691,8 +696,14 @@ export default function TechniciansIndex() {
           <KpiGrid columns={2}>
             <KpiTile
               label="Coût total pièces"
-              value={`${kpiMetrics.totalPartsCost.toFixed(0)} F CFA`}
-              subValue="Pièces consommées"
+              value={
+                partsUsedView.kind === "error"
+                  ? UNAVAILABLE
+                  : partsUsedView.kind === "loading"
+                    ? "…"
+                    : `${kpiMetrics.totalPartsCost.toFixed(0)} F CFA`
+              }
+              subValue={partsUsedView.kind === "error" ? userMessageOf(partsUsedView.error, "Les pièces utilisées sont momentanément indisponibles.") : "Pièces consommées"}
               icon={<Wrench className="h-4 w-4" />}
               iconWrapperClassName="bg-emerald-50 text-emerald-600"
             />
