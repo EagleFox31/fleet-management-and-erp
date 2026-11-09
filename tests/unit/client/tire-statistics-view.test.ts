@@ -24,6 +24,7 @@ function payload(overrides: Partial<TireStatisticsAdvanced> = {}): TireStatistic
     totalValue: "345000.50",
     averageWear: 6.2,
     lowStockCount: 1,
+    rotationsThisMonth: 3,
     requiredActions: { lowStock: [low(1)], outOfStock: [out(2)], criticalWear: [], rotationDue: [], rotationApproaching: [] },
     ...overrides,
   } as TireStatisticsAdvanced;
@@ -54,6 +55,20 @@ describe("toTireStatisticsView", () => {
     expect(view.totalTires).toBe(12);
     expect(view.totalValue).toBe(345000.5);
     expect(view.averageWear).toBe(6.2);
+    expect(view.rotationsThisMonth).toBe(3);
+  });
+
+  it("rotationsThisMonth absent (serveur antérieur) : null, pas 0", () => {
+    const raw = payload();
+    delete (raw as Partial<typeof raw>).rotationsThisMonth;
+    expect(toTireStatisticsView(raw).rotationsThisMonth).toBeNull();
+  });
+
+  it("sans inspection active (averageWear null) : noInspection, pas 0 mm", () => {
+    const view = toTireStatisticsView(payload({ averageWear: null }));
+    expect(view.averageWear).toBeNull();
+    expect(view.noInspection).toBe(true);
+    expect(toTireStatisticsView(payload()).noInspection).toBe(false);
   });
 
   it("valeur illisible : null, pas 0", () => {
