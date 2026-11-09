@@ -1,6 +1,16 @@
 import { useQuery } from "@tanstack/react-query";
-import { listQueryView, readyData } from "@/lib/query-view";
+import { listQueryView, queryView, readyData } from "@/lib/query-view";
 import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
+import { statField } from "@/lib/stat-number";
+import {
+  clientTotals,
+  countSentence,
+  documentRenewals,
+  isPositive,
+  statDisplay,
+  viewData,
+} from "@/lib/secretary-dashboard-stats";
 import { Link } from "wouter";
 import {
   Plus, FileText, Bell, ClipboardList, Car, Fuel,
@@ -33,6 +43,21 @@ interface SecretaryVehicle {
   currentKilometers: number | null;
 }
 
+/** Ligne de `GET /api/operations/stats/by-client` ; les montants sont lus par `statField`. */
+interface ClientStatsRow {
+  clientId: number | null;
+  clientName: string;
+}
+
+/** Ligne de `GET /api/drivers/cpc-status`. */
+interface CpcDriver {
+  id: number;
+  firstName: string;
+  lastName: string;
+  cpcTrainingDate?: string | null;
+  cpcStatus?: string;
+}
+
 const getEffectiveMileage = (v: SecretaryVehicle) =>
   Math.max(v.lastMileage ?? 0, v.mileage ?? 0, v.currentKilometers ?? 0);
 
@@ -40,39 +65,41 @@ export default function SecretaryDashboard() {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
   const canAddVehicle = canManageFleetVehicles(user);
-  const { data: vehicles } = useQuery<SecretaryVehicle[]>({ queryKey: ["/api/vehicles/all"] });
+  // Requêtes gardées entières : une lecture en échec affiche « Indisponible », jamais 0.
+  const vehiclesQuery = useQuery<unknown>({ queryKey: ["/api/vehicles/all"] });
   const alertsQuery = useQuery<unknown>({ queryKey: ["/api/alerts"] });
-  const { data: documentStats } = useQuery<any>({ queryKey: ["/api/vehicles/document-stats"] });
-  const { data: cpcStats } = useQuery<any>({ queryKey: ["/api/drivers/cpc-statistics"] });
-  const { data: driversStatus } = useQuery<any[]>({ queryKey: ["/api/drivers/cpc-status"] });
-  const { data: statsByClient } = useQuery<any[]>({ queryKey: ["/api/operations/stats/by-client"] });
-  const { data: invoicesSummary } = useQuery<any>({ queryKey: ["/api/billing/invoices/summary"] });
+  const documentStatsQuery = useQuery<unknown>({ queryKey: ["/api/vehicles/document-stats"] });
+  const cpcStatsQuery = useQuery<unknown>({ queryKey: ["/api/drivers/cpc-statistics"] });
+  const driversStatusQuery = useQuery<unknown>({ queryKey: ["/api/drivers/cpc-status"] });
+  const statsByClientQuery = useQuery<unknown>({ queryKey: ["/api/operations/stats/by-client"] });
+  const invoicesSummaryQuery = useQuery<unknown>({ queryKey: ["/api/billing/invoices/summary"] });
 
-  const clientsData = Array.isArray(statsByClient) ? statsByClient : [];
-  const totalRevenue = clientsData.reduce((s: number, c: any) => s + (c.totalRevenue || 0), 0);
-  const totalCost = clientsData.reduce((s: number, c: any) => s + (c.totalCost || 0), 0);
-  const totalMissions = clientsData.reduce((s: number, c: any) => s + (c.totalMissions || 0), 0);
+  const vehiclesView = listQueryView<SecretaryVehicle>(vehiclesQuery);
+  const documentStatsView = queryView(documentStatsQuery);
+  const cpcStatsView = queryView(cpcStatsQuery);
+  const driversView = listQueryView<CpcDriver>(driversStatusQuery);
+  const clientsView = listQueryView<ClientStatsRow>(statsByClientQuery);
+  const invoicesView = queryView(invoicesSummaryQuery);
+
+  const clients = viewData(clientsView);
+  const totals = clientTotals(clients);
   // Alertes illisibles : « Indisponible », jamais 0 alerte.
   const alertsView = listQueryView<unknown>(alertsQuery);
   const alertsFailed = alertsView.kind === "error";
   const alertsCount = readyData(alertsView, []).length;
-  const vehiclesCount = Array.isArray(vehicles) ? vehicles.length : 0;
-  const expiringDocumentsSoon =
-    Number(documentStats?.expiringCarteGrise || 0) +
-    Number(documentStats?.expiringAssurance || 0) +
-    Number(documentStats?.expiringVisiteTechnique || 0);
-  const expiredDocuments =
-    Number(documentStats?.expiredCarteGrise || 0) +
-    Number(documentStats?.expiredAssurance || 0) +
-    Number(documentStats?.expiredVisiteTechnique || 0);
-  const documentsToRenew = expiringDocumentsSoon + expiredDocuments;
-  const totalInvoices = Number(invoicesSummary?.total || 0);
-  const pendingInvoices = Number(invoicesSummary?.pending || 0);
-  const paidInvoices = Number(invoicesSummary?.paid || 0);
-  const cpcFormed = Number(cpcStats?.forme || 0);
-  const cpcToTrain = Number(cpcStats?.aFormer || 0);
-  const cpcNotFormed = Number(cpcStats?.nonForme || 0);
-  const cpcTotal = Number(cpcStats?.total || 0);
+  const vehicles = viewData(vehiclesView);
+  const vehiclesCount = vehicles ? vehicles.length : null;
+  const documents = documentRenewals(viewData(documentStatsView));
+  const invoices = viewData(invoicesView);
+  const totalInvoices = statField(invoices, "total");
+  const pendingInvoices = statField(invoices, "pending");
+  const paidInvoices = statField(invoices, "paid");
+  const cpcStats = viewData(cpcStatsView);
+  const cpcFormed = statField(cpcStats, "forme");
+  const cpcToTrain = statField(cpcStats, "aFormer");
+  const cpcNotFormed = statField(cpcStats, "nonForme");
+  const cpcTotal = statField(cpcStats, "total");
+  const drivers = viewData(driversView);
 
   return (
     <div className="space-y-5">
@@ -97,7 +124,7 @@ export default function SecretaryDashboard() {
           <KpiTile
             data-testid="secretary-kpi-vehicles"
             label="Véhicules enregistrés"
-            value={vehiclesCount}
+            value={statDisplay(vehiclesView, vehiclesCount)}
             subValue="Dans la flotte"
             icon={<Truck className="h-4 w-4" />}
             iconWrapperClassName="bg-blue-50 text-blue-600"
@@ -109,16 +136,20 @@ export default function SecretaryDashboard() {
             // Carte grise, assurance, visite technique: la page qui les liste
             // est « Documents & Conformité », déjà dans le menu de la secrétaire.
             onClick={() => setLocation("/vehicles/documents")}
-            value={documentsToRenew}
-            subValue={`${expiredDocuments} expiré(s) · ${expiringDocumentsSoon} à venir`}
+            value={statDisplay(documentStatsView, documents.toRenew)}
+            subValue={
+              documents.expired !== null && documents.expiringSoon !== null
+                ? `${documents.expired} expiré(s) · ${documents.expiringSoon} à venir`
+                : undefined
+            }
             icon={<FileText className="h-4 w-4" />}
-            iconWrapperClassName={documentsToRenew > 0 ? "bg-red-50 text-red-600" : "bg-gray-100 text-gray-400"}
-            valueClassName={documentsToRenew > 0 ? "text-red-600" : undefined}
+            iconWrapperClassName={isPositive(documents.toRenew) ? "bg-red-50 text-red-600" : "bg-gray-100 text-gray-400"}
+            valueClassName={isPositive(documents.toRenew) ? "text-red-600" : undefined}
           />
           <KpiTile
             data-testid="secretary-kpi-missions"
             label="Missions totales"
-            value={totalMissions}
+            value={statDisplay(clientsView, totals.missions)}
             subValue="Toutes missions"
             icon={<Route className="h-4 w-4" />}
             iconWrapperClassName="bg-purple-50 text-purple-600"
@@ -196,11 +227,15 @@ export default function SecretaryDashboard() {
                   </div>
                   <div className="flex items-center gap-2 py-1.5 border-b border-gray-50">
                     <Car className="h-3.5 w-3.5 text-blue-500" />
-                    <span className="text-sm text-gray-600">{vehiclesCount} véhicule(s) enregistré(s)</span>
+                    <span className="text-sm text-gray-600">
+                      {countSentence(vehiclesView, vehiclesCount, (n) => `${n} véhicule(s) enregistré(s)`, "Véhicules indisponibles")}
+                    </span>
                   </div>
                   <div className="flex items-center gap-2 py-1.5">
                     <FileText className="h-3.5 w-3.5 text-red-500" />
-                    <span className="text-sm text-gray-600">{documentsToRenew} document(s) à renouveler</span>
+                    <span className="text-sm text-gray-600">
+                      {countSentence(documentStatsView, documents.toRenew, (n) => `${n} document(s) à renouveler`, "Documents indisponibles")}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -226,7 +261,7 @@ export default function SecretaryDashboard() {
             <KpiTile
               data-testid="secretary-kpi-missions"
               label="Missions totales"
-              value={totalMissions}
+              value={statDisplay(clientsView, totals.missions)}
               subValue="Toutes missions"
               icon={<Truck className="h-4 w-4" />}
               iconWrapperClassName="bg-blue-50 text-blue-600"
@@ -234,16 +269,16 @@ export default function SecretaryDashboard() {
             <KpiTile
               data-testid="secretary-kpi-revenue"
               label="Chiffre d'affaires"
-              value={formatPrice(totalRevenue)}
+              value={statDisplay(clientsView, totals.revenue, formatPrice)}
               subValue="Facturé clients"
               icon={<Banknote className="h-4 w-4" />}
               iconWrapperClassName="bg-green-50 text-green-600"
             />
             <KpiTile
               data-testid="secretary-kpi-costs"
-              label="Coûts totaux"
-              value={formatPrice(totalCost)}
-              subValue="Coûts opérationnels"
+              label="Coûts carburant"
+              value={statDisplay(clientsView, totals.fuelCost, formatPrice)}
+              subValue="Carburant consommé en mission"
               icon={<BarChart2 className="h-4 w-4" />}
               iconWrapperClassName="bg-red-50 text-red-600"
             />
@@ -252,30 +287,50 @@ export default function SecretaryDashboard() {
           <CardShell>
             <div className="px-5 py-4">
               <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">Statistiques par Client</p>
+              {clientsView.kind === "error" ? (
+                <InlineQueryError
+                  error={clientsView.error}
+                  fallback="Les statistiques par client sont momentanément indisponibles."
+                  onRetry={() => void statsByClientQuery.refetch()}
+                  isRetrying={clientsView.isRetrying}
+                  data-testid="secretary-clients-error"
+                />
+              ) : clients && clients.length === 0 ? (
+                <p className="text-sm text-gray-400">Aucune mission rattachée à un client.</p>
+              ) : (
               <div className="space-y-2">
-                {clientsData.map((client: any) => (
-                  <div key={client.clientName} className="rounded-xl border border-gray-100 bg-gray-50/60 px-4 py-3">
+                {(clients ?? []).map((client) => (
+                  <div key={client.clientId ?? client.clientName} className="rounded-xl border border-gray-100 bg-gray-50/60 px-4 py-3">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm font-semibold text-gray-800">{client.clientName}</span>
-                      <span className="text-xs text-gray-400">{client.totalMissions} missions</span>
+                      <span className="text-xs text-gray-400">
+                        {statDisplay(clientsView, statField(client, "totalMissions"))} missions
+                      </span>
                     </div>
                     <div className="grid grid-cols-3 gap-4 text-xs">
                       <div>
                         <p className="text-gray-400">CA</p>
-                        <p className="font-semibold text-green-600">{formatPrice(client.totalRevenue || 0)}</p>
+                        <p className="font-semibold text-green-600">
+                          {statDisplay(clientsView, statField(client, "totalRevenue"), formatPrice)}
+                        </p>
                       </div>
                       <div>
-                        <p className="text-gray-400">Coûts</p>
-                        <p className="font-semibold text-red-600">{formatPrice(client.totalCost || 0)}</p>
+                        <p className="text-gray-400">Carburant</p>
+                        <p className="font-semibold text-red-600">
+                          {statDisplay(clientsView, statField(client, "totalFuelCost"), formatPrice)}
+                        </p>
                       </div>
                       <div>
                         <p className="text-gray-400">Marge</p>
-                        <p className="font-semibold text-purple-600">{client.marginPercentage?.toFixed(1)}%</p>
+                        <p className="font-semibold text-purple-600">
+                          {statDisplay(clientsView, statField(client, "marginPercentage"), (n) => `${n.toFixed(1)}%`)}
+                        </p>
                       </div>
                     </div>
                   </div>
                 ))}
               </div>
+              )}
               <div className="mt-4 flex flex-wrap gap-2">
                 <Link href="/operations">
                   <Button size="sm" className="gap-2">
@@ -303,7 +358,7 @@ export default function SecretaryDashboard() {
             <KpiTile
               data-testid="secretary-kpi-invoices"
               label="Factures clients"
-              value={totalInvoices}
+              value={statDisplay(invoicesView, totalInvoices)}
               subValue="Total factures"
               icon={<FileText className="h-4 w-4" />}
               iconWrapperClassName="bg-blue-50 text-blue-600"
@@ -311,16 +366,16 @@ export default function SecretaryDashboard() {
             <KpiTile
               data-testid="secretary-kpi-pending"
               label="En attente"
-              value={pendingInvoices}
+              value={statDisplay(invoicesView, pendingInvoices)}
               subValue="À encaisser"
               icon={<Clock className="h-4 w-4" />}
-              iconWrapperClassName={pendingInvoices > 0 ? "bg-orange-50 text-orange-600" : "bg-gray-100 text-gray-400"}
-              valueClassName={pendingInvoices > 0 ? "text-orange-600" : undefined}
+              iconWrapperClassName={isPositive(pendingInvoices) ? "bg-orange-50 text-orange-600" : "bg-gray-100 text-gray-400"}
+              valueClassName={isPositive(pendingInvoices) ? "text-orange-600" : undefined}
             />
             <KpiTile
               data-testid="secretary-kpi-paid"
               label="Payées"
-              value={paidInvoices}
+              value={statDisplay(invoicesView, paidInvoices)}
               subValue="Encaissées"
               icon={<CheckCircle2 className="h-4 w-4" />}
               iconWrapperClassName="bg-green-50 text-green-600"
@@ -335,10 +390,10 @@ export default function SecretaryDashboard() {
               </div>
               <div className="space-y-1.5">
                 {[
-                  { label: "Total HT", value: formatPrice(invoicesSummary?.totalAmountHT || 0), bg: "bg-gray-50" },
-                  { label: "TVA (19.25%)", value: formatPrice(invoicesSummary?.totalVAT || 0), bg: "bg-gray-50" },
-                  { label: "Total TTC", value: formatPrice(invoicesSummary?.totalAmountTTC || 0), bg: "bg-green-50", bold: true },
-                  { label: "Solde restant", value: formatPrice(invoicesSummary?.totalBalance || 0), bg: "bg-orange-50", orange: true },
+                  { label: "Total HT", value: statDisplay(invoicesView, statField(invoices, "totalAmountHT"), formatPrice), bg: "bg-gray-50" },
+                  { label: "TVA (19.25%)", value: statDisplay(invoicesView, statField(invoices, "totalVAT"), formatPrice), bg: "bg-gray-50" },
+                  { label: "Total TTC", value: statDisplay(invoicesView, statField(invoices, "totalAmountTTC"), formatPrice), bg: "bg-green-50", bold: true },
+                  { label: "Solde restant", value: statDisplay(invoicesView, statField(invoices, "totalBalance"), formatPrice), bg: "bg-orange-50", orange: true },
                 ].map(({ label, value, bg, bold, orange }) => (
                   <div key={label} className={`flex items-center justify-between px-3 py-2 rounded-lg ${bg}`}>
                     <span className={`text-sm ${bold ? "font-semibold text-gray-800" : "text-gray-500"}`}>{label}</span>
@@ -384,8 +439,17 @@ export default function SecretaryDashboard() {
               <p className="text-xs text-gray-400">Sélectionnez un véhicule ci-dessous pour mettre à jour son kilométrage.</p>
             </div>
           </CardShell>
+          {vehiclesView.kind === "error" && (
+            <InlineQueryError
+              error={vehiclesView.error}
+              fallback="La liste des véhicules est momentanément indisponible."
+              onRetry={() => void vehiclesQuery.refetch()}
+              isRetrying={vehiclesView.isRetrying}
+              data-testid="secretary-vehicles-error"
+            />
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {Array.isArray(vehicles) && vehicles.slice(0, 9).map((vehicle) => (
+            {vehicles?.slice(0, 9).map((vehicle) => (
               <MileageUpdateForm
                 key={vehicle.id}
                 vehicleId={vehicle.id}
@@ -394,7 +458,7 @@ export default function SecretaryDashboard() {
               />
             ))}
           </div>
-          {Array.isArray(vehicles) && vehicles.length > 9 && (
+          {vehicles && vehicles.length > 9 && (
             <CardShell>
               <div className="px-5 py-3 text-center">
                 <p className="text-xs text-gray-400">
@@ -412,28 +476,28 @@ export default function SecretaryDashboard() {
             <KpiTile
               data-testid="secretary-kpi-cpc-formed"
               label="Chauffeurs formés"
-              value={cpcFormed}
-              subValue={`/ ${cpcTotal} total`}
+              value={statDisplay(cpcStatsView, cpcFormed)}
+              subValue={cpcTotal !== null ? `/ ${cpcTotal} total` : undefined}
               icon={<CheckCircle2 className="h-4 w-4" />}
               iconWrapperClassName="bg-green-50 text-green-600"
             />
             <KpiTile
               data-testid="secretary-kpi-cpc-to-form"
               label="À former"
-              value={cpcToTrain}
+              value={statDisplay(cpcStatsView, cpcToTrain)}
               subValue="Alertes actives"
               icon={<AlertTriangle className="h-4 w-4" />}
-              iconWrapperClassName={cpcToTrain > 0 ? "bg-orange-50 text-orange-600" : "bg-gray-100 text-gray-400"}
-              valueClassName={cpcToTrain > 0 ? "text-orange-600" : undefined}
+              iconWrapperClassName={isPositive(cpcToTrain) ? "bg-orange-50 text-orange-600" : "bg-gray-100 text-gray-400"}
+              valueClassName={isPositive(cpcToTrain) ? "text-orange-600" : undefined}
             />
             <KpiTile
               data-testid="secretary-kpi-cpc-not-formed"
               label="Non formés"
-              value={cpcNotFormed}
+              value={statDisplay(cpcStatsView, cpcNotFormed)}
               subValue="Nécessite formation"
               icon={<XCircle className="h-4 w-4" />}
-              iconWrapperClassName={cpcNotFormed > 0 ? "bg-red-50 text-red-600" : "bg-gray-100 text-gray-400"}
-              valueClassName={cpcNotFormed > 0 ? "text-red-600" : undefined}
+              iconWrapperClassName={isPositive(cpcNotFormed) ? "bg-red-50 text-red-600" : "bg-gray-100 text-gray-400"}
+              valueClassName={isPositive(cpcNotFormed) ? "text-red-600" : undefined}
             />
           </KpiGrid>
 
@@ -474,8 +538,17 @@ export default function SecretaryDashboard() {
               <p className="text-xs text-gray-400 mb-3">Mettez à jour les dates de formation CPC pour les chauffeurs nécessitant une certification.</p>
             </div>
           </CardShell>
+          {driversView.kind === "error" && (
+            <InlineQueryError
+              error={driversView.error}
+              fallback="La liste des chauffeurs est momentanément indisponible."
+              onRetry={() => void driversStatusQuery.refetch()}
+              isRetrying={driversView.isRetrying}
+              data-testid="secretary-drivers-error"
+            />
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {Array.isArray(driversStatus) && driversStatus.slice(0, 6).map((driver: any) => (
+            {drivers?.slice(0, 6).map((driver) => (
               <CPCUpdateForm
                 key={driver.id}
                 driverId={driver.id}
@@ -485,7 +558,7 @@ export default function SecretaryDashboard() {
               />
             ))}
           </div>
-          {Array.isArray(driversStatus) && driversStatus.length > 6 && (
+          {drivers && drivers.length > 6 && (
             <CardShell>
               <div className="px-5 py-3 text-center">
                 <p className="text-xs text-gray-400">
