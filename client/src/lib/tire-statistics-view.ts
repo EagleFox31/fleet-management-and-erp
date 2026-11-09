@@ -19,6 +19,9 @@ export interface TireStatisticsView {
   totalTires: number | null;
   totalValue: number | null;
   averageWear: number | null;
+  /** Le service a répondu sans inspection active (`averageWear: null`) : rien à moyenner. */
+  noInspection: boolean;
+  rotationsThisMonth: number | null;
   requiredActions: ActionLists;
 }
 
@@ -35,6 +38,8 @@ export function toTireStatisticsView(raw: TireStatisticsAdvanced): TireStatistic
     totalTires: parseStatNumber(raw.totalTires),
     totalValue: parseStatNumber(raw.totalValue),
     averageWear: parseStatNumber(raw.averageWear),
+    noInspection: raw.averageWear === null,
+    rotationsThisMonth: parseStatNumber(raw.rotationsThisMonth),
     requiredActions: {
       lowStock: listOrNull(actions.lowStock),
       outOfStock: listOrNull(actions.outOfStock),
