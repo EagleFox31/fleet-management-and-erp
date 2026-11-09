@@ -225,7 +225,9 @@ export function useWarehouse() {
         };
       })()
     : reorderAlertsQuery.data;
-  const reorderAlertsError = lowStockPartsQuery.error || partRequirementsQuery.error || reorderAlertsQuery.error;
+  // L'agrégat serveur ne sert que de repli pendant le chargement des deux sources : son échec
+  // (403 selon le rôle) ne doit pas afficher « Indisponible » avant qu'elles aient répondu.
+  const reorderAlertsError = lowStockPartsQuery.error || partRequirementsQuery.error;
   const reorderAlertsFetching =
     reorderAlertsQuery.isFetching || lowStockPartsQuery.isFetching || partRequirementsQuery.isFetching;
   const reorderAlertsView = queryView<any>({
