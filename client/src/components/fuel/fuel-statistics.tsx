@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatCurrency } from "@/lib/utils";
 import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
+import { userMessageOf } from "@/lib/api-error";
 import { Fuel, BarChart3, LineChart } from "lucide-react";
 import { 
   BarChart, 
@@ -49,6 +50,8 @@ export function FuelStatistics() {
   // Lecture en échec sans donnée : « Indisponible », jamais 0 L / 0 FCFA / 0 plein.
   const statsFailed = fuelStatistics === undefined && !!fuelStatisticsError;
   const historyFailed = consumptionHistory === undefined && !!consumptionHistoryError;
+  const statsFailedText = userMessageOf(fuelStatisticsError, "Les statistiques de carburant sont momentanément indisponibles.");
+  const historyFailedText = userMessageOf(consumptionHistoryError, "L'historique des pleins est momentanément indisponible.");
 
   // Formater les données pour les graphiques
   const chartData = consumptionHistory?.map((item: ConsumptionData) => ({
@@ -130,6 +133,7 @@ export function FuelStatistics() {
                     ? `${totalFuel.toFixed(2)} L` 
                     : "0 L"}
                 </div>
+                {statsFailed && <div className="text-xs text-muted-foreground mt-1">{statsFailedText}</div>}
               </div>
 
               <div className="bg-card border rounded-lg p-4 flex flex-col items-center justify-center text-center">
@@ -142,6 +146,7 @@ export function FuelStatistics() {
                     ? formatCurrency(totalCost) 
                     : formatCurrency(0)}
                 </div>
+                {statsFailed && <div className="text-xs text-muted-foreground mt-1">{statsFailedText}</div>}
               </div>
 
               <div className="bg-card border rounded-lg p-4 flex flex-col items-center justify-center text-center">
@@ -154,6 +159,7 @@ export function FuelStatistics() {
                     ? formatCurrency(avgCostPerLiter)
                     : "N/A"}
                 </div>
+                {statsFailed && <div className="text-xs text-muted-foreground mt-1">{statsFailedText}</div>}
               </div>
 
               <div className="bg-card border rounded-lg p-4 flex flex-col items-center justify-center text-center">
@@ -164,6 +170,7 @@ export function FuelStatistics() {
                     ? UNAVAILABLE
                     : consumptionHistory?.reduce((total: number, current: ConsumptionData) => total + current.count, 0) || 0}
                 </div>
+                {historyFailed && <div className="text-xs text-muted-foreground mt-1">{historyFailedText}</div>}
               </div>
             </div>
 

@@ -22,6 +22,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatPrice } from "@/lib/utils";
+import { userMessageOf } from "@/lib/api-error";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 
 interface ClientInvoice {
   id: number;
@@ -84,10 +86,12 @@ export default function ClientInvoicesListPage() {
   const [searchQuery, setSearchQuery] = useState("");
 
   // Charger les factures
-  const { data, isLoading } = useQuery<InvoicesResponse>({
+  const { data, isLoading, error } = useQuery<InvoicesResponse>({
     queryKey: ["/api/billing/invoices", { status: statusFilter }],
   });
 
+  // Échec de lecture : les zéros de repli ne sont pas des valeurs, les tuiles lisent « Indisponible ».
+  const failed = data === undefined && !!error;
   const invoices = data?.invoices || [];
   const summary = data?.summary || {
     total: 0,
@@ -148,7 +152,7 @@ export default function ClientInvoicesListPage() {
               className="text-2xl font-bold"
               data-testid="stat-total-invoices"
             >
-              {summary.total}
+              {failed ? UNAVAILABLE : summary.total}
             </div>
           </CardContent>
         </Card>
@@ -165,7 +169,7 @@ export default function ClientInvoicesListPage() {
               className="text-2xl font-bold"
               data-testid="stat-total-amount"
             >
-              {formatCurrency(summary.totalAmountTTC)}
+              {failed ? UNAVAILABLE : formatCurrency(summary.totalAmountTTC)}
             </div>
           </CardContent>
         </Card>
@@ -177,10 +181,10 @@ export default function ClientInvoicesListPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-500" data-testid="stat-paid">
-              {summary.paid}
+              {failed ? UNAVAILABLE : summary.paid}
             </div>
             <p className="text-xs text-muted-foreground">
-              {formatCurrency(summary.totalPaid)}
+              {failed ? UNAVAILABLE : formatCurrency(summary.totalPaid)}
             </p>
           </CardContent>
         </Card>
@@ -195,10 +199,10 @@ export default function ClientInvoicesListPage() {
               className="text-2xl font-bold text-orange-500"
               data-testid="stat-pending"
             >
-              {summary.pending}
+              {failed ? UNAVAILABLE : summary.pending}
             </div>
             <p className="text-xs text-muted-foreground">
-              {formatCurrency(summary.totalBalance)}
+              {failed ? UNAVAILABLE : formatCurrency(summary.totalBalance)}
             </p>
           </CardContent>
         </Card>
@@ -232,12 +236,20 @@ export default function ClientInvoicesListPage() {
       {/* Liste des factures */}
       <Card>
         <CardHeader>
-          <CardTitle>Factures ({filteredInvoices.length})</CardTitle>
+          <CardTitle>Factures ({failed ? UNAVAILABLE : filteredInvoices.length})</CardTitle>
         </CardHeader>
         <CardContent>
           {isLoading ? (
             <div className="text-center py-8 text-gray-500">
               Chargement...
+            </div>
+          ) : failed ? (
+            <div
+              className="text-center py-8 text-destructive-text"
+              role="alert"
+              data-testid="invoices-load-error"
+            >
+              {userMessageOf(error, "Impossible de charger les factures.")}
             </div>
           ) : filteredInvoices.length === 0 ? (
             <div className="text-center py-8 text-gray-500">

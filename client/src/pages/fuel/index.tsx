@@ -133,6 +133,7 @@ export default function FuelPage() {
   const fuelRecords = fuelRecordsData || [];
   // Lecture en échec sans donnée : « Indisponible », jamais 0 plein / 0 L / 0 FCFA.
   const fuelRecordsFailed = fuelRecordsData === undefined && !!fuelRecordsError;
+  const fuelRecordsFailedText = userMessageOf(fuelRecordsError, "L'historique des pleins est momentanément indisponible.");
 
   const { data: fuelCardBalance, error: fuelCardBalanceError } = useQuery<any>({
     queryKey: ["/api/fuel-card/balance"],
@@ -722,7 +723,7 @@ export default function FuelPage() {
             <KpiTile
               label="Pleins enregistrés"
               value={fuelRecordsFailed ? UNAVAILABLE : filteredFuelRecords.length}
-              subValue="Historique filtré"
+              subValue={fuelRecordsFailed ? fuelRecordsFailedText : "Historique filtré"}
               icon={<CalendarDays className="h-4 w-4" />}
               iconWrapperClassName="bg-blue-50 text-blue-600"
               onClick={() => {
@@ -734,14 +735,14 @@ export default function FuelPage() {
             <KpiTile
               label="Litres consommés"
               value={fuelRecordsFailed ? UNAVAILABLE : `${totalLiters.toFixed(2)} L`}
-              subValue={fuelRecordsFailed ? "Historique des pleins indisponible" : `${fullTankCount} pleins complets`}
+              subValue={fuelRecordsFailed ? fuelRecordsFailedText : `${fullTankCount} pleins complets`}
               icon={<Fuel className="h-4 w-4" />}
               iconWrapperClassName="bg-emerald-50 text-emerald-600"
             />
             <KpiTile
               label="Coût total"
               value={fuelRecordsFailed ? UNAVAILABLE : formatCurrency(totalCost)}
-              subValue="Dépense carburant"
+              subValue={fuelRecordsFailed ? fuelRecordsFailedText : "Dépense carburant"}
               icon={<Wallet className="h-4 w-4" />}
               iconWrapperClassName="bg-amber-50 text-amber-600"
             />

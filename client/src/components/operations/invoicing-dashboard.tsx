@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatPrice } from "@/lib/utils";
+import { userMessageOf } from "@/lib/api-error";
 import { useAuth } from "@/hooks/useAuth";
 import { canReadClientBilling } from "@shared/constants/roles";
 import {
@@ -158,7 +159,7 @@ export function InvoicingDashboard() {
   } as const;
 
   const { user } = useAuth();
-  const { data: stats, isLoading } = useQuery<BillingStatistics>({
+  const { data: stats, isLoading, error } = useQuery<BillingStatistics>({
     queryKey: ["/api/billing/statistics"],
     enabled: canReadClientBilling(user?.role),
     ...liveQueryConfig,
@@ -346,6 +347,20 @@ export function InvoicingDashboard() {
 
         <Skeleton className="h-[360px] w-full rounded-2xl" />
       </div>
+    );
+  }
+
+  if (!stats && error) {
+    return (
+      <CardShell>
+        <div className="px-5 py-16 text-center" role="alert" data-testid="invoicing-dashboard-error">
+          <FileText className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+          <p className="text-base font-medium text-gray-600">Indisponible</p>
+          <p className="text-sm text-gray-400 mt-1">
+            {userMessageOf(error, "Impossible de charger les indicateurs de facturation.")}
+          </p>
+        </div>
+      </CardShell>
     );
   }
 
