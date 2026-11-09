@@ -24,7 +24,9 @@ describe("server/middleware/auth.ts : journalisation", () => {
   });
 
   it("ne journalise ni cookie, ni jeton, ni en-tête d'autorisation, ni session entière", () => {
-    const logged = codeOnly(SOURCE).match(/moduleLogger\("auth"\)\s*\.\w+\([\s\S]*?\n\s*\);?|moduleLogger\("auth"\)\.\w+\([^\n]*\)/g) ?? [];
+    // Appel sur plusieurs lignes : de `(` en fin de ligne jusqu'à la première ligne qui ne contient que `)`.
+    // Appel sur une ligne : limité à cette ligne (jamais d'avalement du code qui suit).
+    const logged = codeOnly(SOURCE).match(/moduleLogger\("auth"\)\.\w+\(\s*?\n[\s\S]*?\n\s*\)|moduleLogger\("auth"\)\.\w+\([^\n]*\)/g) ?? [];
     expect(logged.length).toBeGreaterThan(0);
     for (const call of logged) {
       expect(call, call).not.toMatch(/cookie|\.headers|token|password|\bsession:\s*req\.session\b(?![.?])|sessionID|email/i);

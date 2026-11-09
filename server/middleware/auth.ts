@@ -123,7 +123,7 @@ export const authorize = (roles: string[]) => {
       if (!normalizedAllowedRoles.includes(normalizedUserRole)) {
         if (debugAuth) {
           moduleLogger("auth").info(
-            { requestId: req.requestId, method: req.method, path: req.path, userId: user.id, role: normalizedUserRole, allowedRoles: normalizedAllowedRoles },
+            { requestId: req.requestId, method: req.method, path: req.path, userId: user.id, role: normalizedUserRole, rawRole: user.role, allowedRoles: normalizedAllowedRoles },
             "Accès refusé : rôle non autorisé",
           );
         }
@@ -132,7 +132,7 @@ export const authorize = (roles: string[]) => {
 
       if (debugAuth) {
         moduleLogger("auth").debug(
-          { requestId: req.requestId, method: req.method, path: req.path, userId: user.id, role: normalizedUserRole, allowedRoles: normalizedAllowedRoles },
+          { requestId: req.requestId, method: req.method, path: req.path, userId: user.id, role: normalizedUserRole, rawRole: user.role, allowedRoles: normalizedAllowedRoles },
           "Accès autorisé",
         );
       }
