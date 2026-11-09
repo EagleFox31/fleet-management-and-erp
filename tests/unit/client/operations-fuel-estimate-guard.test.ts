@@ -29,6 +29,22 @@ describe("opérations : carburant estimé jamais présenté comme chiffre d'affa
   });
 });
 
+describe("Q19 : le carburant estimé est masqué selon le rôle, pas selon la donnée", () => {
+  // Masquer sur `=== null` montrerait « 0 F » (liste vide) ou « Indisponible » (statistiques
+  // absentes) à un rôle qui n'a pas le droit de lire le budget.
+  it("bandeau des opérations : tuile gardée par canReadMissionBudget(user?.role)", () => {
+    expect(dashboard).toMatch(/const fuelEstimateRedacted = !canReadMissionBudget\(user\?\.role\);/);
+    expect(code(dashboard)).not.toMatch(/estimatedFuelCost\s*[!=]==\s*null/);
+  });
+
+  it("clients-panel : ligne « Carburant estimé » gardée par canReadMissionBudget(user?.role)", () => {
+    expect(panel).toMatch(/const canSeeFuelEstimate = canReadMissionBudget\(user\?\.role\);/);
+    const at = panel.indexOf("Carburant estimé:");
+    expect(panel.slice(panel.lastIndexOf("{", panel.lastIndexOf("<p", at)), at)).toMatch(/\{canSeeFuelEstimate &&/);
+    expect(code(panel)).not.toMatch(/estimatedFuelCost\s*[!=]==\s*null/);
+  });
+});
+
 describe("bandeau des opérations : une lecture en échec n'est pas un 0", () => {
   it("chiffres lus par clientTotals et statDisplay, sans repli à zéro", () => {
     expect(code(dashboard)).not.toMatch(/\|\|\s*0\b|\?\?\s*0\b|\.data \|\| \[\]/);

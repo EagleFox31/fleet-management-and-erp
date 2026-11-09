@@ -122,10 +122,16 @@ describe("garde-journal", () => {
     expect(r).toEqual([]);
   });
 
-  it("accepte le journal de couverture comme journal", async () => {
+  it("accepte un fragment du journal de couverture comme journal", async () => {
     const { commitsSansJournal } = await charger("garde-journal");
-    const r = commitsSansJournal([commit("eee5555", ["tests/unit/a.test.ts", "docs/qa/JOURNAL_COUVERTURE.md"])]);
+    const r = commitsSansJournal([commit("eee5555", ["tests/unit/a.test.ts", "docs/qa/journal/2026-11-09T1700-alertes.md"])]);
     expect(r).toEqual([]);
+  });
+
+  it("n'accepte plus l'ancien fichier unique du journal de couverture", async () => {
+    const { commitsSansJournal } = await charger("garde-journal");
+    const r = commitsSansJournal([commit("fff6666", ["tests/unit/a.test.ts", "docs/qa/JOURNAL_COUVERTURE.md"])]);
+    expect(r.map((c) => c.hash)).toEqual(["fff6666"]);
   });
 
   it("laisse finir l'agent quand stop_hook_active est vrai (pas de boucle)", () => {

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/useAuth";
+import { canReadMissionBudget } from "@/lib/mission-budget-ui";
 import { apiRequest } from "@/lib/queryClient";
 import { cn, formatNumber, formatPrice } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -147,6 +148,7 @@ function toFormValues(client: DbClient): ClientFormValues {
 
 export function ClientsPanel() {
   const { user } = useAuth();
+  const canSeeFuelEstimate = canReadMissionBudget(user?.role);
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const canManageClients = CLIENT_MANAGER_ROLES.has(normalizeRole(user?.role));
@@ -497,10 +499,11 @@ export function ClientsPanel() {
         const stats = getStatsForClient(row);
 
         // Pas de chiffre d'affaires ni de marge ici : `estimatedFuelCost` est un carburant estimé
-        // (décision du 2026-11-09). Masqué (null) hors lecteurs du budget (Q19) : la ligne disparaît.
+        // (décision du 2026-11-09). Q19 : la ligne est masquée selon le rôle, pas selon la donnée
+        // (statistiques absentes → « Indisponible » montré à un non-lecteur sinon).
         return (
           <div className="space-y-1 text-xs" data-testid={`client-${row.id}-fuel-costs`}>
-            {stats?.estimatedFuelCost !== null && (
+            {canSeeFuelEstimate && (
               <p className="text-gray-500">
                 Carburant estimé: <span className="font-semibold text-gray-800">{statText(stats?.estimatedFuelCost, formatPrice)}</span>
               </p>

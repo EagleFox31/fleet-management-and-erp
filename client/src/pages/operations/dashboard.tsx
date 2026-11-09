@@ -15,10 +15,13 @@ import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { listQueryView, readyData } from "@/lib/query-view";
 import { clientTotals, LOADING_VALUE, statDisplay } from "@/lib/secretary-dashboard-stats";
 import type { ClientSummary } from "@/services/operationsService";
+import { useAuth } from "@/hooks/useAuth";
+import { canReadMissionBudget } from "@/lib/mission-budget-ui";
 
 export default function OperationsDashboard() {
   const { statsByClient, statsByDestination, upcomingMissions, activeMissions } = useOperations();
   const [location, setLocation] = useLocation();
+  const { user } = useAuth();
 
   type OperationsTab = "missions" | "clients" | "destinations" | "invoices";
   const allowedTabs: OperationsTab[] = ["missions", "clients", "destinations", "invoices"];
@@ -45,8 +48,8 @@ export default function OperationsDashboard() {
   const clientsList = readyData(statsView, null);
   const totals = clientTotals(clientsList);
   // Q19 : le carburant estimé est masqué (null) hors lecteurs du budget ; la tuile disparaît.
-  const fuelEstimateRedacted =
-    clientsList !== null && clientsList.length > 0 && clientsList.every((client) => client.estimatedFuelCost === null);
+  // Selon le rôle, pas selon la donnée : une liste vide donnerait sinon « 0 F » à un non-lecteur.
+  const fuelEstimateRedacted = !canReadMissionBudget(user?.role);
   const activeMissionsView = listQueryView<unknown>(activeMissions);
   const activeMissionsCount = activeMissionsView.kind === "ready" ? activeMissionsView.data.length : null;
   const activeClientNames = (clientsList ?? [])

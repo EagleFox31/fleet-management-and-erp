@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useState } from "react";
 import { formatPrice } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 
 interface SupplierInvoiceDetails {
@@ -130,9 +131,12 @@ export default function SupplierInvoiceDetailsPage() {
   });
 
   const settlementsQueryKey = [`/api/supplier-invoices/${invoiceId}/settlements`] as const;
-  const { data: settlements = [], refetch: refetchSettlements } = useQuery<SupplierInvoiceSettlementItem[]>({
+  const { data: settlementsData, error: settlementsError, refetch: refetchSettlements } = useQuery<SupplierInvoiceSettlementItem[]>({
     queryKey: settlementsQueryKey,
   });
+  // Règlements illisibles : la liste vide de repli ferait lire « 0 en attente » et pré-remplir un montant trop élevé.
+  const settlementsFailed = settlementsData === undefined && !!settlementsError;
+  const settlements = settlementsData ?? [];
 
   const syncInvoiceCaches = (nextInvoice: any) => {
     // 1) Détail facture
@@ -381,8 +385,8 @@ export default function SupplierInvoiceDetailsPage() {
   const numericBalance = Number(invoice.balance || 0);
   const remainingToRecord = Math.max(numericBalance - pendingReconciliationAmount, 0);
   const hasRecordedSettlement = settlements.some((s) => s.status === "recorded");
-  const showRecordPaymentButton = invoice.status === "approved" && canPay && remainingToRecord > 0.01;
-  const showReconcileHint = invoice.status === "approved" && canPay && hasRecordedSettlement && remainingToRecord <= 0.01;
+  const showRecordPaymentButton = invoice.status === "approved" && canPay && !settlementsFailed && remainingToRecord > 0.01;
+  const showReconcileHint = invoice.status === "approved" && canPay && !settlementsFailed && hasRecordedSettlement && remainingToRecord <= 0.01;
 
   const validationHint = scope === "parts"
     ? "Validation pièces atelier : Admin, Magasinier ou Chef d'atelier."
@@ -729,11 +733,11 @@ export default function SupplierInvoiceDetailsPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3">
               <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-1">Rapproché</p>
-              <p className="text-sm font-bold text-success">{formatCurrency(reconciledAmount)}</p>
+              <p className="text-sm font-bold text-success">{settlementsFailed ? UNAVAILABLE : formatCurrency(reconciledAmount)}</p>
             </div>
             <div className="rounded-xl bg-warning/10 border border-warning/20 px-4 py-3">
               <p className="text-[10px] font-bold uppercase tracking-widest text-warning-text mb-1">Saisi non rapproché</p>
-              <p className="text-sm font-bold text-warning-text">{formatCurrency(pendingReconciliationAmount)}</p>
+              <p className="text-sm font-bold text-warning-text">{settlementsFailed ? UNAVAILABLE : formatCurrency(pendingReconciliationAmount)}</p>
             </div>
             <div className="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3">
               <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500 mb-1">Solde restant</p>
@@ -741,7 +745,15 @@ export default function SupplierInvoiceDetailsPage() {
             </div>
           </div>
 
-          {settlements.length === 0 ? (
+          {settlementsFailed ? (
+            <div
+              className="rounded-xl border border-dashed border-destructive/30 bg-destructive/10 px-4 py-6 text-center text-sm text-destructive-text"
+              role="alert"
+              data-testid="settlements-load-error"
+            >
+              {userMessageOf(settlementsError, "Impossible de charger les règlements.")} L'enregistrement d'un règlement est suspendu.
+            </div>
+          ) : settlements.length === 0 ? (
             <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center text-sm text-gray-500">
               Aucun règlement saisi.
             </div>

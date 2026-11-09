@@ -8,6 +8,7 @@ import { eq, and, asc, desc, inArray, ne, notInArray, or, ilike, isNull } from "
 import { insertMissionSchema, insertAssignmentSchema } from "@shared/schema";
 import { FuelCardService, toFuelCardAppError } from "../services/fuel-card-service";
 import { storage } from "../storage";
+import { usersByRolesBestEffort } from "../lib/alert-recipients";
 import { z } from "zod";
 import {
   getMissionEligibility,
@@ -3575,10 +3576,11 @@ router.post("/:id/document-renewal-requests", async (req, res, next) => {
       });
     }
 
-    const recipients = [
-      ...(await storage.getUsersByRole("admin")),
-      ...(await storage.getUsersByRole("secretary")),
-    ];
+    // Une lecture des destinataires en échec réduit la notification au demandeur, sans 500.
+    const recipients = await usersByRolesBestEffort(["admin", "secretary"], log, {
+      requestId: req.requestId,
+      missionId: mission.id,
+    });
 
     // Inclure le demandeur pour confirmation immédiate dans sa cloche.
     const recipientIds = Array.from(

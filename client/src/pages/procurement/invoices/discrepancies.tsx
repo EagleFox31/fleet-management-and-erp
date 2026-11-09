@@ -5,11 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatPrice } from "@/lib/utils";
+import { userMessageOf } from "@/lib/api-error";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 import { SUPPLIER_INVOICE_DISCREPANCIES_PATH, type DiscrepancyResult } from "@shared/contracts/supplier-invoice-discrepancies";
 
 export default function InvoiceDiscrepanciesPage() {
   // Charger les factures avec écarts
-  const { data, isLoading } = useQuery<DiscrepancyResult>({
+  const { data, isLoading, error } = useQuery<DiscrepancyResult>({
     queryKey: [SUPPLIER_INVOICE_DISCREPANCIES_PATH],
   });
 
@@ -25,6 +27,8 @@ export default function InvoiceDiscrepanciesPage() {
     });
   };
 
+  // Échec de lecture : « 0 écart » et « 0 FCFA » ne sont pas des valeurs, les tuiles lisent « Indisponible ».
+  const failed = data === undefined && !!error;
   const discrepancies = data?.discrepancies || [];
   const totalDiscrepancyAmount = data?.totalDiscrepancyAmount || 0;
   const averageVariance = data?.averageVariance || 0;
@@ -58,7 +62,7 @@ export default function InvoiceDiscrepanciesPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-orange-600" data-testid="stat-discrepancy-count">
-              {discrepancies.length}
+              {failed ? UNAVAILABLE : discrepancies.length}
             </div>
           </CardContent>
         </Card>
@@ -70,7 +74,7 @@ export default function InvoiceDiscrepanciesPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-orange-600" data-testid="stat-total-variance">
-              {formatCurrency(totalDiscrepancyAmount)}
+              {failed ? UNAVAILABLE : formatCurrency(totalDiscrepancyAmount)}
             </div>
           </CardContent>
         </Card>
@@ -82,7 +86,7 @@ export default function InvoiceDiscrepanciesPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-orange-600" data-testid="stat-avg-variance">
-              {averageVariance.toFixed(2)}%
+              {failed ? UNAVAILABLE : `${averageVariance.toFixed(2)}%`}
             </div>
           </CardContent>
         </Card>
@@ -99,6 +103,10 @@ export default function InvoiceDiscrepanciesPage() {
         <CardContent>
           {isLoading ? (
             <div className="text-center py-8 text-gray-500">Chargement...</div>
+          ) : failed ? (
+            <div className="text-center py-12 text-destructive-text" role="alert" data-testid="discrepancies-load-error">
+              {userMessageOf(error, "Impossible de charger les écarts de facturation.")}
+            </div>
           ) : discrepancies.length === 0 ? (
             <div className="text-center py-12">
               <CheckCircle className="mx-auto h-16 w-16 text-green-500 mb-4" />
