@@ -151,6 +151,9 @@ function after(html: string, label: string): string {
   return html.slice(at, at + 400).replace(/<[^>]*>/g, "|");
 }
 
+const MSG = "Service carburant injoignable, réessayez";
+const FAILURE_MSG = { error: new Error(MSG) };
+
 describe("rendu: carte carburant et pleins en échec affichent Indisponible, jamais 0", () => {
   describe("tableau de bord (dashboard)", () => {
     it("échec : « Solde carte carburant » lit Indisponible", async () => {
@@ -193,6 +196,44 @@ describe("rendu: carte carburant et pleins en échec affichent Indisponible, jam
     });
   });
 
+  describe("logistique : statistiques de carburant (Volume consommé)", () => {
+    it("échec : les deux tuiles « Volume consommé » lisent Indisponible avec le message", async () => {
+      const { default: Page } = await import("@/pages/logistics/dashboard");
+      const html = render(Page, [[K.balance, { data: BALANCE }], [K.stats, FAILURE_MSG]]);
+      const tiles = [...html.matchAll(/<p[^>]*>Volume consommé<\/p><p[^>]*>((?:(?!<\/p>).)*)<\/p>/g)].map((m) => m[1]);
+      expect(tiles.length).toBeGreaterThanOrEqual(2);
+      for (const value of tiles) expect(value).toBe("Indisponible");
+      expect(html).toContain(MSG);
+      expect(html).not.toContain("0 L");
+    });
+
+    it("témoin : statistiques saines, 7777 L affichés", async () => {
+      const { default: Page } = await import("@/pages/logistics/dashboard");
+      const html = render(Page, [[K.balance, { data: BALANCE }], [K.stats, { data: STATS }]]);
+      expect(squash(kpiValue(html, "Volume consommé"))).toBe("7777L");
+      expect(html).not.toContain("Indisponible");
+    });
+  });
+
+  describe("tableau de bord client : statistiques de carburant", () => {
+    it("échec : « Volume carburant » et « Litres consommés » lisent Indisponible, « Consommation totale » aussi si la carte échoue", async () => {
+      const { default: Page } = await import("@/pages/client/dashboard");
+      const html = render(Page, [[K.balance, FAILURE], [K.stats, FAILURE_MSG]]);
+      expect(kpiValue(html, "Volume carburant")).toBe("Indisponible");
+      expect(kpiSubValue(html, "Volume carburant")).toBe(MSG);
+      expect(after(html, "Litres consommés</span>")).toContain("Indisponible");
+      expect(after(html, "Consommation totale")).toContain("Indisponible");
+    });
+
+    it("témoin : statistiques saines, 7777 L", async () => {
+      const { default: Page } = await import("@/pages/client/dashboard");
+      const html = render(Page, [[K.balance, { data: BALANCE }], [K.stats, { data: STATS }]]);
+      expect(squash(kpiValue(html, "Volume carburant"))).toBe("7777L");
+      expect(squash(after(html, "Litres consommés</span>"))).toContain("7777L");
+      expect(html).not.toContain("Indisponible");
+    });
+  });
+
   describe("tableau de bord client (client/dashboard)", () => {
     it("échec : « Dépense carburant » lit Indisponible", async () => {
       const { default: Page } = await import("@/pages/client/dashboard");
@@ -226,6 +267,14 @@ describe("rendu: carte carburant et pleins en échec affichent Indisponible, jam
       expect(squash(kpiValue(html, "Solde carte carburant"))).toContain("12345");
     });
 
+    it("échec pleins : la sous-ligne porte le message de l'erreur, pas un texte fixe", async () => {
+      const { default: Page } = await import("@/pages/fuel/index");
+      const html = render(Page, [[K.balance, { data: BALANCE }], [K.records, FAILURE_MSG]]);
+      for (const label of ["Pleins enregistrés", "Litres consommés", "Coût total"]) {
+        expect(kpiSubValue(html, label)).toBe(MSG);
+      }
+    });
+
     it("témoin : données saines, 12 345 (solde), 1 plein, 7777 L, 88 888 de coût", async () => {
       const { default: Page } = await import("@/pages/fuel/index");
       const html = render(Page, [[K.balance, { data: BALANCE }], [K.records, { data: RECORDS }]]);
@@ -246,6 +295,12 @@ describe("rendu: carte carburant et pleins en échec affichent Indisponible, jam
       }
     });
 
+    it("échec : sous-ligne avec le message de l'erreur sous les tuiles gardées", async () => {
+      const { FuelStatistics } = await import("@/components/fuel/fuel-statistics");
+      const html = render(FuelStatistics, [[K.stats, FAILURE_MSG], [K.history, FAILURE_MSG]]);
+      expect(html.split(MSG).length - 1).toBe(4);
+    });
+
     it("échec historique : « Nb de pleins » lit Indisponible", async () => {
       const { FuelStatistics } = await import("@/components/fuel/fuel-statistics");
       const html = render(FuelStatistics, [[K.stats, { data: STATS }], [K.history, FAILURE]]);
@@ -263,6 +318,7 @@ describe("rendu: carte carburant et pleins en échec affichent Indisponible, jam
       expect(squash(statCardValue(html, "Coût total"))).toContain("88888");
       expect(statCardValue(html, "Nb de pleins")).toBe("3");
       expect(html).not.toContain("Indisponible");
+      expect(html).not.toContain(MSG);
     });
   });
 });
