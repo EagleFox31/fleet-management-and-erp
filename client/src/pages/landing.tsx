@@ -28,7 +28,8 @@ import {
   ChevronRight,
   Minus,
   KeyRound,
-  Lightbulb
+  Lightbulb,
+  PlayCircle
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useState, useEffect, useRef, type ElementType } from "react";
@@ -134,6 +135,17 @@ function VideoBackground({ opacity = 0.85 }: { opacity?: number }) {
 }
 
 // Types de profils utilisateurs (9 profils métier)
+/** Vidéo de démonstration par profil (client/public/demos), données de démonstration uniquement. */
+const PROFILE_DEMO_VIDEOS: Partial<Record<string, string>> = {
+  workshop_manager: "/demos/workshop_manager.mp4",
+  technician: "/demos/technician.mp4",
+  warehouse: "/demos/warehouse.mp4",
+  logistics: "/demos/logistics.mp4",
+  secretary: "/demos/secretary.mp4",
+  management: "/demos/management.mp4",
+  driver: "/demos/driver.mp4",
+};
+
 const userProfiles = [
   {
     id: "admin",
@@ -1315,6 +1327,11 @@ export default function LandingPage() {
                           <Icon className={`h-5 w-5 ${profile.color}`} />
                         </div>
                         <span className="text-[11px] font-semibold text-slate-400 group-hover:text-emerald-300 flex items-center gap-1 transition-colors">
+                          {PROFILE_DEMO_VIDEOS[profile.id] && (
+                            <span className="flex items-center gap-1 mr-1.5 text-emerald-400" data-testid={`badge-video-${profile.id}`}>
+                              <PlayCircle className="h-3.5 w-3.5" /> Vidéo
+                            </span>
+                          )}
                           Guide <ChevronRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
                         </span>
                       </div>
@@ -1524,6 +1541,23 @@ export default function LandingPage() {
               </DialogHeader>
 
               <div className="space-y-6 mt-4">
+                {PROFILE_DEMO_VIDEOS[selectedProfile] && (
+                  <div>
+                    <h4 className="font-semibold text-lg mb-3 flex items-center gap-2">
+                      <PlayCircle className="h-5 w-5 text-emerald-400" /> Vidéo de démonstration
+                    </h4>
+                    <video
+                      key={selectedProfile}
+                      src={PROFILE_DEMO_VIDEOS[selectedProfile]}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      className="w-full rounded-lg border border-white/10 bg-black aspect-video"
+                      data-testid={`video-demo-${selectedProfile}`}
+                    />
+                  </div>
+                )}
+
                 {/* Identifiants et accès */}
                 <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-4">
                   <h4 className="font-semibold text-emerald-400 mb-1 flex items-center gap-2">
