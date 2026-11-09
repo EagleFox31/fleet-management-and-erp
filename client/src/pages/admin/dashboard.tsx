@@ -104,6 +104,9 @@ export default function AdminDashboard() {
   const usersCount = Array.isArray(users) ? users.length : 0;
   const activeWorkOrders = Number(workOrderStats?.pending || 0) + Number(workOrderStats?.inProgress || 0);
 
+  // Statistiques de stock illisibles et sans donnée : « Indisponible », jamais 0.
+  const statsFailed = warehouse.statistics.data === undefined && !!warehouse.statistics.error;
+
   return (
     <div className="space-y-5">
       <HeaderCard
@@ -154,8 +157,8 @@ export default function AdminDashboard() {
             <KpiTile
               data-testid="admin-kpi-parts"
               label="Pièces en stock"
-              value={formatNumber(warehouse.statistics.data?.totalParts || 0)}
-              subValue={`${warehouse.statistics.data?.lowStockCount || 0} alertes stock bas`}
+              value={statsFailed ? UNAVAILABLE : formatNumber(warehouse.statistics.data?.totalParts || 0)}
+              subValue={statsFailed ? userMessageOf(warehouse.statistics.error, "Les statistiques de stock sont momentanément indisponibles.") : `${warehouse.statistics.data?.lowStockCount || 0} alertes stock bas`}
               icon={<Package className="h-4 w-4" />}
               iconWrapperClassName="bg-blue-50 text-blue-600"
             />
