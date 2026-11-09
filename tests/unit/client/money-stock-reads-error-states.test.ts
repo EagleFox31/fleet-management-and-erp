@@ -213,6 +213,6 @@ describe("valeur du stock et alertes de r√©appro : jamais 0 sur une lecture en √
     const src = read("client/src/components/alerts/alerts-panel.tsx");
     expect(src).toMatch(/const reorderAlertsView = queryView\(reorderAlertsQuery\)/);
     expect(src).toMatch(/data-testid="alerts-reorder-error"/);
-    expect(src).toMatch(/emptyState=\{\s*reorderAlertsFailed \?/);
+    expect(src).toMatch(/emptyState=\{\s*reorderAlertsFailed( \|\| alertsFailed)? \?/);
   });
 });
