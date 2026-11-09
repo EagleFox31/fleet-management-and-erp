@@ -21,6 +21,8 @@ import {
 import { format, differenceInDays } from "date-fns";
 import { fr } from "date-fns/locale";
 import { useAuth } from "@/hooks/useAuth";
+import { fetchAllWorkOrders } from "@/lib/fetch-all-work-orders";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 
 interface Vehicle {
   id: number;
@@ -66,11 +68,18 @@ export default function DateBasedAlertsPage() {
     queryKey: ["/api/vehicles"]
   });
 
-  // Requête work-orders pour dériver l'état réel depuis la BD
-  const { data: workOrdersData } = useQuery<any>({
-    queryKey: ["/api/work-orders", { limit: 300, offset: 0 }],
+  // OT existants, pour savoir si une alerte a déjà son OT : liste complète (toutes les pages).
+  // Lue sur les 300 derniers seulement, un OT plus ancien était ignoré, l'alerte redevenait
+  // « à faire » et la génération en masse pouvait créer un doublon. Même préfixe de clé : les
+  // invalidations et le rechargement après création s'appliquent.
+  const workOrdersQuery = useQuery<any[]>({
+    queryKey: ["/api/work-orders", "all"],
+    queryFn: () => fetchAllWorkOrders(),
     staleTime: 0,
   });
+  // Tant que la liste complète n'est pas lue avec succès, on ne sait pas quelles alertes ont
+  // déjà leur OT : aucune création, jamais « à faire » par défaut.
+  const workOrdersKnown = workOrdersQuery.status === "success";
 
   const vehicles = (vehiclesData as any)?.vehicles || [];
 
@@ -84,7 +93,7 @@ export default function DateBasedAlertsPage() {
 
   // Clés dérivées des OT réels en BD (pending uniquement)
   const serverDoneKeys = useMemo<Set<string>>(() => {
-    const wos = (workOrdersData as any)?.workOrders ?? [];
+    const wos = workOrdersQuery.data ?? [];
     const keys = new Set<string>();
     wos.forEach((wo: any) => {
       if (!wo.vehicleId || !wo.title || wo.status === 'cancelled') return;
@@ -96,7 +105,7 @@ export default function DateBasedAlertsPage() {
       }
     });
     return keys;
-  }, [workOrdersData]);
+  }, [workOrdersQuery.data]);
 
   // Union : optimiste (feedback immédiat) + serveur (source de vérité)
   const doneKeys = useMemo(
@@ -193,7 +202,7 @@ export default function DateBasedAlertsPage() {
 
   const createForAlert = async (alert: DateAlert) => {
     const key = getAlertKey(alert);
-    if (doneKeys.has(key) || loadingKeys.has(key)) return;
+    if (!workOrdersKnown || doneKeys.has(key) || loadingKeys.has(key)) return;
     setLoadingKeys(prev => new Set([...prev, key]));
     try {
       const response = await fetch("/api/test-date-maintenance", {
@@ -315,17 +324,29 @@ export default function DateBasedAlertsPage() {
           </div>
           {canCreateWorkOrder && <Button
             onClick={generateAllOTs}
-            disabled={globalLoading || pendingMaintenanceAlerts.length === 0}
+            disabled={globalLoading || !workOrdersKnown || pendingMaintenanceAlerts.length === 0}
             className="flex items-center gap-2"
           >
             {globalLoading
               ? <><Loader2 className="h-4 w-4 animate-spin" /> Génération...</>
+              : !workOrdersKnown
+                ? <><CheckCircle className="h-4 w-4" /> Générer les OT atelier</>
               : pendingMaintenanceAlerts.length === 0
                 ? <><CheckCircle className="h-4 w-4" /> Tout traité</>
                 : <><CheckCircle className="h-4 w-4" /> Générer les OT atelier ({pendingMaintenanceAlerts.length})</>
             }
           </Button>}
         </div>
+        {workOrdersQuery.isError && (
+          <div className="px-6 pb-3">
+            <InlineQueryError
+              error={workOrdersQuery.error}
+              fallback="Les ordres de travail existants n'ont pas pu être lus : la création d'OT est suspendue. Réessayez."
+              onRetry={() => workOrdersQuery.refetch()}
+              isRetrying={workOrdersQuery.isFetching}
+            />
+          </div>
+        )}
 
         {/* KPI Cards */}
         <div className="px-6 pb-3 grid grid-cols-4 gap-3">
@@ -538,7 +559,7 @@ export default function DateBasedAlertsPage() {
                             variant={isExpired ? "destructive" : "default"}
                             className="h-7 text-xs px-3"
                             onClick={() => createForAlert(alert)}
-                            disabled={isLoading}
+                            disabled={isLoading || !workOrdersKnown}
                           >
                             {isLoading
                               ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
