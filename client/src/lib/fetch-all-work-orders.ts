@@ -27,7 +27,9 @@ export async function fetchAllWorkOrders<T = any>(
   { pageSize = WORK_ORDERS_PAGE_SIZE, maxPages = WORK_ORDERS_MAX_PAGES } = {},
 ): Promise<T[]> {
   const limit = pageSize * maxPages;
-  const all: T[] = [];
+  // Par id : un OT répété d'une page à l'autre (dates de création égales) ne compte qu'une fois,
+  // et l'écart avec `total` révèle alors l'OT sauté au lieu de le masquer.
+  const byId = new Map<unknown, T>();
   let total: number | null = null;
 
   for (let page = 0; page < maxPages; page++) {
@@ -41,15 +43,22 @@ export async function fetchAllWorkOrders<T = any>(
       total = body.total;
       if (total > limit) {
         throw new ReportRefusedError(
-          `Trop d'ordres de travail pour un seul rapport (${total}, limite ${limit.toLocaleString("fr-FR")}) : le rapport n'a pas été généré.`,
+          `Trop d'ordres de travail pour un seul rapport (${total.toLocaleString("fr-FR")}, limite ${limit.toLocaleString("fr-FR")}) : le rapport n'a pas été généré.`,
         );
       }
+    } else if (body.total !== total) {
+      // OT créé ou supprimé pendant la lecture : les pages ne décrivent plus la même liste.
+      throw new ReportRefusedError(UNREADABLE);
     }
-    all.push(...(body.workOrders as T[]));
-    if (all.length >= total || body.workOrders.length === 0) break;
+    for (const item of body.workOrders as T[]) {
+      const id = (item as { id?: unknown } | null)?.id;
+      if (id === undefined || id === null) throw new ReportRefusedError(UNREADABLE);
+      byId.set(id, item);
+    }
+    if ((page + 1) * pageSize >= total || body.workOrders.length === 0) break;
   }
 
-  // Page vide avant `total`, ou total qui change en cours de lecture : liste incomplète.
-  if (total === null || all.length !== total) throw new ReportRefusedError(UNREADABLE);
-  return all;
+  // Page vide avant `total`, OT répété ou sauté : liste incomplète.
+  if (total === null || byId.size !== total) throw new ReportRefusedError(UNREADABLE);
+  return [...byId.values()];
 }

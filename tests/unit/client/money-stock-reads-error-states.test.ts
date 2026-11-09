@@ -178,6 +178,11 @@ describe("valeur du stock et alertes de réappro : jamais 0 sur une lecture en �
     expect(src).toMatch(/view: reorderAlertsView,\s*failed: reorderAlertsView\.kind === "error"/);
   });
 
+  it("useWarehouse : l'échec de l'agrégat serveur (403) n'affiche pas « Indisponible » pendant que les sources chargent", () => {
+    const src = read("client/src/hooks/useWarehouse.ts");
+    expect(src).toMatch(/const reorderAlertsError = lowStockPartsQuery\.error \|\| partRequirementsQuery\.error;/);
+  });
+
   const DASHBOARDS = [
     "client/src/pages/admin/dashboard.tsx",
     "client/src/pages/dashboard.tsx",

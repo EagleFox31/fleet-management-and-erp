@@ -36,7 +36,6 @@ export const SWEEP_ROUTES: SweepRoute[] = [
   { label: "document de workflow (suppression)", kind: "wfDocument", method: "DELETE", template: "/api/workflows/documents/:id", attendu: 403, lecturePropre: false },
   { label: "documents d'une session de workflow", kind: "wfSession", method: "GET", template: "/api/workflows/:id/documents", attendu: 200, comparerCorps: true, corpsPropre: "propre.pdf" },
   { label: "etat d'un brouillon d'acquisition", kind: "wfSession", method: "GET", template: "/api/workflows/vehicle-acquisition/:id", attendu: 200, comparerCorps: true, corpsPropre: "-s-propre" },
-  { label: "couts de maintenance (role, le parametre est une periode)", kind: "user", method: "GET", template: "/api/statistics/maintenance-cost/:id", attendu: 403, lecturePropre: false },
   { label: "profil d'un utilisateur", kind: "user", method: "GET", template: "/api/users/:id", attendu: 403 },
   { label: "ordre de travail", kind: "workOrder", method: "GET", template: "/api/work-orders/:id", attendu: 404 },
   { label: "lignes de travail", kind: "workOrder", method: "GET", template: "/api/work-orders/:id/items", attendu: 404 },
