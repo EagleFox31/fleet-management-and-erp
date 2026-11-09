@@ -3443,3 +3443,41 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/unit/server/correlated-subquery-hygiene.test.ts` fige le rendu de Drizzle (`vehicle_id = "id"`) et échoue sur toute sous-requête corrélée `sql\`(SELECT … ${table.colonne})\`` dans la liste d'un `.select({…})` sans jointure sous `server/` (liste gelée vide). Rejouée avec le service de main (0d34c619) copié dans `server/`, elle est rouge sur exactement les deux sous-requêtes de rotation ;
   - `tests/integration/tire-statistics-advanced-sql.test.ts` : comparaison ancien / nouveau calcul sur données seedées, et une seule requête émise.
 - **Leçon généralisée** : un fragment `sql` qui interpole une colonne Drizzle ne dit pas comment elle sera écrite : cela dépend de la requête qui l'accueille. Pour une sous-requête corrélée, écrire les alias soi-même. Et un test qui compare un nouveau calcul à l'ancien peut révéler un défaut de l'ancien : l'écart s'explique et se prouve avant de choisir quel résultat garder.
+
+## 2026-11-09 — Liste paginée tronquée sans signal : récidive côté client (#599, #606)
+
+- **Contexte** : le rapport PDF des coûts de maintenance lisait `GET /api/work-orders` en un seul appel, sans `limit`. Il n'obtenait que les 50 premiers OT et sous-évaluait le total sans le dire (#599). Une semaine plus tard, en relecture de la même zone : les rapports d'utilisation, de coûts et de carburant lisaient `fetch('/api/vehicles?limit=1000')`. Au-delà de 1000 véhicules, les suivants manquaient sans le signaler.
+- **Cause racine** : une liste paginée par l'API (`{ <liste>, total }`) est lue comme si une page était la liste entière. Un plafond en dur (`limit=1000`, `limit: 300`) donne l'illusion du « tout » tant que le volume reste petit. Le `total` renvoyé par l'API n'est jamais comparé au nombre de lignes reçues.
+- **Classification** : récidive d'un motif connu (lecture qui renvoie une partie présentée comme le tout), cette fois côté client. Le correctif de #599 était local à un appel et ne protégeait pas les autres.
+- **Résolution** :
+  - #599 : `fetchAllWorkOrders`, lecture page par page jusqu'à `total`, avec refus du rapport (`ReportRefusedError`) si une page manque ;
+  - #606 : extraction générique `fetchAllPages` (`client/src/lib/fetch-all-pages.ts`) avec dédoublonnage par id et refus si le total change, si une page est vide avant le total, si un élément n'a pas d'id, ou au-delà de 20 pages. `fetchAllVehicles` remplace les trois `limit=1000`. `fetchFuelRecords` refuse une lecture en échec au lieu de `[]`, car un rapport de carburant à 0 est un faux chiffre. Le refus porte un `detail` (chemin, statut HTTP, raison) journalisé par `reportErrorContext`, jamais affiché.
+- **Prévention vérifiée** : `tests/unit/client/capped-list-reads-hygiene.test.ts`.
+  - Il parcourt tout `client/src` et échoue sur `?limit=` / `&limit=` suivi d'un nombre d'au moins trois chiffres, ou sur `limit: <nombre>` d'au moins trois chiffres (paramètres d'une `queryKey`). Un « top N » (`limit=8`) n'est pas visé.
+  - Le motif retrouve les 3 cas de `pdf-export.ts` d'avant #606. À sa première exécution, il a aussi trouvé 7 cas dans 6 autres fichiers, dont 2 que la recherche manuelle avait manqués (`limit: 300` des OT de maintenance).
+  - Ces 7 cas sont gelés par fichier, en cliquet : le compte ne peut que baisser, et une entrée corrigée doit sortir de la liste. Il s'agit de l'export PDF de l'inventaire, des interventions, des alertes par date, de la liste des OT de maintenance, du sélecteur de pièces de l'OT et du dialogue de montage pneu.
+  - `tests/unit/client/fetch-all-pages.test.ts` couvre le doublon, le total qui change, la page vide, la borne, le statut HTTP gardé dans `detail` et l'absence de détail technique dans le message.
+- **Leçon généralisée** : une liste paginée ne se lit jamais en une page présentée comme le tout. Soit l'écran pagine, soit la lecture va jusqu'à `total` et refuse quand elle ne l'atteint pas. Un correctif local ne suffit pas pour un motif : il faut chercher les autres occurrences dans tout le code et poser une garde qui les compte.
+
+## 2026-11-09 — CI : port hôte fixe d'un service déjà pris sur la VM, le job meurt avant les tests (récidive)
+
+- **Contexte** : deux runs CI rouges en moins de 20 minutes, sans aucun test exécuté :
+  - run 42636230900 (#609), job `contract (2)`, 14:36 UTC ;
+  - run 42638967437 (#609), job `contract (3)`, 14:53 UTC.
+  Les deux échouent à l'étape « Initialize containers » : `failed to bind host port 0.0.0.0:54320/tcp: address already in use`. Les runners sont ceux hébergés par GitHub (`ubuntu-latest`), pas une machine locale.
+- **Cause racine** :
+  - `ci.yml` publiait les services de test sur des ports hôte fixes (`54320:5432` pour Postgres, `5433:80` pour wsproxy) dans les jobs `integration` et `contract`. Le port 54320 venait du docker-compose local, où il est voulu.
+  - Sur une VM partagée, rien ne garantit qu'un port fixe soit libre. Quand il est pris, Docker refuse de démarrer le service et le job tombe avant son premier test.
+  - Le rouge ne dit rien du code, mais il bloque la file de fusion.
+- **Classification** : défaut d'infrastructure de CI, récidive le même jour. Faux rouge, non lié au code testé.
+- **Résolution** :
+  - services en port hôte dynamique (`- 5432`, `- 80`) ;
+  - adresses construites par étape avec le port attribué : `DATABASE_URL` du schéma Drizzle avec `job.services.postgres.ports['5432']`, `DATABASE_WS_PROXY` avec `job.services.wsproxy.ports['80']`. Le contexte `job` n'existe qu'au niveau des étapes ;
+  - le schéma passe par `npx drizzle-kit push --force`, la même commande que `npm run test:db:schema` sans le port codé en dur ;
+  - le docker-compose local et `test:db:schema` gardent 54320 ;
+  - pas de relance pour débloquer : un échec répété appelle un contrôle plus fort.
+- **Prévention vérifiée** : `tests/unit/ci-service-ports-hygiene.test.ts`.
+  - Il échoue sur tout mappage de port hôte fixe (`NNNN:NNNN`, avec ou sans IP ni guillemets) dans `.github/workflows/*.yml`.
+  - Rejoué sur le `ci.yml` de main (31802e64), il est rouge sur les 4 lignes `54320:5432` et `5433:80`. Il est vert après correction.
+  - Preuve de bout en bout : un run vert sur toutes les shards `contract` et sur `integration`.
+- **Leçon généralisée** : un service de CI ne réserve jamais un port hôte fixe. On laisse Docker choisir et on lit le port attribué. Un faux rouge d'infrastructure qui revient se corrige à la source, avec une garde ; une relance ne fait que le masquer.

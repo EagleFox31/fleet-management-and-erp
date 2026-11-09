@@ -492,6 +492,8 @@ export default function TiresInventoryPage() {
     onSuccess: (result) => {
       clearDraftRotation(); // saisie enregistree: le brouillon n'a plus lieu d'etre
       queryClient.invalidateQueries({ queryKey: ['/api/tire-rotations'] });
+      // Tuile « Rotations ce mois » (couche 3, écran satellite).
+      queryClient.invalidateQueries({ queryKey: ['/api/tires/statistics-advanced'] });
       queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
       queryClient.invalidateQueries({ queryKey: ['/api/work-orders/statistics'] });
       setShowRotationModal(false);
@@ -1000,12 +1002,12 @@ export default function TiresInventoryPage() {
 
           {user?.role === "admin" && (
             <KpiTile
-              data-testid="kpi-replacement-rate"
+              data-testid="kpi-rotations-this-month"
               className="cursor-pointer transition-shadow hover:shadow-md"
               onClick={() => setActiveTab("rotations")}
-              label="Taux remplacement"
-              value={UNAVAILABLE /* `rotationsThisMonth` n'est pas servi par l'API : pas de 0 inventé */}
-              subValue="Remplacements ce mois"
+              label="Rotations ce mois"
+              value={statText(statistics?.rotationsThisMonth)}
+              subValue="Rotations enregistrées ce mois civil"
               icon={<TrendingUp className="h-4 w-4" />}
               iconWrapperClassName="bg-indigo-50 text-indigo-600"
             />
@@ -1120,7 +1122,7 @@ export default function TiresInventoryPage() {
               className="cursor-pointer transition-shadow hover:shadow-md"
               onClick={() => setActiveTab("mounted")}
               label="Usure moy. flotte"
-              value={statText(statistics?.averageWear, (mm) => `${mm.toFixed(1)}mm`)}
+              value={statistics?.noInspection ? "Aucune inspection" : statText(statistics?.averageWear, (mm) => `${mm.toFixed(1)}mm`)}
               subValue="Profondeur sculpture moyenne"
               icon={<Gauge className="h-4 w-4" />}
               iconWrapperClassName="bg-slate-100 text-slate-600"
@@ -1129,12 +1131,12 @@ export default function TiresInventoryPage() {
 
           {user?.role === "technician" && (
             <KpiTile
-              data-testid="kpi-rotations-assigned"
+              data-testid="kpi-rotations-this-month"
               className="cursor-pointer transition-shadow hover:shadow-md"
               onClick={() => setActiveTab("inspections")}
-              label="Rotations assignees"
-              value={UNAVAILABLE /* `rotationsThisMonth` n'est pas servi par l'API : pas de 0 inventé */}
-              subValue="A executer ce mois"
+              label="Rotations ce mois"
+              value={statText(statistics?.rotationsThisMonth)}
+              subValue="Rotations enregistrées ce mois civil"
               valueClassName="text-green-600"
               icon={<RotateCcw className="h-4 w-4" />}
               iconWrapperClassName="bg-green-50 text-green-600"
@@ -1473,15 +1475,11 @@ export default function TiresInventoryPage() {
               </div>
             </div>
             <div className="px-5 py-4">
+              {/* L'erreur et le bouton Réessayer sont dans l'encart en tête de page : ici, une simple mention. */}
               {pageState.kind === "ready" && pageState.statsError ? (
-                <InlineQueryError
-                  className="mb-5"
-                  error={pageState.statsError.error}
-                  fallback="Les alertes kilométriques sont momentanément indisponibles."
-                  onRetry={() => void statsQuery.refetch()}
-                  isRetrying={pageState.statsError.isRetrying}
-                  data-testid="rotation-alerts-error"
-                />
+                <p className="mb-5 text-sm text-muted-foreground" data-testid="rotation-alerts-unavailable">
+                  Alertes kilométriques indisponibles.
+                </p>
               ) : null}
               {((rotationDueCount ?? 0) > 0 || (rotationApproachingCount ?? 0) > 0) && (
                 <div className="mb-5 rounded-xl border border-blue-100 bg-blue-50/60 p-4 space-y-3">

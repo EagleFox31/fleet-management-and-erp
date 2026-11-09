@@ -2714,6 +2714,28 @@ soumission sans doublon.
 - **RAIDER** : D : aucun contrat touché ; aucune dépendance ajoutée, `vitest.config.ts` inchangé.
 - **Reste / risques** : l'onglet « Alertes » du magasin (répartition) n'est pas rendu par défaut, donc non couvert ; tuile « Stock bas / épuisé » de l'atelier (onglet Inventaire) idem, la garde `stockStatsFailed` est prouvée via « Alertes stock magasin ».
 
+## 2026-11-09T15:33:00+01:00 — Middleware auth : console.* migrés vers moduleLogger ; rendu des onglets Alertes (magasin) et Inventaire (atelier)
+
+- **Statut** : fait (PR brouillon)
+- **Quoi** :
+  - `server/middleware/auth.ts` : les 5 `console.log` migrés vers `moduleLogger("auth")` (aucun supprimé). Niveaux : contrôle à chaque requête et accès autorisé en debug, refus (non authentifié, rôle non autorisé) en info. Champs : requestId, method, path, userId, role, allowedRoles. Ni corps, ni cookie, ni session entière. Statuts HTTP inchangés ;
+  - `tests/unit/server/auth-no-console.test.ts` : aucun `console.*` dans auth.ts, passage par `moduleLogger("auth")`, aucun champ sensible journalisé. Rouge avant : 5 `console.log` relevés ;
+  - `money-stock-render-error-states.test.ts` : onglet Alertes du magasin (`warehouse-alert-summary-unavailable`) et tuile « Stock bas / épuisé » de l'atelier (onglet Inventaire). Les primitives `Tabs` sont remplacées dans le test pour choisir l'onglet actif, sans changement du produit.
+- **Comment tester (QA)** : `npx vitest run tests/unit/server/auth-no-console.test.ts tests/unit/client/money-stock-render-error-states.test.ts`. Rouge avec `statsFailed` (magasin) et `stockStatsFailed` (atelier) forcés à `false` : 4 tests rouges dont les deux nouveaux onglets ; vert sinon.
+- **RAIDER** : D : statuts et comportement du middleware inchangés ; failure memory : garde-fou de code contre le retour du `console.*`. Revue sécurité requise (auth.ts).
+- **Reste / risques** : environ 1 000 `console.*` restent côté serveur ailleurs.
+
+## 2026-11-09T16:55:00+01:00 — Middleware auth : champs journalisés vérifiés à l'exécution, rôle brut ajouté
+
+- **Statut** : fait (PR brouillon)
+- **Quoi** :
+  - `server/middleware/auth.ts` : `rawRole: user.role` ajouté aux journaux de `authorize` (refus et accès). `normalizeRole` ramène tout rôle inconnu à `user`, un 403 dû à un rôle mal saisi était sinon indiagnosticable ;
+  - `tests/unit/server/auth-log-fields.test.ts` : exécute `authenticate` et `authorize` sur une requête piégée (cookie, Authorization, jeton en query, mot de passe en corps, identifiant de session) avec les vraies `loggerOptions` au niveau debug sur un flux capturé. Chaque ligne n'a que les clés module, service, level, time, msg, requestId, method, path, hasSession, userId, role, rawRole, allowedRoles ; aucune valeur sensible n'apparaît ;
+  - `auth-no-console.test.ts` : l'extraction des appels de journal est limitée à chaque appel (une ligne, ou jusqu'à la première ligne `)`), au lieu d'avaler le code suivant.
+- **Comment tester (QA)** : `npx vitest run tests/unit/server/auth-log-fields.test.ts tests/unit/server/auth-no-console.test.ts`. Rouge avec `{ req }` ajouté au journal de `authenticate` (3 tests) et avec `user` ajouté au refus 403 (1 test) ; rouge avec un `console.log` réintroduit ; vert sinon.
+- **RAIDER** : D : statuts inchangés ; failure memory : garde d'exécution contre la fuite d'objets entiers dans les journaux.
+- **Reste / risques** : la garde ne couvre que `authenticate` et `authorize` (pas `isAdmin`, qui ne journalise qu'en erreur).
+
 ## 2026-11-09T14:31:03+01:00 — Alertes, demandes de pièces, catalogue de pannes, maintenance : une lecture en échec n'est plus un vide (6 lectures)
 - **Quoi** : `getPartRequirements`, `getFaultCatalogs`, `getMaintenanceCompliance`, `getScheduledMaintenanceCount`, `getAlertsByUserId`, `getUnreadAlertsByUserId` levaient `[]`, `0` ou `{0,0,0}` en cas d'erreur de base ; elles lèvent désormais une `AppError` 500 journalisée (`storageLog`, `{ err }`).
 - **Comment** : les deux appelants situés dans une mutation (`missions.routes.ts` demande de renouvellement, `routes.ts` déclenchement de maintenance par date) lisent les alertes non lues en meilleur effort (catch local, `log.warn` avec `requestId`, anti-doublon ignoré) : la mutation reste en 2xx. Écrans : badge et panneau des alertes (topnav), catalogue de pannes, tuile « Maintenances planifiées », tuile et compteur de conformité (tableau de bord atelier), encart des OT en attente de pièces affichent « Indisponible » ou un encart d'erreur, jamais 0.
@@ -2721,6 +2743,52 @@ soumission sans doublon.
 - **Comment tester (QA)** : `tests/unit/server/alerts-maintenance-reads-error.test.ts` (6 lectures, rouge 6/6 sur main) ; `tests/contract/mission-renewal-alert-read-failure.contract.test.ts` (POST 201 quand la lecture lève ; rouge 500 sans le catch) ; `tests/unit/client/alerts-maintenance-reads-error-states.test.ts` ; cliquet `swallowed-read-catch-hygiene` 40 → 34 ; tsc 0.
 - **RAIDER** : R : `InlineQueryError`, `AppError`, `storageLog` existants ; D : réponses de succès inchangées ; failure memory : leçon du 2026-11-07 appliquée. Ne s'appliquent pas : A, I, Retroactive (aucune donnée ni schéma touchés).
 - **Reste** : ~34 cas gelés ; `getUsersByRole` (notification de renouvellement) à traiter avec son appelant en meilleur effort.
+
+## 2026-11-09T15:19:00+01:00 — Rapports PDF : véhicules lus en entier, carburant sans repli à 0, logs migrés
+
+- **Statut** : fait (PR brouillon)
+- **Quoi** :
+  - `fetch-all-pages.ts` : lecture paginée générique extraite de `fetchAllWorkOrders` (dédoublonnage par id, refus si total qui change, page vide avant le total, élément sans id, borne de 20 pages). `fetchAllWorkOrders` délègue, mêmes exports et messages ;
+  - `fetchAllVehicles` (pages de 1000) remplace les trois `fetch('/api/vehicles?limit=1000')` des rapports d'utilisation, de coûts et de carburant : au-delà de 1000 véhicules, les suivants étaient omis sans le dire ;
+  - `fetchFuelRecords` : une lecture de `/api/fuel-records` en échec refuse le rapport (`ReportRefusedError`) au lieu de produire un rapport de carburant à 0 ; les `catch` des rapports d'utilisation et de carburant transmettent ce refus ;
+  - `pdf-export.ts` : les 18 `console.*` migrés vers `clientLogger` (13 appels ; regroupements listés dans la PR).
+- **Comment tester (QA)** :
+  - `tests/unit/client/fetch-all-pages.test.ts` (10 cas : 2 500 véhicules en 3 pages, échec en page 2, doublon, total qui change, page vide, borne 20 001, carburant en échec ou non-liste, chemin avec paramètres, élément sans id) ;
+  - `tests/unit/client/money-stock-reads-error-states.test.ts` : branchement de pdf-export (aucun `console.`, 3 `fetchAllVehicles`, 2 `fetchFuelRecords`, refus transmis), rouges avant, verts après ;
+  - `fetch-all-work-orders.test.ts` : 11 tests inchangés, verts ;
+  - campagnes : tsc 0, check:tests 0, unitaires 322 fichiers / 3361 tests. Aucun code serveur touché.
+- **RAIDER** : R : lecture paginée unique pour OT et véhicules ; D : contrats d'API inchangés, messages des OT inchangés.
+- **Reste / risques** : `/api/users` du rapport des coûts lu en un appel (non paginé côté serveur) ; `getWorkOrdersByOwner` non revu.
+
+## 2026-11-09T16:05:00+01:00 — Rapport des coûts : utilisateurs bornés ; OT d'un client départagés par id
+
+- **Statut** : fait (PR brouillon empilée sur #606)
+- **Quoi** :
+  - `/api/users` ne pagine pas (`getAllUsers` sans limite) : la liste est complète, mais son volume n'est pas borné. `fetchAllUsers` (sur `fetchUnpaginatedList`, qui sert aussi `fetchFuelRecords`) refuse une lecture en échec et tout volume au-delà de 10 000, avec un message lisible ; le statut HTTP reste dans `detail`, pour les logs ;
+  - `getWorkOrdersByOwner` triait par `createdAt` seul : à date égale, la liste d'un client pouvait répéter un OT d'une page à l'autre et en sauter un autre. Départage par `id` décroissant, comme `getWorkOrders` (#599). Aucun repli silencieux : la méthode n'a pas de catch.
+- **Comment tester (QA)** :
+  - `tests/integration/work-orders-pagination-tiebreak.test.ts`, cas « liste d'un client » : 6 OT de même date, lus un par page. Rouge avant : `[938, 938, 936, 935, 934, 933]` (937 sauté) ; vert après ;
+  - `tests/unit/client/fetch-all-pages.test.ts` : 10 000 utilisateurs acceptés, 10 001 refusés (message exact), échec et non-liste refusés, statut 403 dans `detail` ;
+  - branchement : `const usersList = await fetchAllUsers()`, plus de `fetch('/api/users')` dans `pdf-export.ts` ;
+  - campagnes : unitaires 323 fichiers / 3369 tests ; tsc 0 ; check:tests 0 ; contrats `work-order` + `client-scope` 25 fichiers verts ; intégration verte (Postgres local).
+- **RAIDER** : D : contrats d'API inchangés, `routes.ts` non touché ; dans `storage.ts`, seul l'`orderBy` change.
+- **Reste / risques** : `/api/users` reste non paginé côté serveur. Les 7 lectures plafonnées gelées par `capped-list-reads-hygiene` sont à résorber écran par écran.
+
+## 2026-11-09T15:37:39+01:00 — Alertes : une lecture de `/api/alerts` en échec n'est plus « 0 alerte »
+
+- **Statut** : fait (PR brouillon #607)
+- **Quoi** :
+  - trois écrans lisaient `GET /api/alerts` sans état d'erreur : tableau de bord secrétaire, centre d'alertes, résumé des alertes du tableau de bord. En échec, ils affichaient « 0 alerte », « Aucune alerte récente » ou « Tout est à jour » ;
+  - secrétaire : tuile « Alertes actives » à « Indisponible », rappel « Alertes indisponibles », bannière masquée ;
+  - centre d'alertes : encart d'erreur, compteurs à « Indisponible » (total, critiques et stock aussi quand la réappro échoue : pas de compte partiel), état vide présenté comme partiel, couleurs des compteurs conditionnées à leur disponibilité ;
+  - résumé : encart avec « Réessayer », « Voir toutes » sans compte ;
+  - `listQueryView` rejoint `client/src/lib/query-view.ts` ; `work-order-tires-cost.ts` le ré-exporte (importeurs inchangés).
+- **Comment tester (QA)** :
+  - `tests/unit/client/alerts-reads-error-states.test.ts` : 9 cas, 7 rouges sur main (7053ecda), 9 verts sur la branche ;
+  - `tests/unit/client/money-stock-reads-error-states.test.ts` : la garde de #599 accepte `reorderAlertsFailed || alertsFailed ?` et exige toujours la condition réappro ;
+  - campagnes : tsc 0, check:tests 0, unitaires verts (hors `db-pool-options`, échec local connu, vert en CI). Aucun fichier serveur modifié.
+- **RAIDER** : R : un helper générique pour les trois écrans ; D : ré-export à signature identique, aucun `data-testid` retiré. Ne s'appliquent pas : A, I, Retroactive (client seul, lecture seule).
+- **Reste / risques** : le reste du tableau de bord secrétaire (factures, documents, CPC, statistiques par client) traité dans la PR suivante, empilée sur #607.
 
 ## 2026-11-09T16:16:45+01:00 — Planning de maintenance, historique pièce, destinataires par rôle (6 lectures)
 - **Statut** : fait (PR)

@@ -16,6 +16,7 @@ import { stampPreventiveDue } from "../lib/preventive-due";
 
 import { PART_CATALOG_EVENT_ROLES, STAFF_ROLES } from "@shared/constants/roles";
 import { jsonRowOf, rowFromJson } from "../lib/json-table-row";
+import { KPI_TIME_ZONE } from "@shared/contracts/kpi-period";
 import type { CriticalWearInspection, RotationVehicle, TireRequiredActions, TireStatisticsAdvanced } from "@shared/contracts/tire-statistics-advanced";
 const log = moduleLogger("tires");
 
@@ -26,6 +27,7 @@ interface TireStatisticsAdvancedRow {
   /** SUM d'un numeric : livré en texte. */
   total_value: string | null;
   average_wear: number | null;
+  rotations_this_month: number;
   low_stock_tires: Record<string, unknown>[];
   critical_wear_inspections: CriticalWearInspection[];
   vehicles_with_rotations: RotationVehicle[];
@@ -922,6 +924,12 @@ export class TiresService {
              FROM tire_inspections i
              LEFT JOIN vehicle_tires vt ON i.vehicle_tire_id = vt.id
             WHERE vt.status = 'active') AS average_wear,
+          -- Mois civil en cours dans le fuseau des KPI ; intervalle semi-ouvert sur la date.
+          (SELECT COUNT(*)::int
+             FROM tire_rotations
+            WHERE rotation_date >= date_trunc('month', now() AT TIME ZONE ${KPI_TIME_ZONE})::date
+              AND rotation_date < (date_trunc('month', now() AT TIME ZONE ${KPI_TIME_ZONE}) + interval '1 month')::date
+          ) AS rotations_this_month,
           COALESCE((
             SELECT json_agg(${jsonRowOf(tires, "t")} ORDER BY t.id)
               FROM tires t
@@ -972,8 +980,10 @@ export class TiresService {
       return {
         totalTires: row.total_quantity || 0,
         totalValue: row.total_value || 0,
-        averageWear: row.average_wear ? Number(row.average_wear.toFixed(1)) : 0,
+        // Aucune inspection active : null, pas 0 (0 mm serait un pneu lisse).
+        averageWear: row.average_wear === null ? null : Number(row.average_wear.toFixed(1)),
         lowStockCount: actions.lowStock.length,
+        rotationsThisMonth: row.rotations_this_month,
         requiredActions: actions
       };
     } catch (error) {
