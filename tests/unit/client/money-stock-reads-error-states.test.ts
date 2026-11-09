@@ -54,8 +54,16 @@ const SCREENS: Array<{ path: string; queryKeys: string[]; shows: RegExp[] }> = [
   },
   {
     path: "client/src/components/inventory/part-table.tsx",
-    queryKeys: ["`/api/part-requirements/by-part/"],
-    shows: [/data-testid="part-requirements-error"/],
+    queryKeys: ["`/api/part-requirements/by-part/", '"/api/part-requirements/active-by-part"'],
+    shows: [/data-testid="part-requirements-error"/, /data-testid="active-requirements-error"/, /if \(activeRequirementsFailed\) \{\s*return <span[^>]*>\{UNAVAILABLE\}/],
+  },
+  {
+    path: "client/src/pages/inventory/[id].tsx",
+    queryKeys: ["`/api/parts/${partId}/stock-history`"],
+    shows: [
+      /stockHistoryView\.kind === "error" \? \(\s*stockHistoryError\("stock-history-recent-error"\)\s*\) : stockHistory\.length === 0/,
+      /stockHistoryView\.kind === "error" \? \(\s*stockHistoryError\("stock-history-error"\)\s*\) : stockHistory\.length === 0/,
+    ],
   },
   {
     path: "client/src/pages/maintenance/work-orders/[id].tsx",
