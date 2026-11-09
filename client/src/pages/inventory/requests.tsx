@@ -675,7 +675,10 @@ export default function PartRequestsIndex() {
                             </span>
                           )}
                           <button
-                            className="rounded-lg bg-warning/15 px-2 py-1 text-[10px] font-semibold text-warning-text hover:bg-warning/20 transition-colors"
+                            className="rounded-lg bg-warning/15 px-2 py-1 text-[10px] font-semibold text-warning-text hover:bg-warning/20 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                            // Demandes non lues : l'action ne trouverait pas la demande et ne ferait rien.
+                            disabled={requestsFailed}
+                            title={requestsFailed ? "Les demandes de pièce n'ont pas pu être chargées : réessayez depuis le tableau." : undefined}
                             onClick={() => {
                               const req = requests.find(r => r.id === part.requestId);
                               if (req) {
@@ -741,9 +744,12 @@ export default function PartRequestsIndex() {
                 <SelectItem value="critical">Critique</SelectItem>
               </SelectContent>
             </Select>
-            <span className="text-xs text-gray-400">
-              {filteredRequests.length} demande{filteredRequests.length > 1 ? 's' : ''}
-            </span>
+            {/* Lecture en échec : pas de « 0 demande » à côté de l'encart d'erreur. */}
+            {!requestsFailed && (
+              <span className="text-xs text-gray-400" data-testid="requests-count">
+                {filteredRequests.length} demande{filteredRequests.length > 1 ? 's' : ''}
+              </span>
+            )}
           </div>
         </div>
 

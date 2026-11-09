@@ -69,11 +69,15 @@ export default function InventoryIndex() {
   const canEditParts = user?.role === 'admin' || user?.role === 'warehouse';
   
   // Fetch inventory statistics (filtered if a part is selected)
-  const { data: stats, isLoading: statsLoading } = useQuery<any>({
+  const statsQuery = useQuery<any>({
     queryKey: selectedPartId 
       ? ["/api/parts/statistics", { partId: selectedPartId }]
       : ["/api/parts/statistics"],
   });
+  // Échec sans données : « Indisponible », jamais 0 pièce ni 0 de valeur de stock.
+  const statsView = queryView(statsQuery);
+  const stats = readyData(statsView, undefined as any);
+  const statsLoading = statsQuery.isLoading;
   
   // Fetch low stock parts
   const { data: lowStockParts = [], isLoading: lowStockLoading } = useQuery<any>({
@@ -208,6 +212,8 @@ export default function InventoryIndex() {
   const totalItems = selectedPartId && selectedPart 
     ? (selectedPart as any).quantity 
     : (stats as any)?.totalItems || 0;
+  // Valeurs lues dans les statistiques (pas dans la pièce choisie) et lecture en échec.
+  const statsFailed = !(selectedPartId && selectedPart) && statsView.kind === "error";
   const lowStockCount = selectedPartId 
     ? (selectedPart && (selectedPart as any).quantity <= (selectedPart as any).minQuantity ? 1 : 0)
     : (lowStockParts as any).length;
@@ -294,7 +300,7 @@ export default function InventoryIndex() {
               </div>
               <div className="mt-1">
                 <p className="text-[11px] font-medium text-gray-500">{selectedPartId ? "Quantité" : "Pièces en stock"}</p>
-                <p className="text-[15px] font-bold text-gray-800 leading-tight mt-0.5">{totalItems}</p>
+                <p className="text-[15px] font-bold text-gray-800 leading-tight mt-0.5" data-testid="kpi-stock-items-value">{statsFailed ? UNAVAILABLE : totalItems}</p>
               </div>
             </div>
 
@@ -359,7 +365,7 @@ export default function InventoryIndex() {
                 </div>
                 <div className="mt-1">
                   <p className="text-[11px] font-medium text-gray-500">{selectedPartId ? "Valeur de la pièce" : "Valeur du stock"}</p>
-                  <p className="text-[15px] font-bold text-gray-800 leading-tight mt-0.5">{formatPrice(totalStockValue)}</p>
+                  <p className="text-[15px] font-bold text-gray-800 leading-tight mt-0.5" data-testid="kpi-stock-value-value">{statsFailed ? UNAVAILABLE : formatPrice(totalStockValue)}</p>
                 </div>
               </div>
             )}

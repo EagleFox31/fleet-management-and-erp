@@ -241,6 +241,7 @@ export function useWarehouse() {
     inventoryValue: {
       data: inventoryValueQuery.data,
       isLoading: inventoryValueQuery.isLoading,
+      isFetching: inventoryValueQuery.isFetching,
       error: inventoryValueQuery.error,
       refetch: inventoryValueQuery.refetch,
     },

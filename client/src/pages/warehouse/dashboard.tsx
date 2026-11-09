@@ -21,6 +21,7 @@ import { usedTiresLabel } from "@shared/constants/tire-stock";
 import { queryView, readyData } from "@/lib/query-view";
 import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
+import { userMessageOf } from "@/lib/api-error";
 
 type StockMovement = {
   movementType?: string | null;
@@ -149,7 +150,14 @@ export default function WarehouseDashboard() {
     ].filter((item) => item.value > 0);
   }, [stockMovements]);
 
-  const totalStockValue = Number(warehouse.inventoryValue.data?.totalValue || 0);
+  // Valeur du stock en échec : « Indisponible », jamais 0.
+  const inventoryValueView = queryView({
+    data: warehouse.inventoryValue.data,
+    error: warehouse.inventoryValue.error,
+    isFetching: warehouse.inventoryValue.isFetching,
+  });
+  const inventoryValueFailed = inventoryValueView.kind === "error";
+  const totalStockValue = Number(readyData(inventoryValueView, undefined)?.totalValue ?? 0);
   const totalPartsCount = Number(warehouse.statistics.data?.totalParts || 0);
   // Unités physiques (somme des quantités), distinct du nombre de références.
   const totalUnitsCount = Number(warehouse.statistics.data?.totalQuantity || 0);
@@ -179,13 +187,17 @@ export default function WarehouseDashboard() {
               data-testid="warehouse-kpi-value"
               label="Valeur stock total"
               featured // c'est ce dont le magasinier repond a l'inventaire
-              value={formatPrice(totalStockValue)}
+              value={inventoryValueFailed ? UNAVAILABLE : formatPrice(totalStockValue)}
               // Le nombre de pièces est déjà la valeur de la tuile suivante:
               // on affiche ici la valeur moyenne, qui n'apparaît nulle part ailleurs.
               // Moyenne par unité physique, cohérent avec la tuile suivante qui
               // compte désormais des unités.
               subValue={
-                totalUnitsCount > 0
+                inventoryValueFailed
+                  ? userMessageOf(inventoryValueView.error, "La valeur du stock est momentanément indisponible.")
+                  : warehouse.statistics.error
+                  ? undefined
+                  : totalUnitsCount > 0
                   ? `${formatPrice(Math.round(totalStockValue / totalUnitsCount))} en moyenne par pièce`
                   : "Aucune pièce en stock"
               }

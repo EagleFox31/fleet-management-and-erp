@@ -75,6 +75,37 @@ describe("écrans argent/stock : une lecture en échec n'est jamais un vide", ()
   });
 });
 
+describe("demandes de pièce en échec", () => {
+  const src = read("client/src/pages/inventory/requests.tsx");
+
+  it("pas de compteur « 0 demande » à côté de l'encart d'erreur", () => {
+    expect(src).toMatch(/\{!requestsFailed && \(\s*<span[^>]*data-testid="requests-count"/);
+  });
+
+  it("« Passer la commande » désactivé avec un motif", () => {
+    const button = src.slice(src.lastIndexOf("<button", src.indexOf("btn-manage-request-")), src.indexOf("btn-manage-request-"));
+    expect(button).toMatch(/disabled=\{requestsFailed\}/);
+    expect(button).toMatch(/title=\{requestsFailed \? "[^"]+" : undefined\}/);
+  });
+});
+
+describe("valeur du stock : jamais 0 sur une lecture en échec", () => {
+  it("accueil stock : statistiques par queryView, tuiles valeur et quantité « Indisponible »", () => {
+    const src = read("client/src/pages/inventory/index.tsx");
+    expect(queryDeclaration(src, '"/api/parts/statistics"')).toMatch(/const statsQuery = useQuery/);
+    expect(src).toMatch(/const statsView = queryView\(statsQuery\)/);
+    expect(src).toMatch(/data-testid="kpi-stock-value-value">\{statsFailed \? UNAVAILABLE : formatPrice\(totalStockValue\)\}/);
+    expect(src).toMatch(/data-testid="kpi-stock-items-value">\{statsFailed \? UNAVAILABLE : totalItems\}/);
+  });
+
+  it("tableau de bord magasin : tuile « Valeur stock total » « Indisponible »", () => {
+    const src = read("client/src/pages/warehouse/dashboard.tsx");
+    expect(src).not.toMatch(/inventoryValue\.data\?\.totalValue \|\| 0/);
+    expect(src).toMatch(/const inventoryValueView = queryView\(/);
+    expect(src).toMatch(/value=\{inventoryValueFailed \? UNAVAILABLE : formatPrice\(totalStockValue\)\}/);
+  });
+});
+
 describe("fiche OT : pièces non lues", () => {
   const src = read("client/src/pages/maintenance/work-orders/[id].tsx");
 
