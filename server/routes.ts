@@ -1492,91 +1492,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Obtenir les OT en attente de pièces (pour le magasinier)
-  app.get("/api/work-orders/awaiting-parts", isStaff, async (req, res) => {
-    try {
-      // Récupérer tous les OT en attente de pièces
-      const result = await storage.getWorkOrders('awaiting_parts', undefined, 100, 0);
-
-      if (result.workOrders.length === 0) {
-        return res.status(200).json({
-          workOrders: [],
-          total: result.total
-        });
-      }
-
-      // Éviter le N+1: charger les demandes une seule fois pour toutes les OT.
-      const allRequests = await storage.getPartRequirements();
-      const activeRequestStatuses = new Set(['pending', 'approved', 'ordered']);
-      const requestsByWorkOrderId = new Map<number, typeof allRequests>();
-      for (const request of allRequests) {
-        if (!request.workOrderId || !activeRequestStatuses.has(request.status)) {
-          continue;
-        }
-        const existing = requestsByWorkOrderId.get(request.workOrderId) || [];
-        existing.push(request);
-        requestsByWorkOrderId.set(request.workOrderId, existing);
-      }
-
-      const vehicleCache = new Map<number, Awaited<ReturnType<typeof storage.getVehicle>>>();
-      const technicianCache = new Map<number, Awaited<ReturnType<typeof storage.getUser>>>();
-
-      // Enrichir avec les détails des pièces manquantes et demandes associées
-      const enrichedWorkOrders = await Promise.all(
-        result.workOrders.map(async (workOrder) => {
-          const relatedRequests = requestsByWorkOrderId.get(workOrder.id) || [];
-          
-          // Récupérer le véhicule
-          let vehicle = vehicleCache.get(workOrder.vehicleId);
-          if (!vehicle) {
-            vehicle = await storage.getVehicle(workOrder.vehicleId);
-            vehicleCache.set(workOrder.vehicleId, vehicle);
-          }
-          
-          // Récupérer le technicien assigné
-          let technician: Awaited<ReturnType<typeof storage.getUser>> | null = null;
-          if (workOrder.technicianId) {
-            const cachedTechnician = technicianCache.get(workOrder.technicianId);
-            if (cachedTechnician) {
-              technician = cachedTechnician;
-            } else {
-              technician = await storage.getUser(workOrder.technicianId);
-              technicianCache.set(workOrder.technicianId, technician);
-            }
-          }
-          
-          return {
-            ...workOrder,
-            vehicle: vehicle ? {
-              registrationNumber: vehicle.registrationNumber,
-              brand: vehicle.brand,
-              model: vehicle.model
-            } : null,
-            technician: technician ? { name: technician.name } : null,
-            pendingParts: relatedRequests.map((r) => ({
-              requestId: r.id,
-              partId: r.partId,
-              partName: r.partName,
-              partReference: r.partReference,
-              quantityNeeded: r.quantityNeeded,
-              status: r.status,
-              urgency: r.urgency,
-              expectedDeliveryDate: r.expectedDeliveryDate
-            })),
-            pendingPartsCount: relatedRequests.length
-          };
-        })
-      );
-      
-      return res.status(200).json({
-        workOrders: enrichedWorkOrders,
-        total: result.total
-      });
-    } catch (error) {
-      log.error({ err: error, requestId: req.requestId }, "Get awaiting parts work orders error");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
 
   app.get("/api/work-orders", authenticate, async (req, res) => {
     try {
@@ -2308,59 +2223,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Endpoint dédié pour les rapports d'inventaire
-  app.get("/api/reports/inventory", isInventoryReportReader, async (req, res, next) => {
-    try {
-      const { startDate, endDate } = parseReportPeriod(req.query);
-      
-      console.log('Generating inventory report for period:', startDate, 'to', endDate);
-      
-      // Utiliser le storage existant pour éviter les erreurs d'importation
-      const partsResult = await storage.getParts();
-      const allParts = partsResult.parts || [];
-      
-      // Récupérer tous les mouvements via le storage
-      const allMovements = await storage.getAllStockMovements();
-      
-      // Filtrer les mouvements par période
-      const filteredMovements = allMovements.filter((movement: any) => {
-        const movementDate = new Date(movement.createdAt || movement.date);
-        return movementDate >= startDate && movementDate <= endDate;
-      });
-      
-      console.log(`Found ${allParts.length} parts and ${filteredMovements.length} movements`);
-      
-      // Enrichir les données des pièces avec les mouvements
-      const enrichedParts = allParts.map((part: any) => {
-        const partMovements = filteredMovements.filter((movement: any) => movement.partId === part.id);
-        const totalMovements = partMovements.reduce((sum: number, movement: any) => sum + Math.abs(movement.quantity || 0), 0);
-        
-        return {
-          ...part,
-          movementsCount: totalMovements,
-          movements: partMovements
-        };
-      });
-      
-      const totalValue = allParts.reduce((sum: number, part: any) => sum + ((part.quantity || 0) * (part.unitPrice || 0)), 0);
-      const lowStockParts = allParts.filter((part: any) => (part.quantity || 0) <= (part.minQuantity || 0));
-      
-      return res.status(200).json({
-        parts: enrichedParts,
-        movements: filteredMovements,
-        statistics: {
-          totalParts: allParts.length,
-          totalValue,
-          lowStockCount: lowStockParts.length,
-          totalMovements: filteredMovements.length
-        }
-      });
-    } catch (error) {
-      if (error instanceof AppError) return next(error);
-      console.error("Get inventory report error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
 
   // Endpoint dédié pour les rapports de performance des techniciens
   app.get("/api/reports/technician-performance", isTechnicianReportReader, async (req, res, next) => {
@@ -3241,25 +3103,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Endpoint pour les statistiques des ordres de travail
-  app.get("/api/statistics/work-orders", isStaff, async (req, res) => {
-    try {
-      const workOrdersData = await storage.getWorkOrders();
-      const workOrders = workOrdersData.workOrders;
-      
-      const stats = {
-        pending: workOrders.filter(wo => wo.status === 'pending').length,
-        inProgress: workOrders.filter(wo => wo.status === 'in_progress').length,
-        completed: workOrders.filter(wo => wo.status === 'completed').length,
-        total: workOrders.length
-      };
-      
-      return res.status(200).json(stats);
-    } catch (error) {
-      log.error({ err: error, requestId: req.requestId }, "Get work orders statistics error");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
   
 
   // Statistiques spécifiques pour les techniciens
