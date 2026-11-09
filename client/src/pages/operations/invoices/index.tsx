@@ -245,7 +245,7 @@ export default function ClientInvoicesListPage() {
             </div>
           ) : failed ? (
             <div
-              className="text-center py-8 text-destructive"
+              className="text-center py-8 text-destructive-text"
               role="alert"
               data-testid="invoices-load-error"
             >

@@ -104,7 +104,7 @@ export default function InvoiceDiscrepanciesPage() {
           {isLoading ? (
             <div className="text-center py-8 text-gray-500">Chargement...</div>
           ) : failed ? (
-            <div className="text-center py-12 text-destructive" role="alert" data-testid="discrepancies-load-error">
+            <div className="text-center py-12 text-destructive-text" role="alert" data-testid="discrepancies-load-error">
               {userMessageOf(error, "Impossible de charger les écarts de facturation.")}
             </div>
           ) : discrepancies.length === 0 ? (

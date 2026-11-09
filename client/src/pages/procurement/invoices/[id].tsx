@@ -747,7 +747,7 @@ export default function SupplierInvoiceDetailsPage() {
 
           {settlementsFailed ? (
             <div
-              className="rounded-xl border border-dashed border-red-200 bg-red-50 px-4 py-6 text-center text-sm text-red-700"
+              className="rounded-xl border border-dashed border-destructive/30 bg-destructive/10 px-4 py-6 text-center text-sm text-destructive-text"
               role="alert"
               data-testid="settlements-load-error"
             >

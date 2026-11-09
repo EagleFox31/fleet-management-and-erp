@@ -2796,6 +2796,7 @@ soumission sans doublon.
   - `money-stock-reads-error-states.test.ts` : regex de garde des 5 fichiers.
 - **RAIDER** : R : même constante `UNAVAILABLE` et même méthode de test que les autres écrans ; D : contrats et serveur inchangés.
 - **Reste / risques** : `client-revenue-chart.tsx` lit aussi `/api/billing/statistics` (hors périmètre, non revu).
+- **Ajout (fuel, même PR, après fusion de #613)** : volume consommé (`logistics/dashboard`, deux tuiles) et « Volume carburant » / « Litres consommés » / « Consommation totale » (`client/dashboard`) lisent « Indisponible » + `userMessageOf` quand `/api/fuel-records/statistics` ou le solde échoue ; sous-lignes `userMessageOf` sur `fuel-statistics` et sur les tuiles de pleins de `fuel/index`. Tests dans `fuel-card-render-error-states.test.ts` (18 cas), rouge prouvé (« expected '0 L' to be 'Indisponible' », « expected 1 to be 4 », sous-ligne fixe), restauré.
 ## 2026-11-09T15:37:39+01:00 — Alertes : une lecture de `/api/alerts` en échec n'est plus « 0 alerte »
 
 - **Statut** : fait (PR brouillon #607)

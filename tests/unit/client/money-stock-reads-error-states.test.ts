@@ -354,4 +354,14 @@ describe("factures : jamais 0 ni vide sur une lecture en échec", () => {
     expect(src).toMatch(/settlementsFailed \? UNAVAILABLE : formatCurrency\(pendingReconciliationAmount\)/);
     expect(src).toMatch(/data-testid="settlements-load-error"/);
   });
+
+  it.each(["client/src/pages/logistics/dashboard.tsx", "client/src/pages/client/dashboard.tsx"])(
+    "%s : le volume de carburant en échec lit UNAVAILABLE avec userMessageOf",
+    (path) => {
+      const src = read(path);
+      expect(src).toMatch(/const fuelStatsFailed = fuelStats === undefined && !!fuelStatsError/);
+      expect(src).toMatch(/fuelStatsFailed \? UNAVAILABLE : `\$\{totalFuelLiters\.toFixed\(0\)\} L`/);
+      expect(src).toMatch(/userMessageOf\(fuelStatsError,/);
+    },
+  );
 });
