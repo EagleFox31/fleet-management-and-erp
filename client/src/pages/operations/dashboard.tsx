@@ -186,7 +186,12 @@ export default function OperationsDashboard() {
         </TabsContent>
 
         <TabsContent value="destinations">
-          <DestinationsChart data={statsByDestination.data} />
+          <DestinationsChart
+            data={statsByDestination.data}
+            error={statsByDestination.error}
+            isFetching={statsByDestination.isFetching}
+            onRetry={() => statsByDestination.refetch()}
+          />
         </TabsContent>
 
         <TabsContent value="invoices">
