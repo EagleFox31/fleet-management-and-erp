@@ -3,6 +3,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
+import { queryView, readyData } from "@/lib/query-view";
 import { useLocation } from "wouter";
 import {
   Activity, Wrench, Truck, Package,
@@ -71,9 +73,13 @@ export function RecentActivityFeed() {
     queryKey: ["/api/operations/missions"],
   });
 
-  const { data: movements = [], isLoading: movementsLoading } = useQuery<any[]>({
+  const movementsQuery = useQuery<any[]>({
     queryKey: ["/api/parts/stock-movements"],
   });
+  // Échec sans données : message et « Réessayer », jamais « Aucun mouvement de stock récent ».
+  const movementsView = queryView(movementsQuery);
+  const movements = readyData(movementsView, [] as any[]);
+  const movementsLoading = movementsView.kind === "loading";
 
   const workOrders: any[] = woData?.workOrders?.slice(0, 5) ?? [];
 
@@ -175,7 +181,16 @@ export function RecentActivityFeed() {
 
           {/* Stock movements */}
           <TabsContent value="stock" className="mt-0">
-            {movementsLoading ? <ItemSkeleton /> : recentMovements.length === 0 ? (
+            {movementsLoading ? <ItemSkeleton /> : movementsView.kind === "error" ? (
+              <InlineQueryError
+                className="m-4"
+                error={movementsView.error}
+                fallback="Les mouvements de stock sont momentanément indisponibles."
+                onRetry={() => void movementsQuery.refetch()}
+                isRetrying={movementsView.isRetrying}
+                data-testid="recent-movements-error"
+              />
+            ) : recentMovements.length === 0 ? (
               <EmptyState text="Aucun mouvement de stock récent" />
             ) : (
               <div className="divide-y">
