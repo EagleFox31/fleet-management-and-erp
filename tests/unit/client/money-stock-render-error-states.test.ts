@@ -119,7 +119,7 @@ const STATS_DOWN = seedWith({ [KEY.stats]: FAILURE, [KEY.lowOnStock]: FAILURE })
 /** Texte de la valeur d'une tuile : le `<p>` qui suit le `<p>` portant son libellé. */
 function tileValue(html: string, label: string): string {
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = html.match(new RegExp(`<p[^>]*>${escaped}</p><p[^>]*>(.*?)</p>`));
+  const match = html.match(new RegExp(`<p[^>]*>${escaped}</p><p[^>]*>((?:(?!</p>).)*)</p>`));
   expect(match, `tuile « ${label} » absente du rendu`).not.toBeNull();
   return match![1].replace(/<[^>]*>/g, "").trim();
 }
@@ -127,7 +127,7 @@ function tileValue(html: string, label: string): string {
 /** Sous-valeur d'une tuile : le deuxième `<p>` après celui de son libellé. */
 function tileSubValue(html: string, label: string): string {
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = html.match(new RegExp(`<p[^>]*>${escaped}</p><p[^>]*>.*?</p><p[^>]*>(.*?)</p>`));
+  const match = html.match(new RegExp(`<p[^>]*>${escaped}</p><p[^>]*>(?:(?!</p>).)*</p><p[^>]*>((?:(?!</p>).)*)</p>`));
   expect(match, `sous-valeur de « ${label} » absente du rendu`).not.toBeNull();
   return match![1].replace(/<[^>]*>/g, "").trim();
 }
