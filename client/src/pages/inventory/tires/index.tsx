@@ -37,43 +37,15 @@ import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 import { useFormDraft } from "@/hooks/use-form-draft";
 import { FormDraftBadge, FormDraftDiscardButton } from "@/components/form-draft/form-draft-indicator";
 import { tireRotationDraft, tireInspectionDraft } from "@/lib/form-drafts";
-
-interface TireStatistics {
-  totalTires: number;
-  totalValue: number;
-  averageWear: number;
-  lowStockCount: number;
-  rotationsThisMonth?: number;
-  requiredActions: {
-    lowStock: Array<{
-      id: number;
-      brand: string;
-      model: string;
-      size: string;
-      stockQuantity: number;
-      minStockLevel: number;
-    }>;
-    criticalWear: Array<{
-      vehicleRegistration: string;
-      position: string;
-      treadDepth: number;
-      brand: string;
-      model: string;
-    }>;
-    rotationDue: Array<{
-      message?: string;
-      vehicleRegistration?: string;
-      vehicle?: { vehicleRegistration?: string };
-      daysSinceLastRotation?: number;
-      totalTires?: number;
-    }>;
-    rotationApproaching?: Array<{
-      message?: string;
-      vehicleRegistration?: string;
-      vehicle?: { vehicleRegistration?: string };
-    }>;
-  };
-}
+import type { TireStatisticsAdvancedJson } from "@shared/contracts/tire-statistics-advanced";
+import {
+  actionCount,
+  listCount,
+  statText,
+  stockAlertCount,
+  toTireStatisticsView,
+  type TireStatisticsView,
+} from "@/lib/tire-statistics-view";
 
 interface VehicleTire {
   id: number;
@@ -617,12 +589,16 @@ export default function TiresInventoryPage() {
   // Ces trois requêtes alimentent les KPI de l'en-tête, affichés quel que soit
   // l'onglet actif: elles ne doivent pas être conditionnées à un onglet.
   // queryFn par défaut : une erreur serveur arrive en ApiError (message lisible + référence).
-  const statsQuery = useQuery<TireStatistics>({
+  // `select` : les sommes servies en texte sont converties une seule fois (`toTireStatisticsView`) ;
+  // une valeur illisible ou une liste absente s'affiche « Indisponible », jamais 0.
+  const statsQuery = useQuery<TireStatisticsAdvancedJson, Error, TireStatisticsView>({
     queryKey: ["/api/tires/statistics-advanced"],
+    select: toTireStatisticsView,
     ...liveQueryConfig,
   });
   const statistics = statsQuery.data;
   const pageState = tiresPageState(tiresQuery, statsQuery);
+  const statsActions = statistics?.requiredActions;
 
   // Lignes brutes: l'API renvoie une jointure (vehicle_tires / tires / vehicles),
   // que `normalizeVehicleTireRow` aplatit en `VehicleTire`. Typer la requete en
@@ -671,11 +647,15 @@ export default function TiresInventoryPage() {
       ? Math.round(Number(fleetStats?.availabilityRate ?? (fleetOperational / fleetTotal) * 100))
       : null;
 
-  const rotationDueCount = statistics?.requiredActions?.rotationDue?.length ?? 0;
-  const rotationApproachingCount = statistics?.requiredActions?.rotationApproaching?.length ?? 0;
-  const tireRotationsPending = rotationDueCount + rotationApproachingCount;
+  // `null` : statistiques indisponibles, jamais confondues avec « aucune alerte ».
+  const rotationDueCount = listCount(statsActions?.rotationDue);
+  const rotationApproachingCount = listCount(statsActions?.rotationApproaching);
+  const tireRotationsPending =
+    rotationDueCount === null || rotationApproachingCount === null ? null : rotationDueCount + rotationApproachingCount;
   const rotationKpiSubValue =
-    tireRotationsPending === 0
+    tireRotationsPending === null || rotationDueCount === null || rotationApproachingCount === null
+      ? "Alertes kilométriques indisponibles"
+      : tireRotationsPending === 0
       ? vehicleTiresView.kind === "ready" && mountedTires.length === 0
         ? "Montages atelier requis d'abord"
         : "Aucune alerte kilométrique"
@@ -921,7 +901,7 @@ export default function TiresInventoryPage() {
             className="cursor-pointer transition-shadow hover:shadow-md"
             onClick={() => setActiveTab("inventory")}
             label="Pneus en stock"
-            value={statistics?.totalTires || 0}
+            value={statText(statistics?.totalTires)}
             subValue={
               vehicleTiresView.kind === "ready"
                 ? `${mountedTires.length} montés sur véhicules`
@@ -937,7 +917,7 @@ export default function TiresInventoryPage() {
               className="cursor-pointer transition-shadow hover:shadow-md"
               onClick={() => setActiveTab("inventory")}
               label="Valeur inventaire"
-              value={statistics ? formatPrice(statistics.totalValue) : formatPrice(0)}
+              value={statText(statistics?.totalValue, formatPrice)}
               subValue="Cout total des pneus en stock"
               icon={<DollarSign className="h-4 w-4" />}
               iconWrapperClassName="bg-emerald-50 text-emerald-600"
@@ -949,8 +929,8 @@ export default function TiresInventoryPage() {
               data-testid="kpi-low-stock"
               onClick={() => setActiveTab("inventory")}
               label="Stock critique"
-              value={statistics?.lowStockCount || 0}
-              subValue="References sous le seuil minimal"
+              value={statText(statsActions ? stockAlertCount(statsActions) : null)}
+              subValue="References sous le seuil minimal, ruptures comprises"
               valueClassName="text-orange-600"
               icon={<AlertTriangle className="h-4 w-4" />}
               iconWrapperClassName="bg-orange-50 text-orange-600"
@@ -964,7 +944,7 @@ export default function TiresInventoryPage() {
               className="cursor-pointer transition-shadow hover:shadow-md"
               onClick={() => setActiveTab("rotations")}
               label="Rotations a planifier"
-              value={statistics?.requiredActions?.rotationDue?.length || 0}
+              value={statText(rotationDueCount)}
               subValue="Vehicules necessitant rotation"
               valueClassName="text-blue-600"
               icon={<RotateCcw className="h-4 w-4" />}
@@ -1010,7 +990,7 @@ export default function TiresInventoryPage() {
               className="cursor-pointer transition-shadow hover:shadow-md"
               onClick={() => setActiveTab("inventory")}
               label="Alertes stock"
-              value={statistics?.lowStockCount || 0}
+              value={statText(statsActions ? stockAlertCount(statsActions) : null)}
               subValue="Commandes a preparer"
               valueClassName="text-orange-600"
               icon={<AlertTriangle className="h-4 w-4" />}
@@ -1024,7 +1004,7 @@ export default function TiresInventoryPage() {
               className="cursor-pointer transition-shadow hover:shadow-md"
               onClick={() => setActiveTab("rotations")}
               label="Taux remplacement"
-              value={statistics?.rotationsThisMonth || 0}
+              value={UNAVAILABLE /* `rotationsThisMonth` n'est pas servi par l'API : pas de 0 inventé */}
               subValue="Remplacements ce mois"
               icon={<TrendingUp className="h-4 w-4" />}
               iconWrapperClassName="bg-indigo-50 text-indigo-600"
@@ -1037,7 +1017,7 @@ export default function TiresInventoryPage() {
               className="cursor-pointer transition-shadow hover:shadow-md"
               onClick={() => setActiveTab("inventory")}
               label="Valeur stock"
-              value={statistics ? formatPrice(statistics.totalValue) : formatPrice(0)}
+              value={statText(statistics?.totalValue, formatPrice)}
               subValue="Total inventaire pneus"
               icon={<DollarSign className="h-4 w-4" />}
               iconWrapperClassName="bg-emerald-50 text-emerald-600"
@@ -1049,7 +1029,7 @@ export default function TiresInventoryPage() {
               data-testid="kpi-critical-wear"
               onClick={() => setActiveTab("mounted")}
               label="Usure critique"
-              value={statistics?.requiredActions?.criticalWear?.length || 0}
+              value={statText(listCount(statsActions?.criticalWear))}
               subValue="Pneus usure > 80%"
               valueClassName="text-red-600"
               icon={<Gauge className="h-4 w-4" />}
@@ -1100,7 +1080,7 @@ export default function TiresInventoryPage() {
               className="cursor-pointer transition-shadow hover:shadow-md"
               onClick={() => setActiveTab("inventory")}
               label="Valeur inventaire"
-              value={statistics ? formatPrice(statistics.totalValue) : formatPrice(0)}
+              value={statText(statistics?.totalValue, formatPrice)}
               subValue="Total pneus en stock"
               icon={<DollarSign className="h-4 w-4" />}
               iconWrapperClassName="bg-emerald-50 text-emerald-600"
@@ -1113,7 +1093,7 @@ export default function TiresInventoryPage() {
               className="cursor-pointer transition-shadow hover:shadow-md"
               onClick={() => setActiveTab("inspections")}
               label="Actions requises"
-              value={(statistics?.requiredActions?.lowStock?.length || 0) + (statistics?.requiredActions?.criticalWear?.length || 0) + (statistics?.requiredActions?.rotationDue?.length || 0)}
+              value={statText(statsActions ? actionCount(statsActions, ["criticalWear", "rotationDue"]) : null)}
               subValue="Actions preventives requises"
               valueClassName="text-orange-600"
               icon={<AlertTriangle className="h-4 w-4" />}
@@ -1140,7 +1120,7 @@ export default function TiresInventoryPage() {
               className="cursor-pointer transition-shadow hover:shadow-md"
               onClick={() => setActiveTab("mounted")}
               label="Usure moy. flotte"
-              value={`${statistics?.averageWear?.toFixed(1) || 0}mm`}
+              value={statText(statistics?.averageWear, (mm) => `${mm.toFixed(1)}mm`)}
               subValue="Profondeur sculpture moyenne"
               icon={<Gauge className="h-4 w-4" />}
               iconWrapperClassName="bg-slate-100 text-slate-600"
@@ -1153,7 +1133,7 @@ export default function TiresInventoryPage() {
               className="cursor-pointer transition-shadow hover:shadow-md"
               onClick={() => setActiveTab("inspections")}
               label="Rotations assignees"
-              value={statistics?.rotationsThisMonth || 0}
+              value={UNAVAILABLE /* `rotationsThisMonth` n'est pas servi par l'API : pas de 0 inventé */}
               subValue="A executer ce mois"
               valueClassName="text-green-600"
               icon={<RotateCcw className="h-4 w-4" />}
@@ -1166,13 +1146,13 @@ export default function TiresInventoryPage() {
               data-testid="kpi-next-maintenance"
               className={cn(
                 "cursor-pointer transition-shadow hover:shadow-md",
-                activeTab === "rotations" && tireRotationsPending > 0 && "ring-2 ring-blue-200 shadow-md",
+                activeTab === "rotations" && (tireRotationsPending ?? 0) > 0 && "ring-2 ring-blue-200 shadow-md",
               )}
               onClick={() => setActiveTab("rotations")}
               label="Rotations à planifier"
-              value={tireRotationsPending}
+              value={statText(tireRotationsPending)}
               subValue={rotationKpiSubValue}
-              valueClassName={tireRotationsPending > 0 ? "text-blue-600" : undefined}
+              valueClassName={(tireRotationsPending ?? 0) > 0 ? "text-blue-600" : undefined}
               icon={<RotateCcw className="h-4 w-4" />}
               iconWrapperClassName="bg-blue-50 text-blue-600"
             />
@@ -1184,7 +1164,7 @@ export default function TiresInventoryPage() {
               className="cursor-pointer transition-shadow hover:shadow-md"
               onClick={() => setActiveTab("inspections")}
               label="Actions requises"
-              value={(statistics?.requiredActions?.lowStock?.length || 0) + (statistics?.requiredActions?.criticalWear?.length || 0)}
+              value={statText(statsActions ? actionCount(statsActions, ["criticalWear"]) : null)}
               subValue="Alertes a traiter"
               valueClassName="text-orange-600"
               icon={<AlertTriangle className="h-4 w-4" />}
@@ -1254,11 +1234,14 @@ export default function TiresInventoryPage() {
                   <Truck className="h-10 w-10 text-gray-200 mb-3" />
                   <p className="text-sm font-medium text-gray-600">Aucun pneu monté sur un véhicule</p>
                   <p className="text-xs text-gray-400 mt-1 max-w-md">
-                    {statistics?.totalTires
-                      ? `${statistics.totalTires} pneu(s) en stock magasin — le montage se fait depuis l'atelier.`
-                      : "Le magasin doit d'abord réceptionner des pneus, puis l'atelier les monte sur les véhicules."}
+                    {/* Stock inconnu (statistiques en échec) : ni « 0 pneu » ni « réceptionner d'abord ». */}
+                    {statistics?.totalTires == null
+                      ? "Le montage se fait depuis l'atelier, à partir du stock magasin."
+                      : statistics.totalTires > 0
+                        ? `${statistics.totalTires} pneu(s) en stock magasin — le montage se fait depuis l'atelier.`
+                        : "Le magasin doit d'abord réceptionner des pneus, puis l'atelier les monte sur les véhicules."}
                   </p>
-                  {canMountFromStock && (statistics?.totalTires ?? 0) > 0 && (
+                  {canMountFromStock && statistics?.totalTires !== 0 && (
                     <Button size="sm" className="mt-4" onClick={() => openMountDialog()}>
                       <CircleDot className="h-4 w-4 mr-2" />
                       Monter un pneu
@@ -1490,7 +1473,17 @@ export default function TiresInventoryPage() {
               </div>
             </div>
             <div className="px-5 py-4">
-              {(rotationDueCount > 0 || rotationApproachingCount > 0) && (
+              {pageState.kind === "ready" && pageState.statsError ? (
+                <InlineQueryError
+                  className="mb-5"
+                  error={pageState.statsError.error}
+                  fallback="Les alertes kilométriques sont momentanément indisponibles."
+                  onRetry={() => void statsQuery.refetch()}
+                  isRetrying={pageState.statsError.isRetrying}
+                  data-testid="rotation-alerts-error"
+                />
+              ) : null}
+              {((rotationDueCount ?? 0) > 0 || (rotationApproachingCount ?? 0) > 0) && (
                 <div className="mb-5 rounded-xl border border-blue-100 bg-blue-50/60 p-4 space-y-3">
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-700">
@@ -1501,22 +1494,22 @@ export default function TiresInventoryPage() {
                     </p>
                   </div>
                   <div className="space-y-2">
-                    {statistics?.requiredActions?.rotationDue?.map((item, index) => (
+                    {statsActions?.rotationDue?.map((item) => (
                       <div
-                        key={`due-${index}`}
+                        key={`due-${item.vehicle.vehicleId}`}
                         className="flex items-start gap-2 text-sm text-red-700 bg-white/70 border border-red-100 rounded-lg px-3 py-2"
                       >
                         <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-                        <span>{item.message ?? item.vehicle?.vehicleRegistration ?? "Rotation en retard"}</span>
+                        <span>{item.message}</span>
                       </div>
                     ))}
-                    {statistics?.requiredActions?.rotationApproaching?.map((item, index) => (
+                    {statsActions?.rotationApproaching?.map((item) => (
                       <div
-                        key={`approaching-${index}`}
+                        key={`approaching-${item.vehicle.vehicleId}`}
                         className="flex items-start gap-2 text-sm text-amber-800 bg-white/70 border border-amber-100 rounded-lg px-3 py-2"
                       >
                         <Clock className="h-4 w-4 shrink-0 mt-0.5" />
-                        <span>{item.message ?? item.vehicle?.vehicleRegistration ?? "Rotation à anticiper"}</span>
+                        <span>{item.message}</span>
                       </div>
                     ))}
                   </div>
