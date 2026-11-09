@@ -64,6 +64,13 @@ describe("toTireStatisticsView", () => {
     expect(toTireStatisticsView(raw).rotationsThisMonth).toBeNull();
   });
 
+  it("sans inspection active (averageWear null) : noInspection, pas 0 mm", () => {
+    const view = toTireStatisticsView(payload({ averageWear: null }));
+    expect(view.averageWear).toBeNull();
+    expect(view.noInspection).toBe(true);
+    expect(toTireStatisticsView(payload()).noInspection).toBe(false);
+  });
+
   it("valeur illisible : null, pas 0", () => {
     const view = toTireStatisticsView(payload({ totalTires: "n/a", totalValue: "" }));
     expect(view.totalTires).toBeNull();

@@ -254,6 +254,8 @@ describe("statistiques avancées des pneus en une requête", { timeout: 120000 }
     expect(actions.criticalWear.map((a: any) => a.inspection.treadDepth)).not.toContain(1.1);
     expect(actions.rotationDue.some((a: any) => a.vehicle.vehicleId === ids.vehicleIds[0])).toBe(true);
     expect(actions.rotationApproaching.some((a: any) => a.vehicle.vehicleId === ids.vehicleIds[1])).toBe(true);
+    // Inspections actives seedées : la moyenne existe, l'ancien repli à 0 (null désormais) n'entre pas dans la comparaison.
+    expect(typeof stats.averageWear).toBe("number");
     expect(typeof stats.totalTires).toBe("string");
     expect(typeof stats.totalValue).toBe("string");
   });

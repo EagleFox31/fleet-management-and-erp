@@ -4,7 +4,7 @@
  *
  * Les types décrivent ce qui est servi aujourd'hui, sans le changer : les sommes Postgres
  * (`SUM` d'un integer, d'un numeric) arrivent du pilote en texte, et valent `0` quand il n'y a
- * aucun pneu (repli `|| 0`).
+ * aucun pneu (repli `|| 0`). `averageWear` vaut `null` sans inspection active.
  */
 import type { Tire } from "../schema";
 import type { Serialized } from "./serialized";
@@ -61,8 +61,8 @@ export interface TireStatisticsAdvanced {
   totalTires: string | number;
   /** Valeur du stock (quantité × prix d'achat) : texte (numeric), `0` sans pneu. */
   totalValue: string | number;
-  /** Profondeur moyenne des pneus montés (mm, une décimale), `0` sans inspection. */
-  averageWear: number;
+  /** Profondeur moyenne des pneus montés (mm, une décimale), `null` sans inspection active. */
+  averageWear: number | null;
   /** Nombre de références en stock faible mais non épuisé (`requiredActions.lowStock`). */
   lowStockCount: number;
   /** Rotations (`tire_rotations.rotation_date`) du mois civil en cours à Africa/Douala (`KPI_TIME_ZONE`). */

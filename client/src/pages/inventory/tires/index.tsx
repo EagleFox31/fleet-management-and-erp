@@ -1120,7 +1120,7 @@ export default function TiresInventoryPage() {
               className="cursor-pointer transition-shadow hover:shadow-md"
               onClick={() => setActiveTab("mounted")}
               label="Usure moy. flotte"
-              value={statText(statistics?.averageWear, (mm) => `${mm.toFixed(1)}mm`)}
+              value={statistics?.noInspection ? "Aucune inspection" : statText(statistics?.averageWear, (mm) => `${mm.toFixed(1)}mm`)}
               subValue="Profondeur sculpture moyenne"
               icon={<Gauge className="h-4 w-4" />}
               iconWrapperClassName="bg-slate-100 text-slate-600"
@@ -1473,15 +1473,11 @@ export default function TiresInventoryPage() {
               </div>
             </div>
             <div className="px-5 py-4">
+              {/* L'erreur et le bouton Réessayer sont dans l'encart en tête de page : ici, une simple mention. */}
               {pageState.kind === "ready" && pageState.statsError ? (
-                <InlineQueryError
-                  className="mb-5"
-                  error={pageState.statsError.error}
-                  fallback="Les alertes kilométriques sont momentanément indisponibles."
-                  onRetry={() => void statsQuery.refetch()}
-                  isRetrying={pageState.statsError.isRetrying}
-                  data-testid="rotation-alerts-error"
-                />
+                <p className="mb-5 text-sm text-muted-foreground" data-testid="rotation-alerts-unavailable">
+                  Alertes kilométriques indisponibles.
+                </p>
               ) : null}
               {((rotationDueCount ?? 0) > 0 || (rotationApproachingCount ?? 0) > 0) && (
                 <div className="mb-5 rounded-xl border border-blue-100 bg-blue-50/60 p-4 space-y-3">

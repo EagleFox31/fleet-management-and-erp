@@ -980,7 +980,8 @@ export class TiresService {
       return {
         totalTires: row.total_quantity || 0,
         totalValue: row.total_value || 0,
-        averageWear: row.average_wear ? Number(row.average_wear.toFixed(1)) : 0,
+        // Aucune inspection active : null, pas 0 (0 mm serait un pneu lisse).
+        averageWear: row.average_wear === null ? null : Number(row.average_wear.toFixed(1)),
         lowStockCount: actions.lowStock.length,
         rotationsThisMonth: row.rotations_this_month,
         requiredActions: actions
