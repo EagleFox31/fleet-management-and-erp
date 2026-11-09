@@ -17,13 +17,15 @@ export default function ClientDashboard() {
   const fuelCard = useFuelCard();
 
   const { data: vehicles } = useQuery<any>({ queryKey: ["/api/vehicles"] });
-  const { data: fuelStats } = useQuery<any>({
+  const { data: fuelStats, error: fuelStatsError } = useQuery<any>({
     queryKey: ["/api/fuel-records/statistics", { period: "month" }],
   });
 
   const vehiclesCount = Array.isArray(vehicles) ? vehicles.length : 0;
   const totalDebits = Number(fuelCard.balance.data?.totalDebits || 0);
   const totalFuelLiters = Number(fuelStats?.totalFuel || 0);
+  const fuelStatsFailed = fuelStats === undefined && !!fuelStatsError;
+  const fuelStatsFailedText = userMessageOf(fuelStatsError, "Les statistiques de carburant sont momentanément indisponibles.");
 
   return (
     <div className="space-y-5">
@@ -66,8 +68,8 @@ export default function ClientDashboard() {
           <KpiTile
             data-testid="client-kpi-liters"
             label="Volume carburant"
-            value={`${totalFuelLiters.toFixed(0)} L`}
-            subValue="Litres consommés ce mois"
+            value={fuelStatsFailed ? UNAVAILABLE : `${totalFuelLiters.toFixed(0)} L`}
+            subValue={fuelStatsFailed ? fuelStatsFailedText : "Litres consommés ce mois"}
             icon={<Droplets className="h-4 w-4" />}
             iconWrapperClassName="bg-orange-50 text-orange-600"
           />
@@ -100,13 +102,13 @@ export default function ClientDashboard() {
                 <div className="flex items-center justify-between py-2 border-b border-gray-50">
                   <span className="text-sm text-gray-500">Consommation totale</span>
                   <span className="text-sm font-semibold text-gray-800">
-                    {totalDebits > 0 ? formatPrice(totalDebits) : "—"}
+                    {fuelCard.balance.failed ? UNAVAILABLE : totalDebits > 0 ? formatPrice(totalDebits) : "—"}
                   </span>
                 </div>
                 <div className="flex items-center justify-between py-2">
                   <span className="text-sm text-gray-500">Litres consommés</span>
                   <span className="text-sm font-semibold text-gray-800">
-                    {totalFuelLiters > 0 ? `${totalFuelLiters.toFixed(0)} L` : "—"}
+                    {fuelStatsFailed ? UNAVAILABLE : totalFuelLiters > 0 ? `${totalFuelLiters.toFixed(0)} L` : "—"}
                   </span>
                 </div>
               </div>
