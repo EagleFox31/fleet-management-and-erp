@@ -155,7 +155,8 @@ describe("rapport PDF des coûts de maintenance", () => {
   });
 
   it("véhicules ou utilisateurs illisibles : refus, pas des lignes « N/A »", () => {
-    expect(report).toMatch(/if \(!Array\.isArray\(vehiclesData\?\.vehicles\)\) \{\s*throw new ReportRefusedError/);
+    // Véhicules : `fetchAllVehicles` refuse lui-même (ReportRefusedError) une lecture incomplète.
+    expect(report).toMatch(/const vehicles = await fetchAllVehicles\(\)/);
     expect(report).toMatch(/if \(!Array\.isArray\(users\)\) \{\s*throw new ReportRefusedError/);
   });
 
@@ -165,6 +166,34 @@ describe("rapport PDF des coûts de maintenance", () => {
 
   it("un refus de rapport garde son message lisible", () => {
     expect(report).toMatch(/if \(error instanceof ReportRefusedError\) throw error;/);
+  });
+});
+
+describe("rapports PDF : véhicules lus en entier, logs migrés", () => {
+  const src = read("client/src/lib/pdf-export.ts");
+  const section = (start: string, end: string) => src.slice(src.indexOf(start), src.indexOf(end));
+
+  it("aucun console.* : tout passe par clientLogger", () => {
+    expect(src).not.toMatch(/\bconsole\./);
+    expect(src).toMatch(/import \{ clientLogger \} from ['"]@\/lib\/logger['"]/);
+  });
+
+  it("plus de lecture des véhicules plafonnée à 1000 : page par page", () => {
+    expect(src).not.toMatch(/\/api\/vehicles\?limit=1000/);
+    expect(src.match(/= await fetchAllVehicles\(\)/g)).toHaveLength(3);
+  });
+
+  it("pleins de carburant illisibles : refus, jamais un rapport carburant à 0", () => {
+    expect(src).not.toMatch(/Array\.isArray\(fuelData\) \? fuelData : \[\]/);
+    expect(src).not.toMatch(/fetch\(['"`]\/api\/fuel-records['"`]\)/);
+    expect(src.match(/= await fetchFuelRecords\(\)/g)).toHaveLength(2);
+  });
+
+  it.each([
+    ["utilisation", "export async function exportVehicleUsageReport", "export async function exportMaintenanceCostReport"],
+    ["carburant", "export async function exportFuelConsumptionReport", "export async function exportInventoryReport"],
+  ])("rapport %s : un refus garde son message lisible", (_, start, end) => {
+    expect(section(start, end)).toMatch(/if \(error instanceof ReportRefusedError\) throw error;/);
   });
 });
 
