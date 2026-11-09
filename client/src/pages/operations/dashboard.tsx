@@ -8,13 +8,20 @@ import { MissionsList } from "@/components/operations/missions-list";
 import { InvoicingDashboard } from "@/components/operations/invoicing-dashboard";
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
-import { ClipboardList, Users, MapPin, FileText } from "lucide-react";
+import { ClipboardList, Users, MapPin, FileText, Fuel } from "lucide-react";
 import { statusWhenHigherIsBetter, statusWhenLowerIsBetter } from "@/lib/kpi-status";
 import { HeaderCard, KpiGrid, KpiTile } from "@/components/design-system";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
+import { listQueryView, readyData } from "@/lib/query-view";
+import { clientTotals, LOADING_VALUE, statDisplay } from "@/lib/secretary-dashboard-stats";
+import type { ClientSummary } from "@/services/operationsService";
+import { useAuth } from "@/hooks/useAuth";
+import { canReadMissionBudget } from "@/lib/mission-budget-ui";
 
 export default function OperationsDashboard() {
   const { statsByClient, statsByDestination, upcomingMissions, activeMissions } = useOperations();
   const [location, setLocation] = useLocation();
+  const { user } = useAuth();
 
   type OperationsTab = "missions" | "clients" | "destinations" | "invoices";
   const allowedTabs: OperationsTab[] = ["missions", "clients", "destinations", "invoices"];
@@ -35,15 +42,18 @@ export default function OperationsDashboard() {
     setActiveTab((prev) => (prev === tabFromUrl ? prev : tabFromUrl));
   }, [location]);
 
-  const clientsData = statsByClient.data || [];
-  const totalRevenue = clientsData.reduce((sum, client) => sum + (client.totalRevenue || 0), 0);
-  const totalCost = clientsData.reduce((sum, client) => sum + (client.totalCost || 0), 0);
-  const totalMissions = clientsData.reduce((sum, client) => sum + (client.totalMissions || 0), 0);
-  const margin = totalRevenue - totalCost;
-  const marginPercentage = totalRevenue > 0 ? (margin / totalRevenue * 100) : 0;
-  const activeMissionsCount = Array.isArray(activeMissions.data) ? activeMissions.data.length : 0;
-  const activeClientNames = clientsData
-    .map((client: any) => client.clientName)
+  // `estimatedFuelCost` (ex-`totalRevenue`) est un carburant estimé, pas un chiffre d'affaires :
+  // ni CA ni marge n'en sont tirés. Un chiffre illisible vaut « Indisponible », jamais 0.
+  const statsView = listQueryView<ClientSummary>(statsByClient);
+  const clientsList = readyData(statsView, null);
+  const totals = clientTotals(clientsList);
+  // Q19 : le carburant estimé est masqué (null) hors lecteurs du budget ; la tuile disparaît.
+  // Selon le rôle, pas selon la donnée : une liste vide donnerait sinon « 0 F » à un non-lecteur.
+  const fuelEstimateRedacted = !canReadMissionBudget(user?.role);
+  const activeMissionsView = listQueryView<unknown>(activeMissions);
+  const activeMissionsCount = activeMissionsView.kind === "ready" ? activeMissionsView.data.length : null;
+  const activeClientNames = (clientsList ?? [])
+    .map((client) => client.clientName)
     .filter((name: unknown): name is string => typeof name === "string" && name.trim().length > 0);
   const activeClientsCount = activeClientNames.length;
   const clientsSubValue =
@@ -51,24 +61,20 @@ export default function OperationsDashboard() {
       ? "Aucun client actif"
       : `${activeClientNames.slice(0, 4).join(", ")}${activeClientNames.length > 4 ? ` +${activeClientNames.length - 4}` : ""}`;
 
-  // Une erreur sur les missions actives ne vaut pas « 0 en cours » : pas de statut coloré.
-  const missionsStatus = activeMissions.isError
-    ? undefined
-    : statusWhenLowerIsBetter(activeMissionsCount, {
-        warningAbove: 0,
-        criticalAbove: 5,
-      });
-  const revenueStatus = statusWhenHigherIsBetter(totalRevenue, {
-    warningBelow: 1,
-    criticalBelow: 0,
-  });
-  const marginStatus =
-    totalRevenue <= 0
-      ? "neutral"
-      : statusWhenHigherIsBetter(marginPercentage, {
-          warningBelow: 15,
-          criticalBelow: 5,
+  // Missions actives inconnues : pas « 0 en cours », pas de statut coloré.
+  const missionsStatus =
+    activeMissionsCount === null
+      ? undefined
+      : statusWhenLowerIsBetter(activeMissionsCount, {
+          warningAbove: 0,
+          criticalAbove: 5,
         });
+  const missionsSubValue =
+    activeMissionsView.kind === "ready"
+      ? `${activeMissionsCount} en cours`
+      : activeMissionsView.kind === "loading"
+        ? `En cours : ${LOADING_VALUE}`
+        : "En cours : indisponible";
   const clientsStatus = statusWhenHigherIsBetter(activeClientsCount, {
     warningBelow: 1,
     criticalBelow: 0,
@@ -95,46 +101,48 @@ export default function OperationsDashboard() {
         subtitle="Gestion des missions clients et facturation"
         icon={<ClipboardList className="h-5 w-5" />}
       >
-        {statsByClient.isLoading ? (
+        {statsView.kind === "loading" ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
             <Skeleton className="h-[92px] w-full rounded-xl" />
             <Skeleton className="h-[92px] w-full rounded-xl" />
             <Skeleton className="h-[92px] w-full rounded-xl" />
             <Skeleton className="h-[92px] w-full rounded-xl" />
           </div>
-        ) : statsByClient.isError ? (
-          <p className="text-sm text-muted-foreground" data-testid="kpi-unavailable">
-            Indicateurs momentanément indisponibles.
-          </p>
+        ) : statsView.kind === "error" ? (
+          <InlineQueryError
+            error={statsView.error}
+            fallback="Indicateurs momentanément indisponibles."
+            onRetry={() => statsByClient.refetch()}
+            isRetrying={statsView.isRetrying}
+            data-testid="kpi-unavailable"
+          />
         ) : (
           <KpiGrid columns={4}>
             <KpiTile
               label="Missions actives"
               featured // le pouls de l'exploitation
-              value={formatNumber(totalMissions)}
-              subValue={activeMissions.isError ? "En cours : indisponible" : `${activeMissionsCount} en cours`}
+              value={statDisplay(statsView, totals.missions, formatNumber)}
+              subValue={missionsSubValue}
               icon={<ClipboardList className="h-4 w-4" />}
               iconWrapperClassName="bg-blue-50 text-blue-600"
               valueClassName={missionsStatus === "critical" ? "text-red-600" : missionsStatus === "warning" ? "text-amber-600" : undefined}
               data-testid="kpi-total-missions"
             />
+            {!fuelEstimateRedacted && (
+              <KpiTile
+                label="Carburant estimé (missions)"
+                value={statDisplay(statsView, totals.estimatedFuelCost, formatPrice)}
+                subValue="Somme des estimations des missions"
+                icon={<Fuel className="h-4 w-4" />}
+                data-testid="kpi-fuel-estimated"
+              />
+            )}
             <KpiTile
-              label="Chiffre d'affaires"
-              value={formatPrice(totalRevenue)}
-              subValue="Facture clients"
-              icon={<FileText className="h-4 w-4" />}
-              iconWrapperClassName="bg-green-50 text-green-600"
-              valueClassName={revenueStatus === "critical" ? "text-red-600" : revenueStatus === "warning" ? "text-amber-600" : "text-green-700"}
-              data-testid="kpi-revenue"
-            />
-            <KpiTile
-              label="Marge brute"
-              value={`${marginPercentage.toFixed(1)}%`}
-              subValue={formatPrice(margin)}
-              icon={<MapPin className="h-4 w-4" />}
-              iconWrapperClassName="bg-indigo-50 text-indigo-600"
-              valueClassName={marginStatus === "critical" ? "text-red-600" : marginStatus === "warning" ? "text-amber-600" : undefined}
-              data-testid="kpi-margin"
+              label="Carburant réel (missions)"
+              value={statDisplay(statsView, totals.fuelCost, formatPrice)}
+              subValue="Pleins rattachés aux missions"
+              icon={<Fuel className="h-4 w-4" />}
+              data-testid="kpi-fuel-actual"
             />
             <KpiTile
               label="Clients actifs"
@@ -186,7 +194,12 @@ export default function OperationsDashboard() {
         </TabsContent>
 
         <TabsContent value="destinations">
-          <DestinationsChart data={statsByDestination.data} />
+          <DestinationsChart
+            data={statsByDestination.data}
+            error={statsByDestination.error}
+            isFetching={statsByDestination.isFetching}
+            onRetry={() => statsByDestination.refetch()}
+          />
         </TabsContent>
 
         <TabsContent value="invoices">

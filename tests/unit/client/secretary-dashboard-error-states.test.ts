@@ -79,6 +79,11 @@ describe("tableau de bord secrétaire : une lecture en échec n'est pas un zéro
     expect(src).not.toMatch(/marginPercentage|profit/i);
   });
 
+  it("carburant estimé par client lu sous son nom exact, pas sous l'alias déprécié", () => {
+    expect(src).toMatch(/statField\(client, "estimatedFuelCost"\)/);
+    expect(src).not.toMatch(/statField\([^)]*"totalRevenue"\)/);
+  });
+
   it("listes en échec : un encart, pas un vide", () => {
     for (const id of ["secretary-clients-error", "secretary-vehicles-error", "secretary-drivers-error"]) {
       expect(src).toMatch(new RegExp(`data-testid="${id}"`));
