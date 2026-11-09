@@ -4,6 +4,7 @@ import { eq, desc, and, ne, sql, inArray } from "drizzle-orm";
 import type { PartRequirement, InsertPartRequirement } from "@shared/schema";
 import { PartRequirementWorkflow, type PartRequirementStatus } from "./part-requirements-workflow";
 import { moduleLogger } from "../lib/logger";
+import { AppError } from "../lib/app-error";
 
 const log = moduleLogger("part-requirements");
 
@@ -188,8 +189,9 @@ export class PartRequirementsService {
       log.debug(`Found ${enrichedRequirements.length} part requirements`);
       return enrichedRequirements as any;
     } catch (error) {
-      log.error({ err: error }, 'Error getting part requirements');
-      return [];
+      log.error({ err: error, status }, 'Error getting part requirements');
+      // Une liste vide passerait pour « aucune demande de pièce en cours ».
+      throw new AppError(500, "Les demandes de pièces sont momentanément indisponibles.", { cause: error });
     }
   }
 
@@ -596,8 +598,9 @@ export class PartRequirementsService {
 
       return (await this.attachPurchaseOrderContext(requirements as any[])) as any;
     } catch (error) {
-      log.error({ err: error }, 'Error getting requirements by part');
-      return [];
+      log.error({ err: error, partId }, 'Error getting requirements by part');
+      // Une liste vide passerait pour « aucune demande sur cette pièce ».
+      throw new AppError(500, "Les demandes de cette pièce sont momentanément indisponibles.", { cause: error });
     }
   }
 

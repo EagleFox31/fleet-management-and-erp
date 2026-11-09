@@ -41,6 +41,8 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { queryClient } from "@/lib/queryClient";
 import { exportInventoryToPDF } from "@/lib/pdf-export";
+import { queryView, readyData } from "@/lib/query-view";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 import { useFormDraft } from "@/hooks/use-form-draft";
 import { FormDraftBadge, FormDraftDiscardButton } from "@/components/form-draft/form-draft-indicator";
 import { partRequirementDraft } from "@/lib/form-drafts";
@@ -85,16 +87,23 @@ export default function InventoryIndex() {
   });
   
   // Fetch part requirements for workshop manager stats
-  const { data: allRequirements = [], isLoading: requirementsLoading } = useQuery<any[]>({
+  const requirementsQuery = useQuery<any[]>({
     queryKey: ["/api/part-requirements"],
     enabled: isWorkshopManager,
   });
-  
+  const requirementsLoading = requirementsQuery.isLoading;
+
   // Fetch stock movements for this month
-  const { data: stockMovements = [], isLoading: stockMovementsLoading } = useQuery<any[]>({
+  const stockMovementsQuery = useQuery<any[]>({
     queryKey: ["/api/parts/stock-movements"],
     enabled: isWorkshopManager,
   });
+  const stockMovementsLoading = stockMovementsQuery.isLoading;
+  // Échec sans données : tuile « Indisponible », jamais 0 demande en attente ni 0 mouvement.
+  const requirementsView = queryView(requirementsQuery);
+  const stockMovementsView = queryView(stockMovementsQuery);
+  const allRequirements = readyData(requirementsView, [] as any[]);
+  const stockMovements = readyData(stockMovementsView, [] as any[]);
   
   // Calculate workshop manager specific stats
   const myRequestsCount = isWorkshopManager 
@@ -304,7 +313,9 @@ export default function InventoryIndex() {
                 </div>
                 <div className="mt-1">
                   <p className="text-[11px] font-medium text-gray-500">Demandes en attente</p>
-                  <p className={`text-[15px] font-bold leading-tight mt-0.5 ${pendingRequestsCount > 0 ? 'text-orange-700' : 'text-gray-800'}`}>{pendingRequestsCount}</p>
+                  <p className={`text-[15px] font-bold leading-tight mt-0.5 ${pendingRequestsCount > 0 ? 'text-orange-700' : 'text-gray-800'}`} data-testid="kpi-pending-requests-value">
+                    {requirementsView.kind === "error" ? UNAVAILABLE : pendingRequestsCount}
+                  </p>
                 </div>
               </div>
             ) : (
@@ -336,7 +347,9 @@ export default function InventoryIndex() {
                 </div>
                 <div className="mt-1">
                   <p className="text-[11px] font-medium text-gray-500">Mouvements ce mois</p>
-                  <p className="text-[15px] font-bold text-gray-800 leading-tight mt-0.5">{thisMonthMovements}</p>
+                  <p className="text-[15px] font-bold text-gray-800 leading-tight mt-0.5" data-testid="kpi-movements-value">
+                    {stockMovementsView.kind === "error" ? UNAVAILABLE : thisMonthMovements}
+                  </p>
                 </div>
               </div>
             ) : (

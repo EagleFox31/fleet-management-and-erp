@@ -63,6 +63,9 @@ import {
   FileText,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
+import { queryView, readyData } from "@/lib/query-view";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 import { userMessageOf } from "@/lib/api-error";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { formatCurrency } from "@/lib/utils";
@@ -241,11 +244,16 @@ export default function PartRequestsIndex() {
   };
 
   // Récupérer toutes les demandes de pièces
-  const { data: requests = [], isLoading } = useQuery<PartRequirement[]>({
+  const requestsQuery = useQuery<PartRequirement[]>({
     queryKey: ["/api/part-requirements"],
     refetchInterval: 5000,
     refetchIntervalInBackground: true,
   });
+  // Échec sans données : compteurs « Indisponible » et message, jamais « Aucune demande » ni 0.
+  const requestsView = queryView(requestsQuery);
+  const requests = readyData(requestsView, [] as PartRequirement[]);
+  const isLoading = requestsView.kind === "loading";
+  const requestsFailed = requestsView.kind === "error";
 
   // Récupérer les OT en attente de pièces (pour le magasinier)
   const { data: awaitingPartsData, isLoading: isLoadingAwaitingParts } = useQuery<{
@@ -521,11 +529,11 @@ export default function PartRequestsIndex() {
               { icon: <CheckCircle className="h-4 w-4 text-success" />, iconBg: "bg-success/10", label: "Approuvées", value: stats.approved },
               { icon: <ShoppingCart className="h-4 w-4 text-purple-500" />, iconBg: "bg-purple-50", label: "Commandées", value: stats.ordered },
               { icon: <Truck className="h-4 w-4 text-teal-500" />, iconBg: "bg-teal-50", label: "Livrées", value: stats.delivered },
-            ].map((kpi) => (
+            ].map((kpi) => requestsFailed ? { ...kpi, value: UNAVAILABLE, alert: false } : kpi).map((kpi) => (
               <div key={kpi.label} className={`rounded-xl border px-4 py-3.5 flex flex-col gap-1 ${(kpi as any).alert ? 'border-orange-200 bg-orange-50' : 'border-gray-100 bg-gray-50'}`}>
                 <div className={`w-7 h-7 rounded-lg ${kpi.iconBg} flex items-center justify-center`}>{kpi.icon}</div>
                 <p className="text-[11px] font-medium text-gray-500 mt-1">{kpi.label}</p>
-                <p className={`text-xl font-bold leading-none ${(kpi as any).alert ? 'text-orange-600' : 'text-gray-800'}`}>{kpi.value}</p>
+                <p className={`leading-none ${requestsFailed ? 'text-sm font-medium text-gray-500' : `text-xl font-bold ${(kpi as any).alert ? 'text-orange-600' : 'text-gray-800'}`}`}>{kpi.value}</p>
               </div>
             ))}
           </div>
@@ -760,6 +768,18 @@ export default function PartRequestsIndex() {
                     ))}
                   </tr>
                 ))
+              ) : requestsView.kind === "error" ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-6">
+                    <InlineQueryError
+                      error={requestsView.error}
+                      fallback="Les demandes de pièces sont momentanément indisponibles."
+                      onRetry={() => void requestsQuery.refetch()}
+                      isRetrying={requestsView.isRetrying}
+                      data-testid="requests-error"
+                    />
+                  </td>
+                </tr>
               ) : filteredRequests.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-4 py-16 text-center">

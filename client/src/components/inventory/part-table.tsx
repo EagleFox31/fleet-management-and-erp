@@ -6,6 +6,8 @@ import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tansta
 import { apiRequest } from "@/lib/queryClient";
 import { IDEMPOTENCY_HEADER, partStockKeyScope, sendWithSubmissionKey } from "@/lib/submission-key";
 import { userMessageOf } from "@/lib/api-error";
+import { queryView, readyData } from "@/lib/query-view";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
@@ -161,10 +163,14 @@ export function PartTable({ onRowClick }: PartTableProps) {
     queryKey: ["/api/part-requirements/active-by-part"],
   });
 
-  const { data: partRequirements = [], isLoading: isLoadingRequirements } = useQuery<PartRequirementDetail[]>({
+  const partRequirementsQuery = useQuery<PartRequirementDetail[]>({
     queryKey: [`/api/part-requirements/by-part/${selectedPartForDialog}`],
     enabled: !!selectedPartForDialog && isRequirementDialogOpen,
   });
+  // Échec sans données : message et « Réessayer », jamais « Aucune demande active pour cette pièce ».
+  const partRequirementsView = queryView(partRequirementsQuery);
+  const partRequirements = readyData(partRequirementsView, [] as PartRequirementDetail[]);
+  const isLoadingRequirements = partRequirementsQuery.isLoading;
 
   const parts = data?.parts ?? [];
   const totalParts = data?.total ?? 0;
@@ -667,6 +673,14 @@ export function PartTable({ onRowClick }: PartTableProps) {
             <div className="flex items-center justify-center py-8">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
             </div>
+          ) : partRequirementsView.kind === "error" ? (
+            <InlineQueryError
+              error={partRequirementsView.error}
+              fallback="Les demandes de cette pièce sont momentanément indisponibles."
+              onRetry={() => void partRequirementsQuery.refetch()}
+              isRetrying={partRequirementsView.isRetrying}
+              data-testid="part-requirements-error"
+            />
           ) : partRequirements.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">Aucune demande active pour cette pièce</div>
           ) : (

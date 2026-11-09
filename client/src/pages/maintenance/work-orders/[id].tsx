@@ -13,6 +13,7 @@ import { getPartRequirementStatusLabel } from "@shared/constants/part-requiremen
 import { partLineCost, totalLaborHours } from "@shared/work-order-cost";
 import { formatKnownCost, listQueryView, workOrderDisplayCost } from "@/lib/work-order-tires-cost";
 import { readyData } from "@/lib/query-view";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { canReadWorkOrderCost, canRoleRemovePartUsed } from "@shared/constants/roles";
 import { useVehicle } from "@/context/vehicle-context";
 import { useAuth } from "@/hooks/useAuth";
@@ -339,16 +340,22 @@ export default function WorkOrderDetails({
     workOrder?.status !== 'completed' &&
     !(user?.role === 'technician' && demarreurEstAutre);
 
-  // Fetch parts used in this work order
-  const {
-    data: partsUsed = [],
-    refetch: refetchPartsUsed,
-  } = useQuery<any[]>({
+  // Pièces utilisées sur l'OT. Pas de `= []` par défaut : une lecture en échec n'est pas
+  // « aucune pièce », sinon le coût de l'OT est sous-évalué sans signal.
+  const partsUsedQuery = useQuery<any[]>({
     queryKey: [`/api/work-orders/${workOrderId}/parts`],
     enabled: !!workOrderId,
     staleTime: 0,
     gcTime: 0,
   });
+  const refetchPartsUsed = partsUsedQuery.refetch;
+  const partsUsedView = listQueryView<any>({
+    data: partsUsedQuery.data,
+    error: partsUsedQuery.error,
+    isFetching: partsUsedQuery.isFetching,
+  });
+  const partsUsed = readyData(partsUsedView, [] as any[]);
+  const partsUsedFailed = partsUsedView.kind === "error";
 
   const {
     data: pendingPartRequirements = [],
@@ -388,11 +395,18 @@ export default function WorkOrderDetails({
     enabled: isAddPartDialogOpen,
   });
   
-  // Fetch existing part requirements for the selected part
-  const { data: existingRequests = [] as any[] } = useQuery<any[]>({
+  // Demandes existantes pour la pièce choisie. Échec : l'aperçu ne promet pas « une demande
+  // sera créée » sans savoir s'il en existe déjà une.
+  const existingRequestsQuery = useQuery<any[]>({
     queryKey: [`/api/part-requirements/by-part/${selectedPartId}`],
     enabled: !!selectedPartId,
   });
+  const existingRequestsView = listQueryView<any>({
+    data: existingRequestsQuery.data,
+    error: existingRequestsQuery.error,
+    isFetching: existingRequestsQuery.isFetching,
+  });
+  const existingRequests = readyData(existingRequestsView, [] as any[]);
   
   // Find the selected part details
   const selectedPart = selectedPartId 
@@ -635,6 +649,17 @@ export default function WorkOrderDetails({
   });
 
   const handlePrintWorkOrder = () => {
+    // Pièces non lues : le PDF afficherait « aucune pièce » et un coût sous-évalué.
+    if (partsUsedView.kind !== "ready") {
+      toast({
+        variant: "destructive",
+        title: "Impression impossible",
+        description: partsUsedFailed
+          ? userMessageOf(partsUsedView.error, "Les pièces de l'ordre de travail sont momentanément indisponibles.")
+          : "Les pièces de l'ordre de travail sont en cours de chargement.",
+      });
+      return;
+    }
     try {
       const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
       const pageWidth = doc.internal.pageSize.width;
@@ -945,7 +970,7 @@ export default function WorkOrderDetails({
 
       const costRows = [
         { label: "Main d'oeuvre", value: formatCurrency(laborCost) },
-        { label: "Pièces", value: formatCurrency(partsCost) },
+        { label: "Pièces", value: formatKnownCost(partsCost, formatCurrency, { isError: partsUsedFailed }) },
         { label: "Rotations pneus", value: formatKnownCost(tireCost, formatCurrency, { isError: tireRotationsFailed }) },
       ];
 
@@ -1153,14 +1178,15 @@ export default function WorkOrderDetails({
     laborValued,
   } = workOrderDisplayCost({
     baseCost: workOrder.cost,
-    parts: partsUsed,
+    parts: partsUsedView.kind === "ready" ? partsUsed : undefined,
     tireRotations,
     laborHours,
     laborRate: laborRate?.hourlyRateHt ?? null,
   });
-  // Coût pneus ou total inconnus : « Indisponible » après échec, jamais 0.
+  // Coût pièces, pneus ou total inconnus : « Indisponible » après échec, jamais 0.
   const costLabel = (value: number | null) =>
-    formatKnownCost(value, formatCurrency, { isError: tireRotationsFailed });
+    formatKnownCost(value, formatCurrency, { isError: tireRotationsFailed || partsUsedFailed });
+  const partsCostLabel = formatKnownCost(totalPartsCost, formatCurrency, { isError: partsUsedFailed });
   const pendingPartsCount = Array.isArray(pendingPartRequirements) ? pendingPartRequirements.length : 0;
   const usedPartsCount = Array.isArray(partsUsed) ? partsUsed.length : 0;
   const displayedPartsCount = usedPartsCount + pendingPartsCount;
@@ -1669,6 +1695,14 @@ export default function WorkOrderDetails({
                                 <CheckCircle className="h-4 w-4 inline mr-1" />
                                 Une demande est déjà en cours pour cette pièce ({getPartRequirementStatusLabel(openRequest.status)}).
                               </p>
+                            ) : existingRequestsView.kind === "error" ? (
+                              <InlineQueryError
+                                error={existingRequestsView.error}
+                                fallback="Les demandes en cours pour cette pièce n'ont pas pu être vérifiées."
+                                onRetry={() => void existingRequestsQuery.refetch()}
+                                isRetrying={existingRequestsView.isRetrying}
+                                data-testid="existing-requests-error"
+                              />
                             ) : (
                               <p>Une demande sera créée pour {previewMissing} unité(s) manquante(s).</p>
                             )}
@@ -1709,6 +1743,16 @@ export default function WorkOrderDetails({
               )}
               </div>
             </div>
+              {partsUsedFailed && (
+                <InlineQueryError
+                  className="m-4"
+                  error={partsUsedView.error}
+                  fallback="Les pièces utilisées sont momentanément indisponibles."
+                  onRetry={() => void refetchPartsUsed()}
+                  isRetrying={partsUsedView.isRetrying}
+                  data-testid="parts-used-error"
+                />
+              )}
               {(Array.isArray(partsUsed) && partsUsed.length > 0) || (Array.isArray(pendingPartRequirements) && pendingPartRequirements.length > 0) ? (
                 <div className="overflow-x-auto border-t border-gray-100">
                   <table className="w-full text-sm">
@@ -1860,19 +1904,19 @@ export default function WorkOrderDetails({
                     </tbody>
                   </table>
                 </div>
-              ) : (
+              ) : partsUsedView.kind === "ready" ? (
                 <div className="flex flex-col items-center justify-center py-12 gap-3 text-gray-400 border-t border-gray-100">
                   <div className="w-12 h-12 rounded-full bg-warning/10 border border-warning/20 flex items-center justify-center">
                     <Package className="h-5 w-5 text-warning-text" />
                   </div>
                   <p className="text-sm">Aucune pièce utilisée dans cet ordre de travail.</p>
                 </div>
-              )}
+              ) : null}
               {canReadLaborRate && Array.isArray(partsUsed) && partsUsed.length > 0 && (
                 <div className="px-5 py-3 border-t border-gray-100 flex justify-end">
                   <div className="bg-warning/10 border border-warning/20 rounded-lg px-4 py-2 flex items-center gap-3">
                     <span className="text-sm text-warning-text">Total pièces</span>
-                    <span className="text-base font-bold text-warning-text">{formatCurrency(totalPartsCost)}</span>
+                    <span className="text-base font-bold text-warning-text">{partsCostLabel}</span>
                   </div>
                 </div>
               )}
@@ -2102,7 +2146,7 @@ export default function WorkOrderDetails({
                       </div>
                     )}
                     <div className="flex justify-between text-muted-foreground">
-                      <span>Pièces détachées</span><span>{formatCurrency(totalPartsCost)}</span>
+                      <span>Pièces détachées</span><span>{partsCostLabel}</span>
                     </div>
                     {(totalTireRotationsCost === null || totalTireRotationsCost > 0) && (
                       <div className="flex justify-between text-muted-foreground">

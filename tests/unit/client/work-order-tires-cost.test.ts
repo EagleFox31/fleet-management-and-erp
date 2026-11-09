@@ -32,6 +32,26 @@ describe("coût d'OT affiché, rotations de pneus", () => {
   });
 });
 
+describe("coût d'OT affiché, pièces utilisées", () => {
+  const rotations = [{ cost: 300 }];
+
+  it("pièces jamais lues (échec ou chargement) : coût pièces et total inconnus, pas 0", () => {
+    const cost = workOrderDisplayCost({ ...base, parts: undefined, tireRotations: rotations });
+    expect(cost).toMatchObject({ baseCost: 1000, partsCost: null, tiresCost: 300, totalCost: null });
+  });
+
+  it("pièces lues et vides : 0 est un vrai zéro", () => {
+    expect(workOrderDisplayCost({ ...base, parts: [], tireRotations: rotations })).toMatchObject({
+      partsCost: 0,
+      totalCost: 1300,
+    });
+  });
+
+  it("réponse pièces qui n'est pas une liste : inconnue aussi", () => {
+    expect(workOrderDisplayCost({ ...base, parts: { message: "x" } as never, tireRotations: rotations }).partsCost).toBeNull();
+  });
+});
+
 describe("vue d'une requête de liste", () => {
   const error = new Error("panne");
 
