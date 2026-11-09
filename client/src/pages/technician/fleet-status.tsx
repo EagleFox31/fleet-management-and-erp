@@ -24,6 +24,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
 import { queryClient } from "@/lib/queryClient";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { useRealTimeSync } from "@/hooks/useRealTimeSync";
 import { useAuth } from "@/hooks/useAuth";
 import { isApiError } from "@/lib/api-error";
@@ -78,7 +79,7 @@ export default function FleetTechnicianPWA() {
     refetchOnMount: true
   });
 
-  const { data: maintenanceSchedules, isLoading: maintenanceLoading, refetch: refetchMaintenance } = useQuery<any>({
+  const { data: maintenanceSchedules, isLoading: maintenanceLoading, error: maintenanceError, refetch: refetchMaintenance } = useQuery<any>({
     queryKey: ['/api/maintenance-schedules'],
     staleTime: 0,
     gcTime: 0,
@@ -419,7 +420,13 @@ export default function FleetTechnicianPWA() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {upcomingMaintenanceList.length > 0 ? (
+            {maintenanceError ? (
+              <InlineQueryError
+                error={maintenanceError}
+                fallback="Le planning de maintenance est momentanément indisponible."
+                onRetry={() => void refetchMaintenance()}
+              />
+            ) : upcomingMaintenanceList.length > 0 ? (
               <div className="space-y-3">
                 {upcomingMaintenanceList.slice(0, 3).map((schedule: any) => {
                   const scheduleDate = new Date(schedule.scheduledDate);
