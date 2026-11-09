@@ -545,8 +545,8 @@ export class DatabaseStorage implements IStorage {
 
       return { compliant: total - overdue, overdue, total };
     } catch (error) {
-      console.error('Error getting maintenance compliance:', error);
-      return { compliant: 0, overdue: 0, total: 0 };
+      storageLog.error({ err: error }, "Error getting maintenance compliance");
+      throw new AppError(500, "La conformité de maintenance est momentanément indisponible.", { cause: error });
     }
   }
 
@@ -613,8 +613,8 @@ export class DatabaseStorage implements IStorage {
       
       return result.count;
     } catch (error) {
-      console.error('Error getting scheduled maintenance count:', error);
-      return 0;
+      storageLog.error({ err: error }, "Error getting scheduled maintenance count");
+      throw new AppError(500, "Le nombre de maintenances planifiées est momentanément indisponible.", { cause: error });
     }
   }
 
@@ -2128,8 +2128,8 @@ export class DatabaseStorage implements IStorage {
         .orderBy(desc(alerts.createdAt));
       return userAlerts;
     } catch (error) {
-      console.error('Error getting alerts by user ID:', error);
-      return [];
+      storageLog.error({ err: error }, "Error getting alerts by user ID");
+      throw new AppError(500, "Les alertes sont momentanément indisponibles.", { cause: error });
     }
   }
 
@@ -2144,8 +2144,8 @@ export class DatabaseStorage implements IStorage {
       console.log(`Alertes non lues pour l'utilisateur ${userId}:`, unreadAlerts.length);
       return unreadAlerts;
     } catch (error) {
-      console.error('Error getting unread alerts:', error);
-      return [];
+      storageLog.error({ err: error }, "Error getting unread alerts");
+      throw new AppError(500, "Les alertes sont momentanément indisponibles.", { cause: error });
     }
   }
 
@@ -2263,8 +2263,8 @@ export class DatabaseStorage implements IStorage {
       console.log(`Found ${requirements.length} part requirements`);
       return requirements;
     } catch (error) {
-      console.error('Error getting part requirements:', error);
-      return [];
+      storageLog.error({ err: error }, "Error getting part requirements");
+      throw new AppError(500, "La liste des demandes de pièces est momentanément indisponible.", { cause: error });
     }
   }
 
@@ -2338,8 +2338,8 @@ export class DatabaseStorage implements IStorage {
       const catalogs = await db.select().from(faultCatalog).orderBy(desc(faultCatalog.createdAt));
       return catalogs;
     } catch (error) {
-      console.error('Error getting fault catalogs:', error);
-      return [];
+      storageLog.error({ err: error }, "Error getting fault catalogs");
+      throw new AppError(500, "Le catalogue des pannes est momentanément indisponible.", { cause: error });
     }
   }
 

@@ -3797,7 +3797,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let requestsCreated = 0;
 
       for (const recipientId of recipientIds) {
-        const unreadAlerts = await storage.getUnreadAlertsByUserId(recipientId);
+        // Meilleur effort : la lecture ne sert qu'à éviter un doublon, elle ne doit jamais faire échouer l'action.
+        let unreadAlerts: Awaited<ReturnType<typeof storage.getUnreadAlertsByUserId>> = [];
+        try {
+          unreadAlerts = await storage.getUnreadAlertsByUserId(recipientId);
+        } catch (err) {
+          log.warn({ err, requestId: req.requestId, recipientId }, "lecture des alertes non lues impossible, anti-doublon ignoré");
+        }
         const exists = unreadAlerts.some((alert) =>
           alert.title === requestConfig.title &&
           alert.link === requestLink

@@ -236,6 +236,28 @@ describe("valeur du stock et alertes de réappro : jamais 0 sur une lecture en �
     expect(src).toMatch(/UNAVAILABLE/);
   });
 
+  it("workshop-manager/dashboard : compteur sous seuil « Indisponible » quand les statistiques échouent", () => {
+    const src = read("client/src/pages/workshop-manager/dashboard.tsx");
+    expect(src).toMatch(/const stockStatsFailed = warehouse\.statistics\.data === undefined && !!warehouse\.statistics\.error/);
+    expect(src).toMatch(/subValue=\{stockStatsFailed \? UNAVAILABLE : `\$\{stockRiskCount\} références sous seuil`\}/);
+    expect(src).toMatch(/value=\{stockStatsFailed \? UNAVAILABLE : ofStockParts\(stockRiskCount\)\}/);
+  });
+
+  it("admin/dashboard : tuile pièces « Indisponible » quand les statistiques échouent", () => {
+    const src = read("client/src/pages/admin/dashboard.tsx");
+    expect(src).toMatch(/const statsFailed = warehouse\.statistics\.data === undefined && !!warehouse\.statistics\.error/);
+    expect(src).toMatch(/value=\{statsFailed \? UNAVAILABLE : formatNumber\(warehouse\.statistics\.data\?\.totalParts/);
+  });
+
+  it("warehouse/dashboard : tuiles pièces, stock bas et répartition « Indisponible », sans couleur d'alerte", () => {
+    const src = read("client/src/pages/warehouse/dashboard.tsx");
+    expect(src).toMatch(/const statsFailed = warehouse\.statistics\.data === undefined && !!warehouse\.statistics\.error/);
+    expect(src).toMatch(/value=\{statsFailed \? UNAVAILABLE : totalUnitsCount\}/);
+    expect(src).toMatch(/value=\{statsFailed \? UNAVAILABLE : lowStockCount\}/);
+    expect(src).toMatch(/valueClassName=\{!statsFailed && \(lowStockCount/);
+    expect(src).toMatch(/statsFailed \? \(<div[^>]*>\{UNAVAILABLE\}<\/div>\)\s*:\s*alertSummaryData/);
+  });
+
   it.each(DASHBOARDS.filter((p) => !p.includes("warehouse/")))("%s : valeur du stock « Indisponible »", (path) => {
     expect(read(path)).toMatch(/warehouse\.inventoryValue\.failed/);
   });

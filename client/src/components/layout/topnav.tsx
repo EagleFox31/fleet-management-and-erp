@@ -91,20 +91,22 @@ export const Topnav: React.FC<TopnavProps> = ({ className, onMenuClick }) => {
 
   const breadcrumbs = getBreadcrumbs(location);
 
-  const { data: alertsCount } = useQuery<any>({
+  const { data: alertsCount, isError: countError } = useQuery<any>({
     queryKey: ["/api/alerts/count"],
     enabled: true,
     staleTime: 60 * 1000,
   });
 
-  const { data: recentAlerts } = useQuery<any[]>({
+  const { data: recentAlerts, isError: alertsError } = useQuery<any[]>({
     queryKey: ["/api/alerts"],
     enabled: true,
     staleTime: 60 * 1000,
     select: (data) => (Array.isArray(data) ? data.slice(0, 5) : []),
   });
 
-  const notificationCount = Number(alertsCount?.unread || 0);
+  // Lecture en échec : jamais « 0 non lue » ni « aucune alerte », le badge est masqué et le panneau le dit.
+  const alertsUnavailable = countError || alertsError;
+  const notificationCount = alertsUnavailable ? 0 : Number(alertsCount?.unread || 0);
 
   const getAlertIcon = (type: string) => {
     switch (type) {
@@ -235,7 +237,12 @@ export const Topnav: React.FC<TopnavProps> = ({ className, onMenuClick }) => {
               )}
             </div>
 
-            {!recentAlerts || recentAlerts.length === 0 ? (
+            {alertsUnavailable ? (
+              <div className="px-4 py-6 text-center" role="alert">
+                <AlertTriangle className="h-8 w-8 text-gray-300 mx-auto mb-2" />
+                <p className="text-[12.5px] text-gray-500">Alertes indisponibles. Réessayez dans un instant.</p>
+              </div>
+            ) : !recentAlerts || recentAlerts.length === 0 ? (
               <div className="px-4 py-6 text-center">
                 <Bell className="h-8 w-8 text-gray-200 mx-auto mb-2" />
                 <p className="text-[12.5px] text-gray-400">Aucune alerte récente</p>
