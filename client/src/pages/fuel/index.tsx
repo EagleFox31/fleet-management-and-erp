@@ -13,6 +13,8 @@ import { MascotHelper } from "@/components/onboarding/mascot-helper";
 import { Input } from "@/components/ui/input";
 import { PageLayout } from "@/components/layout/page-layout";
 import { useAuth } from "@/hooks/useAuth";
+import { ALL_VEHICLES_UNREADABLE, useAllVehicles } from "@/hooks/use-all-vehicles";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { canDeleteFuelRecord } from "@shared/constants/fuel-record-delete";
 import { FUEL_RECHARGE_SOURCE_ROLES } from "@shared/constants/roles";
 import type { FuelRechargeSourceAccount } from "@shared/contracts/treasury";
@@ -114,11 +116,10 @@ export default function FuelPage() {
   const canEditFuelRecord = (record: FuelRecord) =>
     user?.role === "admin" || user?.id === record.createdBy;
 
-  // Fetch all vehicles for the filter dropdown
-  const { data: vehiclesData } = useQuery<{ vehicles: Vehicle[], total: number }>({
-    queryKey: ["/api/vehicles"],
-  });
-  const vehicles = vehiclesData?.vehicles || [];
+  // Flotte complète (filtre, libellés des pleins, export) : sans `limit`, `/api/vehicles` ne rend
+  // que 10 véhicules.
+  const vehiclesQuery = useAllVehicles<Vehicle>();
+  const vehicles = vehiclesQuery.data ?? [];
 
   // Fetch all fuel records
   const { data: fuelRecordsData, isLoading, error: fuelRecordsError } = useQuery<FuelRecord[]>({
@@ -817,6 +818,15 @@ export default function FuelPage() {
                   </div>
                 )}
               </div>
+              {vehiclesQuery.isError && (
+                <InlineQueryError
+                  className="mt-3"
+                  error={vehiclesQuery.error}
+                  fallback={ALL_VEHICLES_UNREADABLE}
+                  onRetry={() => vehiclesQuery.refetch()}
+                  isRetrying={vehiclesQuery.isFetching}
+                />
+              )}
             </div>
 
             <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as FuelPageTab)} className="w-full">

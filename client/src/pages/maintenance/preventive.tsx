@@ -14,6 +14,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAllVehicles } from "@/hooks/use-all-vehicles";
 import { apiRequest } from "@/lib/queryClient";
 import { RoleExplanationCard } from "@/components/RoleExplanationCard";
 import { Button } from "@/components/ui/button";
@@ -134,10 +135,10 @@ export default function PreventiveMaintenancePage() {
     isEmpty: preventiveDraft.isEmpty as any,
   });
 
-  const { data: vehicles = [] } = useQuery<any[]>({
-    queryKey: ["/api/vehicles"],
-    enabled: isDialogOpen,
-  });
+  // Liste complète des véhicules pour le sélecteur du dialogue. L'ancienne lecture typée `any[]`
+  // recevait `{ vehicles, total }` : `vehicles.map` levait une erreur et le dialogue plantait.
+  const vehiclesQuery = useAllVehicles({ enabled: isDialogOpen });
+  const vehicles = vehiclesQuery.data ?? [];
 
   const { data: schedulesData = [], isLoading } = useQuery<any[]>({
     queryKey: ["/api/maintenance-schedules"],

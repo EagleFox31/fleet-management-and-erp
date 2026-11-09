@@ -3,6 +3,8 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { ALL_VEHICLES_UNREADABLE, useAllVehicles } from "@/hooks/use-all-vehicles";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 
@@ -87,10 +89,9 @@ export default function MaintenancePlannerPage() {
     queryKey: ['/api/maintenance-schedules'],
   });
 
-  // Charger les véhicules pour le filtrage
-  const { data: vehiclesData } = useQuery<any>({
-    queryKey: ['/api/vehicles'],
-  });
+  // Flotte complète (libellés et filtre) : sans `limit`, `/api/vehicles` ne rend que 10 véhicules.
+  const vehiclesQuery = useAllVehicles();
+  const vehicles = vehiclesQuery.data ?? [];
 
   // Mutation pour supprimer une planification
   const deleteMutation = useMutation({
@@ -170,8 +171,7 @@ export default function MaintenancePlannerPage() {
 
   // Trouver le véhicule correspondant
   const findVehicle = (vehicleId: number) => {
-    if (!vehiclesData?.vehicles) return null;
-    return vehiclesData.vehicles.find((v: any) => v.id === vehicleId);
+    return vehicles.find((v: any) => v.id === vehicleId) ?? null;
   };
 
   return (
@@ -215,7 +215,7 @@ export default function MaintenancePlannerPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Tous les véhicules</SelectItem>
-              {vehiclesData?.vehicles?.map((vehicle: any) => (
+              {vehicles.map((vehicle: any) => (
                 <SelectItem key={vehicle.id} value={vehicle.id.toString()}>
                   {vehicle.registrationNumber} - {vehicle.brand} {vehicle.model}
                 </SelectItem>
@@ -248,6 +248,16 @@ export default function MaintenancePlannerPage() {
             Une erreur est survenue lors du chargement des planifications: {(error as Error).message}
           </AlertDescription>
         </Alert>
+      )}
+
+      {vehiclesQuery.isError && (
+        <InlineQueryError
+          className="mb-4"
+          error={vehiclesQuery.error}
+          fallback={ALL_VEHICLES_UNREADABLE}
+          onRetry={() => vehiclesQuery.refetch()}
+          isRetrying={vehiclesQuery.isFetching}
+        />
       )}
 
       {/* Indicateur de chargement */}

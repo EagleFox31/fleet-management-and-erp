@@ -1,11 +1,12 @@
 import { userMessageOf } from "@/lib/api-error";
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { invalidateVehicleLifecycleQueries } from "@/lib/vehicle-lifecycle-cache";
 import { useAuth } from "@/hooks/useAuth";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { 
@@ -40,26 +41,19 @@ export default function VehicleDetailsByRegistration({ params }: { params: { reg
   const queryClient = useQueryClient();
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("details");
-  const [vehicleId, setVehicleId] = useState<number | null>(null);
-  
   const registrationNumber = decodeURIComponent(params.registration);
-  
-  // Récupérer les informations du véhicule par immatriculation
-  const { data: vehiclesData, isLoading: isLoadingVehicles } = useQuery<any>({
-    queryKey: ["/api/vehicles", { registrationNumber }],
+
+  // Recherche serveur sur l'immatriculation (`search`). L'ancien paramètre `registrationNumber`
+  // était ignoré par la route : la page cherchait dans les 10 véhicules les plus récents, et tout
+  // autre véhicule restait en chargement sans fin. Une immatriculation complète ne correspond qu'à
+  // quelques lignes ; la correspondance exacte est choisie côté client.
+  const lookupQuery = useQuery<{ vehicles: Array<{ id: number; registrationNumber: string }>; total: number }>({
+    queryKey: ["/api/vehicles", { search: registrationNumber, limit: 50 }],
     staleTime: 0,
     refetchOnMount: "always",
   });
-  
-  // Extraire le premier véhicule correspondant à cette immatriculation
-  useEffect(() => {
-    if (vehiclesData?.vehicles && vehiclesData.vehicles.length > 0) {
-      const vehicle = vehiclesData.vehicles.find(v => v.registrationNumber === registrationNumber);
-      if (vehicle) {
-        setVehicleId(vehicle.id);
-      }
-    }
-  }, [vehiclesData, registrationNumber]);
+  const vehicleId =
+    lookupQuery.data?.vehicles?.find((v) => v.registrationNumber === registrationNumber)?.id ?? null;
   
   // Récupérer les détails du véhicule une fois que nous avons son ID
   const { data: vehicle, isLoading: isLoadingVehicle } = useQuery<any>({
@@ -112,8 +106,23 @@ export default function VehicleDetailsByRegistration({ params }: { params: { reg
   };
   const canCreateWorkOrder = user?.role === "admin" || user?.role === "workshop_manager";
   
-  const isLoading = isLoadingVehicles || isLoadingVehicle || !vehicle;
-  
+  // Chargement tant que la recherche, puis la fiche, sont en cours ; sans correspondance exacte,
+  // « Véhicule non trouvé » (et non plus un chargement sans fin).
+  const isLoading = lookupQuery.isLoading || (vehicleId !== null && isLoadingVehicle);
+
+  if (lookupQuery.isError) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <InlineQueryError
+          error={lookupQuery.error}
+          fallback="Le véhicule n'a pas pu être recherché. Réessayez."
+          onRetry={() => lookupQuery.refetch()}
+          isRetrying={lookupQuery.isFetching}
+        />
+      </div>
+    );
+  }
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
