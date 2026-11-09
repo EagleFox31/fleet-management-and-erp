@@ -2485,26 +2485,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Parts History and Analytics Routes
-  app.get("/api/parts/stock-movements", isStaff, async (req, res) => {
-    try {
-      const partId = queryIdOrNaN(req.query.partId);
-      if (Number.isNaN(partId)) return res.status(400).json({ message: "ID de pièce invalide" });
-      
-      if (partId) {
-        // Get stock history for specific part
-        const stockHistory = await storage.getPartStockHistory(partId);
-        return res.status(200).json(stockHistory);
-      } else {
-        // Get all stock movements for all parts
-        const allMovements = await storage.getAllStockMovements();
-        return res.status(200).json(allMovements);
-      }
-    } catch (error) {
-      log.error({ err: error, requestId: req.requestId }, "Get stock movements error");
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
+  // GET /api/parts/stock-movements : server/api/money-reads.routes.ts
 
   app.get("/api/parts/:id/stock-history", isStaff, async (req, res) => {
     try {
@@ -3240,40 +3221,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/statistics/maintenance-cost/:period", authenticate, async (req: Request, res) => {
-    try {
-      // Vérifier les permissions utilisateur - DONNÉES FINANCIÈRES SENSIBLES
-      const userId = req.session.userId;
-      if (typeof userId !== "number") {
-        return res.status(401).json({ message: "Non authentifié" });
-      }
-      const user = await storage.getUser(userId);
-      
-      if (!user) {
-        return res.status(401).json({ message: "Utilisateur non trouvé" });
-      }
-      
-      // RESTRICTION: Seuls admin et workshop_manager ont accès aux coûts de maintenance
-      if (user.role === 'client' || user.role === 'technician') {
-        return res.status(403).json({ 
-          message: "Accès non autorisé - Données financières réservées à la direction" 
-        });
-      }
-      
-      const period = req.params.period as 'week' | 'month' | 'quarter' | 'year';
-      
-      if (!['week', 'month', 'quarter', 'year'].includes(period)) {
-        return res.status(400).json({ message: "Période invalide" });
-      }
-      
-      const cost = await storage.getMaintenanceCost(period);
-      
-      return res.status(200).json({ cost });
-    } catch (error) {
-      console.error("Get maintenance cost error:", error);
-      return res.status(500).json({ message: "Erreur serveur" });
-    }
-  });
+  // GET /api/statistics/maintenance-cost/:period : server/api/money-reads.routes.ts
 
   // Nouveau endpoint pour les maintenances planifiées
   app.get("/api/statistics/scheduled-maintenance", isStaff, async (req, res) => {
