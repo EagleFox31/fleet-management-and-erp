@@ -2831,3 +2831,22 @@ soumission sans doublon.
 - **Pourquoi** : un 0 affiché pendant une panne ou pour un champ jamais servi est lu comme un vrai chiffre. Présenter le carburant estimé comme chiffre d'affaires et en tirer une marge donnait une rentabilité fausse.
 - **RAIDER** : R : helpers de vue partagés avec #607 ; D : routes et contrats d'API inchangés, un seul `data-testid` renommé (aucun consommateur e2e). Ne s'appliquent pas : A, I, Retroactive (client seul, lecture seule).
 - **Reste / risques** : le vrai chiffre d'affaires (factures HT, hors annulées, par période) arrive avec le lot « CA réel » ; `operations/clients-panel` et `destinations-chart` traités dans la PR T2 (`c7-ops-fuel-estimate`), qui ajoute l'alias serveur `estimatedFuelCost`.
+
+## 2026-11-09T16:16:45+01:00 — Planning de maintenance, historique pièce, destinataires par rôle (6 lectures)
+- **Statut** : fait (PR)
+- **Quoi** : `storage.ts` : `getUsersByRole`, `getMaintenanceSchedules`, `getMaintenanceSchedulesByVehicleId`, `getPartRequirementsByPartId`, `getPartUsageHistory`, `getPartWorkOrders` journalisent (`storageLog.error`) et lèvent une `AppError` 500 au lieu de renvoyer `[]`. Cliquet `swallowed-read-catch-hygiene` 33 → 27 ; cliquet `technician-pages-query-errors` 2 → 0.
+- **Comment** : nouveau `server/lib/alert-recipients.ts` (`usersByRolesBestEffort`) pour les trois notifications qui suivent une écriture (`POST /api/document-renewals/requests`, `POST /api/missions/:id/document-renewal-requests`, `POST /api/test-date-maintenance`) : un rôle illisible est journalisé (`warn`, `err` + `requestId`) et ignoré, l'action reste en 2xx. Incident, échec de sauvegarde et renouvellement rapide avaient déjà un `catch`. Écrans du planning : `maintenance/preventive` et `gmao-dashboard` (« En retard » → Indisponible), `technician/fleet-status`, `technician/vehicles` → `InlineQueryError` ; `maintenance-planner` et `maintenance-simple` n'affichent plus `error.message` (`userMessageOf`).
+- **Pourquoi** : même défaut que #597/#600 : une panne de base lisait « aucune planification » ou « aucune notification à envoyer ».
+- **Comment tester (QA)** : `tests/unit/server/schedules-parts-users-reads-error.test.ts` (6/6 rouges sur l'ancien `storage.ts`), `tests/unit/server/alert-recipients-best-effort.test.ts`, `tests/unit/client/maintenance-schedules-render-error.test.ts` (rendu serveur de `preventive.tsx`, rouge sur l'ancien écran), `tests/unit/client/maintenance-schedules-error-states.test.ts` ; contrats 2xx : `document-renewal-request-recipients-failure`, `mission-renewal-alert-read-failure` (+1 cas), `date-maintenance-alert-read-failure` (+1 cas).
+- **RAIDER** : R : helper unique pour les notifications, `InlineQueryError`/`userMessageOf` existants ; D : réponses 2xx des mutations inchangées, aucun contrat de route modifié ; E : aucun `console.*` ajouté, `routes.ts` limité au bloc test-date-maintenance et à son import.
+- **Reste / risques** : 27 cas gelés. Sur `fleet-status` et `technician/vehicles`, seule la requête du planning a un état d'erreur ; les autres requêtes de ces pages n'en ont pas encore. `technicians/index.tsx` charge le planning sans l'afficher (inchangé). Contrats non rejoués en local (pile fm-b7demo bloquée au démarrage, driver installé hors version) : preuve par la CI.
+
+## 2026-11-09T16:45:00+01:00 — Destinataires au mieux : incident et renouvellement rapide (relecture #615)
+
+**Quoi** : la notification d'incident (`incident-service`, `notifyRoles`) et celle du renouvellement rapide (`POST /api/document-renewals/quick-renew`) lisent les destinataires par `usersByRolesBestEffort`. Un rôle illisible ne coupe plus la boucle : les autres rôles restent notifiés. Préventif : l'en-tête reste affiché au-dessus de l'erreur.
+
+**Comment** : test rouge d'abord. `tests/unit/server/incident-notify-roles-best-effort.test.ts` (admin en échec, workshop_manager notifié) rouge sur l'ancienne boucle (« promise rejected… timeout »), vert après. Cas de contrat ajouté dans `document-quick-renew-proof-lifecycle.contract.test.ts` (admin en échec, logistique notifiée). Rendu préventif : assertion sur le titre.
+
+**Pourquoi** : `getUsersByRole` lève désormais sur erreur. Avant, seul le rôle en panne était perdu ; sans le helper, toute la notification l'était.
+
+**Preuve** : `npm run check` 0 erreur ; unitaires serveur 1919 verts (db-pool-options : environnement local) ; contrat rejoué par la CI.

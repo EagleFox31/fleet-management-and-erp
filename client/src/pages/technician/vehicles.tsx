@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Truck, Search, AlertTriangle, CheckCircle, Wrench, Fuel, Calendar } from "lucide-react";
 import { Link } from "wouter";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 
 export default function TechnicianVehiclesPage() {
   const [searchTerm, setSearchTerm] = React.useState("");
@@ -14,7 +15,7 @@ export default function TechnicianVehiclesPage() {
     queryKey: ['/api/vehicles'],
   });
 
-  const { data: maintenanceSchedules } = useQuery<any>({
+  const { data: maintenanceSchedules, error: maintenanceError, refetch: refetchMaintenance } = useQuery<any>({
     queryKey: ['/api/maintenance-schedules'],
   });
 
@@ -98,6 +99,14 @@ export default function TechnicianVehiclesPage() {
         </div>
       </div>
 
+      {maintenanceError && (
+        <InlineQueryError
+          error={maintenanceError}
+          fallback="Le planning de maintenance est momentanément indisponible."
+          onRetry={() => void refetchMaintenance()}
+        />
+      )}
+
       {/* Liste des véhicules */}
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {filteredVehicles.map((vehicle: any) => {
@@ -147,7 +156,7 @@ export default function TechnicianVehiclesPage() {
                       <span className="text-sm font-medium">Maintenances préventives actives</span>
                     </div>
                     <Badge variant="outline" className="text-xs">
-                      {getTotalPreventiveMaintenance(vehicle.id)} actives
+                      {maintenanceError ? "Indisponible" : `${getTotalPreventiveMaintenance(vehicle.id)} actives`}
                     </Badge>
                   </div>
                 </div>

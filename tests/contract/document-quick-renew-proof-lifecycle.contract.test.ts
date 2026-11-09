@@ -184,6 +184,21 @@ describe("renouvellement rapide : cycle de vie du justificatif", { timeout: 1800
     expect(proofFiles(prefix)).toHaveLength(1);
     expect(await expiryOf(document.id)).toBe("2028-03-31");
   });
+
+  it("un rôle destinataire illisible n'empêche pas de notifier les autres rôles", async () => {
+    const { vehicle, document, prefix } = await setup();
+    const logistics = await createTestUser({ role: "logistics" });
+    ids.userIds.push(logistics.id);
+    const original = storage.getUsersByRole.bind(storage);
+    vi.spyOn(storage, "getUsersByRole").mockImplementation(async (role: string) => {
+      if (role === "admin") throw new Error("timeout exceeded when trying to connect");
+      return role === "logistics" ? [logistics as any] : original(role);
+    });
+    const response = await quickRenew(baseFields(vehicle.id, document.id), prefix);
+    expect(response.status).toBe(200);
+    const notified = await db.select({ userId: alerts.userId }).from(alerts).where(eq(alerts.link, `/vehicles/${vehicle.id}`));
+    expect(notified.map((a) => a.userId)).toContain(logistics.id);
+  });
   it("échec dans la transaction : 500, justificatif supprimé, échéance, miroir et demande inchangés", async () => {
     const { vehicle, document, prefix } = await setup();
     const [before] = await db.select({ insuranceExpiry: vehicles.insuranceExpiry }).from(vehicles).where(eq(vehicles.id, vehicle.id));
