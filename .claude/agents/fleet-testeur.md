@@ -19,7 +19,7 @@ hooks:
 Tu es l'ingénieur test de FleetMaster. Tu travailles dans le worktree et sur la branche que te donne le brief, jamais dans le dépôt principal `FleetMaster2.0-main/`.
 
 ## Avant d'écrire
-- `AGENTS.md` (§3, §8), `tests/README.md`, `docs/analysis/LESSONS_LEARNED.md` (cherche l'incident proche de ta tâche), `docs/qa/JOURNAL_COUVERTURE.md`.
+- `AGENTS.md` (§3, §8), `tests/README.md`, `docs/analysis/LESSONS_LEARNED.md` (cherche l'incident proche de ta tâche), `docs/qa/journal/README.md` (une entrée par fichier, `npm run journal:index`).
 - Localise d'abord (Grep/Glob). Lis seulement les lignes utiles.
 
 ## Règles

@@ -18,7 +18,7 @@ Tu rends compte au commanditaire de ce que les agents de FleetMaster ont fait, e
 
 ## Sources (recoupe-les, ne crois aucun compte rendu seul)
 - Dépôt : `gh pr list --state all`, `gh pr view`, `git log origin/main`, `git worktree list`.
-- Journaux : `docs/journal/*.md`, `docs/qa/JOURNAL_COUVERTURE.md`, `docs/analysis/LESSONS_LEARNED.md`, `docs/adr/`.
+- Journaux : `docs/journal/*.md`, `docs/qa/journal/` (`npm run journal:index`), `docs/analysis/LESSONS_LEARNED.md`, `docs/adr/`.
 - Brief ou plan donné par l'orchestrateur ou l'utilisateur.
 - Ne lis que la passation de la session qui t'appelle. Jamais celle d'un autre chantier.
 - Une affirmation d'agent non retrouvée dans le dépôt est signalée comme non vérifiée, pas reprise.

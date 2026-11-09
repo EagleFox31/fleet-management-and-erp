@@ -6,9 +6,9 @@
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-const JOURNAUX = [/^docs\/journal\//, /^docs\/qa\/JOURNAL_COUVERTURE\.md$/];
+const JOURNAUX = [/^docs\/journal\//, /^docs\/qa\/journal\//];
 // Un commit qui ne touche que des journaux ou des ADR n'exige pas d'entrée de journal supplémentaire.
-const DOCS_SEULES = [/^docs\/journal\//, /^docs\/adr\//, /^docs\/qa\/JOURNAL_COUVERTURE\.md$/];
+const DOCS_SEULES = [/^docs\/journal\//, /^docs\/adr\//, /^docs\/qa\/journal\//];
 
 export function commitsSansJournal(commits) {
   return commits
@@ -67,7 +67,7 @@ async function main() {
   if (manquants.length > 0) {
     const liste = manquants.map((c) => `${c.hash} ${c.sujet}`).join("; ");
     process.stderr.write(
-      `Journal manquant dans ces commits : ${liste}. Ajoute l'entrée (docs/journal/<agent>.md, format de docs/journal/README.md) dans le même commit, puis termine.\n`,
+      `Journal manquant dans ces commits : ${liste}. Ajoute l'entrée (docs/journal/<agent>.md, format de docs/journal/README.md ; agent de test : docs/qa/journal/<AAAA-MM-JJTHHMM>-<slug>.md, voir son README) dans le même commit, puis termine.\n`,
     );
     process.exit(2);
   }
