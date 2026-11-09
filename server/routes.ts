@@ -3898,7 +3898,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(409).json({ message: "Stock insuffisant pour cette référence pneu" });
         }
       }
-      console.error("Install tire on vehicle error:", error);
+      log.error({ err: error, requestId: req.requestId, vehicleId: req.params.vehicleId }, "Install tire on vehicle error");
       return res.status(500).json({ message: "Erreur serveur" });
     }
   });
