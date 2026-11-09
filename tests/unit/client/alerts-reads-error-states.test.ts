@@ -50,3 +50,10 @@ describe.each(SCREENS)("$path : /api/alerts en échec n'est pas un vide", ({ pat
     expect(src).not.toMatch(/Array\.isArray\(\w*[aA]lerts\w*\)\s*\?\s*\w+\.length\s*:\s*0/);
   });
 });
+
+describe("centre d'alertes : couleur des compteurs", () => {
+  it("aucune couleur d'alerte lue sur un compte indisponible", () => {
+    const src = read("client/src/components/alerts/alerts-panel.tsx");
+    expect(src).not.toMatch(/valueClassName=\{counts\./);
+  });
+});

@@ -441,6 +441,9 @@ export function AlertsPanel() {
   /** Compteur affiché : inconnu si sa source a échoué (un compte partiel serait un faux chiffre). */
   const countText = (value: number, includesStock = false) =>
     alertsFailed || (includesStock && reorderAlertsFailed) ? UNAVAILABLE : value;
+  // Couleur d'alerte seulement sur un compte disponible et non nul.
+  const countTone = (value: number, className: string, includesStock = false) =>
+    countText(value, includesStock) !== UNAVAILABLE && value > 0 ? className : undefined;
 
   const filteredAlerts = useMemo(() => {
     const searchLower = search.trim().toLowerCase();
@@ -839,7 +842,7 @@ export function AlertsPanel() {
             value={countText(counts.critical, true)}
             icon={<AlertTriangle className="h-4 w-4" />}
             iconWrapperClassName="bg-red-50 text-red-600"
-            valueClassName={counts.critical > 0 ? "text-red-700" : undefined}
+            valueClassName={countTone(counts.critical, "text-red-700", true)}
           />
           <KpiTile
             label="Documents"
@@ -910,7 +913,7 @@ export function AlertsPanel() {
             value={countText(counts.byCategory.mission)}
             icon={<Truck className="h-4 w-4" />}
             iconWrapperClassName="bg-purple-50 text-purple-600"
-            valueClassName={counts.byCategory.mission > 0 ? "text-purple-700" : undefined}
+            valueClassName={countTone(counts.byCategory.mission, "text-purple-700")}
           />
         </div>
       </HeaderCard>
