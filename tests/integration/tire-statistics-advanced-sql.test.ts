@@ -5,6 +5,7 @@ import { tireInspections, tireRotations, tires, vehicleTires, vehicles } from ".
 import { tiresService } from "../../server/services/tires-service-simplified";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestVehicle } from "../support/factories";
+import { isoDateInZone } from "../../shared/contracts/kpi-period";
 
 /**
  * `GET /api/tires/statistics-advanced` en une seule requête SQL.
@@ -253,6 +254,26 @@ describe("statistiques avancées des pneus en une requête", { timeout: 120000 }
     expect(actions.rotationApproaching.some((a: any) => a.vehicle.vehicleId === ids.vehicleIds[1])).toBe(true);
     expect(typeof stats.totalTires).toBe("string");
     expect(typeof stats.totalValue).toBe("string");
+  });
+
+  it("rotationsThisMonth : rotations du mois civil en cours à Africa/Douala, pas celles du mois précédent", async () => {
+    const today = isoDateInZone(new Date());
+    const firstOfMonth = `${today.slice(0, 8)}01`;
+    const lastOfPreviousMonth = new Date(Date.parse(`${firstOfMonth}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+
+    const before = (await tiresService.getTireStatisticsAdvanced()).rotationsThisMonth;
+    const added = await db
+      .insert(tireRotations)
+      .values([
+        { vehicleId: ids.vehicleIds[2], rotationDate: firstOfMonth, rotationMileage: 50500, rotationType: "front_to_back" },
+        { vehicleId: ids.vehicleIds[2], rotationDate: lastOfPreviousMonth, rotationMileage: 50400, rotationType: "front_to_back" },
+      ])
+      .returning();
+    rotationIds.push(...added.map((r) => r.id));
+    const after = (await tiresService.getTireStatisticsAdvanced()).rotationsThisMonth;
+
+    expect(typeof after).toBe("number");
+    expect(after - before).toBe(1);
   });
 
   it("une seule requête, donc une seule connexion du pool", async () => {
