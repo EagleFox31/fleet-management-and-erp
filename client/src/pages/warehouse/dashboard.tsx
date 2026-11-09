@@ -158,6 +158,9 @@ export default function WarehouseDashboard() {
   });
   const inventoryValueFailed = inventoryValueView.kind === "error";
   const totalStockValue = Number(readyData(inventoryValueView, undefined)?.totalValue ?? 0);
+  // Statistiques de stock illisibles et sans donnée : « Indisponible », jamais 0.
+  const statsFailed = warehouse.statistics.data === undefined && !!warehouse.statistics.error;
+  const statsErrorText = userMessageOf(warehouse.statistics.error, "Les statistiques de stock sont momentanément indisponibles.");
   const totalPartsCount = Number(warehouse.statistics.data?.totalParts || 0);
   // Unités physiques (somme des quantités), distinct du nombre de références.
   const totalUnitsCount = Number(warehouse.statistics.data?.totalQuantity || 0);
@@ -227,8 +230,8 @@ export default function WarehouseDashboard() {
               // demande « combien de pièces j'ai » attend le nombre d'unités,
               // pas le nombre de fiches au catalogue.
               label="Pièces en stock"
-              value={totalUnitsCount}
-              subValue={`${totalPartsCount} pièce${totalPartsCount > 1 ? "s" : ""} différente${totalPartsCount > 1 ? "s" : ""}`}
+              value={statsFailed ? UNAVAILABLE : totalUnitsCount}
+              subValue={statsFailed ? statsErrorText : `${totalPartsCount} pièce${totalPartsCount > 1 ? "s" : ""} différente${totalPartsCount > 1 ? "s" : ""}`}
               icon={<Package className="h-4 w-4" />}
               iconWrapperClassName="bg-blue-50 text-blue-600"
             />
@@ -239,11 +242,11 @@ export default function WarehouseDashboard() {
             <KpiTile
               data-testid="warehouse-kpi-lowstock"
               label="Stock bas"
-              value={lowStockCount}
-              subValue={`${outOfStockCount} épuisé(s)`}
+              value={statsFailed ? UNAVAILABLE : lowStockCount}
+              subValue={statsFailed ? statsErrorText : `${outOfStockCount} épuisé(s)`}
               icon={<AlertTriangle className="h-4 w-4" />}
-              iconWrapperClassName={(lowStockCount + outOfStockCount) > 0 ? "bg-amber-50 text-amber-600" : "bg-gray-100 text-gray-400"}
-              valueClassName={(lowStockCount + outOfStockCount) > 0 ? "text-amber-600" : undefined}
+              iconWrapperClassName={!statsFailed && (lowStockCount + outOfStockCount) > 0 ? "bg-amber-50 text-amber-600" : "bg-gray-100 text-gray-400"}
+              valueClassName={!statsFailed && (lowStockCount + outOfStockCount) > 0 ? "text-amber-600" : undefined}
             />
           )}
           {warehouse.reorderAlerts.isLoading ? (
@@ -593,6 +596,7 @@ export default function WarehouseDashboard() {
                 <p className="text-xs text-gray-400 mb-3">Rupture vs stock bas</p>
                 <div className="h-[220px]">
                   {warehouse.statistics.isLoading ? <Skeleton className="h-full w-full" />
+                    : statsFailed ? (<div className="h-full flex items-center justify-center text-xs text-gray-400" data-testid="warehouse-alert-summary-unavailable">{UNAVAILABLE}</div>)
                     : alertSummaryData.some((d) => d.value > 0) ? (
                       <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
