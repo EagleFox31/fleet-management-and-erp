@@ -211,7 +211,7 @@ export default function WarehouseDashboard() {
               subValue={
                 inventoryValueFailed
                   ? userMessageOf(inventoryValueView.error, "La valeur du stock est momentanément indisponible.")
-                  : warehouse.statistics.error
+                  : statsFailed
                   ? undefined
                   : totalUnitsCount > 0
                   ? `${formatPrice(Math.round(totalStockValue / totalUnitsCount))} en moyenne par pièce`
