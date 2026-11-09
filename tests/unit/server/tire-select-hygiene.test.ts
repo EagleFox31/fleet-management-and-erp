@@ -20,7 +20,7 @@ const FROZEN: Record<string, string> = {
   "server/services/tires-service-simplified.ts#3": "deleteTire : lecture interne avant suppression logique, rien n'est renvoyé",
   "server/services/tires-service-simplified.ts#4": "getVehicleTires : GET /api/vehicles/:id/tires masque la fiche pneu par redactTirePrice",
   "server/services/tires-service-simplified.ts#5": "getVehicleTire : aucun appelant, à projeter avant tout usage",
-  "server/services/tires-service-simplified.ts#6": "calculateRequiredActions : réservé à statistics-advanced, route refusée au chauffeur (isTireValuationReader)",
+  "server/services/tires-service-simplified.ts#6": "getTireStatisticsAdvanced (jsonRowOf, pneus en stock bas) : route refusée au chauffeur (isTireValuationReader)",
   "server/services/tires-service-simplified.ts#7": "getLowStockTires : GET /api/tires/low-stock masque par redactTirePrice",
 };
 
@@ -69,6 +69,8 @@ export function wholeTireReads(source: string): number {
     if (readsTires && isWholeTireRow(argument)) count++;
   }
   if (/row_to_json\(\s*t(ires)?\.\*/.test(source)) count++;
+  // Ligne entière agrégée en JSON (`server/lib/json-table-row.ts`) : même colonne de prix.
+  count += (source.match(/jsonRowOf\(\s*tires\s*,/g) ?? []).length;
   return count;
 }
 
@@ -90,6 +92,8 @@ describe("lectures entières de la table tires", () => {
     expect(wholeTireReads("db.select(getTableColumns(tires)).from(tires);")).toBe(1);
     expect(wholeTireReads("db.select({ id: tires.id, brand: tires.brand }).from(tires);")).toBe(0);
     expect(wholeTireReads("db.select().from(vehicles);")).toBe(0);
+    expect(wholeTireReads('sql`SELECT json_agg(${jsonRowOf(tires, "t")})`;')).toBe(1);
+    expect(wholeTireReads('sql`SELECT json_agg(${jsonRowOf(vehicles, "v")})`;')).toBe(0);
   });
 
   it("les lectures entières existantes sont gelées avec leur justification (la liste ne bouge que sciemment)", () => {
