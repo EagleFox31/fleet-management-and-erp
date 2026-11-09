@@ -16,6 +16,7 @@ import {
 import multer from "multer";
 import { uploadVehicleDocument, deleteFile } from "./middleware/upload";
 import { storage } from "./storage";
+import { usersByRolesBestEffort } from "./lib/alert-recipients";
 import { partsService } from "./services/parts-service";
 import { POSITION_OCCUPIED_MESSAGE, tiresService } from "./services/tires-service-simplified";
 import { FuelService } from "./services/fuel-service";
@@ -3786,10 +3787,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       const requestConfig = requestByType[alertType as 'insurance' | 'inspection' | 'license'];
-      const recipients = [
-        ...(await storage.getUsersByRole("admin")),
-        ...(await storage.getUsersByRole("workshop_manager")),
-      ];
+      // Meilleur effort : une lecture des destinataires en échec ne fait pas échouer l'action.
+      const recipients = await usersByRolesBestEffort(["admin", "workshop_manager"], log, {
+        requestId: req.requestId,
+        vehicleId: vehicle.id,
+      });
 
       const recipientIds = Array.from(new Set(recipients.map((user) => user.id)));
       const requestMessage = `${requestConfig.documentLabel} à renouveler pour le véhicule ${vehicle.registrationNumber}. Demande créée depuis les alertes de maintenance.`;

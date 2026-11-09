@@ -39,33 +39,44 @@ afterAll(async () => {
   await session?.close();
 });
 
-describe("document-renewal-requests : lecture des alertes en échec", () => {
-  it("POST (logistique) reste en 201 et crée la demande quand getUnreadAlertsByUserId lève", async () => {
-    const [driver] = await db
+/** Mission affectée dont le véhicule porte une carte grise expirée : une demande à créer. */
+let seededDriver: { id: number } | undefined;
+async function seedMissionWithExpiredDocument() {
+  // Une fiche chauffeur par compte (uq_drivers_user_id) : créée une fois, partagée par les cas.
+  if (!seededDriver) {
+    [seededDriver] = await db
       .insert(drivers)
       .values({ userId: session.userIdOf("driverA"), firstName: "TEST", lastName: uniqueTestToken("drv"), cpcStatus: "FORMÉ", isActive: true } as any)
       .returning();
-    driverIds.push(driver.id);
-    const vehicle = await createTestVehicle();
-    ids.vehicleIds.push(vehicle.id);
-    await db.insert(vehicleDocuments).values({
-      vehicleId: vehicle.id,
-      name: "TEST carte_grise",
-      type: "carte_grise",
-      filename: "x.pdf",
-      filesize: 1,
-      fileType: "application/pdf",
-      filePath: "uploads/x.pdf",
-      expiryDate: "2020-01-01",
-    } as any);
-    const orderNumber = uniqueTestToken("MIS");
-    orderNumbers.push(orderNumber);
-    const [mission] = await db
-      .insert(missions)
-      .values({ orderNumber, pickupAddress: "TEST A", deliveryAddress: "TEST B", status: "assigned" } as any)
-      .returning();
-    missionIds.push(mission.id);
-    await db.insert(assignments).values({ missionId: mission.id, driverId: driver.id, vehicleId: vehicle.id, status: "accepted" } as any);
+    driverIds.push(seededDriver.id);
+  }
+  const driver = seededDriver;
+  const vehicle = await createTestVehicle();
+  ids.vehicleIds.push(vehicle.id);
+  await db.insert(vehicleDocuments).values({
+    vehicleId: vehicle.id,
+    name: "TEST carte_grise",
+    type: "carte_grise",
+    filename: "x.pdf",
+    filesize: 1,
+    fileType: "application/pdf",
+    filePath: "uploads/x.pdf",
+    expiryDate: "2020-01-01",
+  } as any);
+  const orderNumber = uniqueTestToken("MIS");
+  orderNumbers.push(orderNumber);
+  const [mission] = await db
+    .insert(missions)
+    .values({ orderNumber, pickupAddress: "TEST A", deliveryAddress: "TEST B", status: "assigned" } as any)
+    .returning();
+  missionIds.push(mission.id);
+  await db.insert(assignments).values({ missionId: mission.id, driverId: driver.id, vehicleId: vehicle.id, status: "accepted" } as any);
+  return { mission, vehicle };
+}
+
+describe("document-renewal-requests : lecture des alertes en échec", () => {
+  it("POST (logistique) reste en 201 et crée la demande quand getUnreadAlertsByUserId lève", async () => {
+    const { mission, vehicle } = await seedMissionWithExpiredDocument();
 
     const spy = vi.spyOn(storage, "getUnreadAlertsByUserId").mockRejectedValue(new Error("timeout exceeded when trying to connect"));
     const res = await session.call("POST", `/api/missions/${mission.id}/document-renewal-requests`, {
@@ -80,4 +91,21 @@ describe("document-renewal-requests : lecture des alertes en échec", () => {
     const rows = await db.select({ id: documentRenewalRequests.id }).from(documentRenewalRequests).where(inArray(documentRenewalRequests.vehicleId, [vehicle.id]));
     expect(rows).toHaveLength(1);
   }, 60000);
+  it("POST (logistique) reste en 201 quand getUsersByRole lève : la notification est réduite, pas l'action", async () => {
+    const { mission, vehicle } = await seedMissionWithExpiredDocument();
+
+    const spy = vi.spyOn(storage, "getUsersByRole").mockRejectedValue(new Error("timeout exceeded when trying to connect"));
+    const res = await session.call("POST", `/api/missions/${mission.id}/document-renewal-requests`, {
+      actor: "logistics",
+      body: { documentTypes: ["carte_grise"] },
+    });
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+
+    expect(res.status).toBe(201);
+    expect(res.body.createdRequestCount).toBe(1);
+    const rows = await db.select({ id: documentRenewalRequests.id }).from(documentRenewalRequests).where(inArray(documentRenewalRequests.vehicleId, [vehicle.id]));
+    expect(rows).toHaveLength(1);
+  }, 60000);
 });
+

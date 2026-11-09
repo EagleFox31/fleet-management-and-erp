@@ -31,6 +31,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 import {
   CardShell,
   HeaderCard,
@@ -140,7 +141,7 @@ export default function PreventiveMaintenancePage() {
   const vehiclesQuery = useAllVehicles({ enabled: isDialogOpen });
   const vehicles = vehiclesQuery.data ?? [];
 
-  const { data: schedulesData = [], isLoading } = useQuery<any[]>({
+  const { data: schedulesData = [], isLoading, error: schedulesError, refetch: refetchSchedules } = useQuery<any[]>({
     queryKey: ["/api/maintenance-schedules"],
   });
 
@@ -306,6 +307,24 @@ export default function PreventiveMaintenancePage() {
             <Skeleton className="h-64 w-full rounded-xl" />
           </div>
         </CardShell>
+      </div>
+    );
+  }
+
+  if (schedulesError) {
+    return (
+      <div className="space-y-5">
+        <HeaderCard
+          moduleLabel="Maintenance · Préventif"
+          title="Planifications préventives"
+          subtitle="Gestion des échéances et cycles d'entretien"
+          icon={<ShieldCheck className="h-5 w-5" />}
+        />
+        <InlineQueryError
+          error={schedulesError}
+          fallback="Le planning de maintenance est momentanément indisponible."
+          onRetry={() => void refetchSchedules()}
+        />
       </div>
     );
   }

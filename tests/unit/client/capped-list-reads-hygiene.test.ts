@@ -19,11 +19,8 @@ import { describe, expect, it } from "vitest";
 const FROZEN: Record<string, number> = {
   // Export PDF de l'inventaire des pièces : 1000 premières pièces seulement.
   "client/src/pages/inventory/index.tsx": 1,
-  // Liste des interventions : 1000 premiers OT.
+  // Liste des interventions : 1000 demandés, 500 rendus (plafond de la route).
   "client/src/pages/maintenance/interventions.tsx": 1,
-  // Alertes par date et liste des OT de maintenance : 300 premiers OT.
-  "client/src/pages/maintenance/date-based-alerts.tsx": 1,
-  "client/src/pages/maintenance/work-orders.tsx": 1,
   // Sélecteur de pièces de l'OT : 1000 premières pièces.
   "client/src/pages/maintenance/work-orders/[id].tsx": 1,
   // Dialogue de montage : 500 premiers véhicules et 500 premiers pneus.

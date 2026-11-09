@@ -19,7 +19,7 @@ export default function TechnicianVehiclesPage() {
   const vehiclesQuery = useAllVehicles();
   const isLoading = vehiclesQuery.isLoading;
 
-  const { data: maintenanceSchedules } = useQuery<any>({
+  const { data: maintenanceSchedules, error: maintenanceError, refetch: refetchMaintenance } = useQuery<any>({
     queryKey: ['/api/maintenance-schedules'],
   });
 
@@ -116,6 +116,13 @@ export default function TechnicianVehiclesPage() {
           isRetrying={workOrdersQuery.isFetching}
         />
       )}
+      {maintenanceError && (
+        <InlineQueryError
+          error={maintenanceError}
+          fallback="Le planning de maintenance est momentanément indisponible."
+          onRetry={() => void refetchMaintenance()}
+        />
+      )}
 
       {/* Liste des véhicules */}
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -166,7 +173,7 @@ export default function TechnicianVehiclesPage() {
                       <span className="text-sm font-medium">Maintenances préventives actives</span>
                     </div>
                     <Badge variant="outline" className="text-xs">
-                      {getTotalPreventiveMaintenance(vehicle.id)} actives
+                      {maintenanceError ? "Indisponible" : `${getTotalPreventiveMaintenance(vehicle.id)} actives`}
                     </Badge>
                   </div>
                 </div>

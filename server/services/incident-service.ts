@@ -57,18 +57,20 @@ export interface IncidentDeps {
   now?: () => Date;
 }
 
-async function defaultDeps(): Promise<IncidentDeps> {
-  const [{ db }, { storage }, { assignedVehicleIdsOf }] = await Promise.all([
+export async function defaultDeps(): Promise<IncidentDeps> {
+  const [{ db }, { storage }, { assignedVehicleIdsOf }, { usersByRolesBestEffort }] = await Promise.all([
     import("../db"),
     import("../storage"),
     import("../lib/driver-scope"),
+    import("../lib/alert-recipients"),
   ]);
   return {
     db,
     assignedVehicleIds: assignedVehicleIdsOf,
     notifyRoles: async ({ roles, title, message, link, dedupeKey, priority }) => {
+      // Un rôle illisible est journalisé et ignoré : les autres rôles restent notifiés.
       for (const role of roles) {
-        for (const user of await storage.getUsersByRole(role)) {
+        for (const user of await usersByRolesBestEffort([role], log, { dedupeKey })) {
           try {
             const created = await storage.createAlert({
               userId: user.id,

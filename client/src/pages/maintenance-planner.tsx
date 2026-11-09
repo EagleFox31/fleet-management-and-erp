@@ -245,7 +245,7 @@ export default function MaintenancePlannerPage() {
         <Alert variant="destructive" className="mb-6">
           <AlertTitle>Erreur</AlertTitle>
           <AlertDescription>
-            Une erreur est survenue lors du chargement des planifications: {(error as Error).message}
+            {userMessageOf(error, "Le planning de maintenance est momentanément indisponible.")}
           </AlertDescription>
         </Alert>
       )}

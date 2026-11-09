@@ -691,8 +691,8 @@ export class DatabaseStorage implements IStorage {
         .from(users)
         .where(and(eq(users.role, role as any), isNull(users.deletedAt)));
     } catch (error) {
-      console.error("Error getting users by role:", error);
-      return [];
+      storageLog.error({ err: error }, "Error getting users by role");
+      throw new AppError(500, "La liste des utilisateurs est momentanément indisponible.", { cause: error });
     }
   }
   async getAllUsers(): Promise<User[]> {
@@ -1181,8 +1181,8 @@ export class DatabaseStorage implements IStorage {
             .orderBy(maintenanceSchedules.scheduledDate)
         : await base.orderBy(maintenanceSchedules.scheduledDate);
     } catch (error) {
-      console.error('Error getting maintenance schedules:', error);
-      return [];
+      storageLog.error({ err: error }, "Error getting maintenance schedules");
+      throw new AppError(500, "Le planning de maintenance est momentanément indisponible.", { cause: error });
     }
   }
 
@@ -1195,8 +1195,8 @@ export class DatabaseStorage implements IStorage {
         .where(eq(maintenanceSchedules.vehicleId, vehicleId))
         .orderBy(maintenanceSchedules.scheduledDate);
     } catch (error) {
-      console.error('Error getting maintenance schedules for vehicle:', error);
-      return [];
+      storageLog.error({ err: error }, "Error getting maintenance schedules for vehicle");
+      throw new AppError(500, "Le planning de maintenance du véhicule est momentanément indisponible.", { cause: error });
     }
   }
   async createMaintenanceSchedule(schedule: InsertMaintenanceSchedule): Promise<MaintenanceSchedule> {
@@ -1929,8 +1929,8 @@ export class DatabaseStorage implements IStorage {
       
       return partWorkOrders;
     } catch (error) {
-      console.error('Error getting part work orders:', error);
-      return [];
+      storageLog.error({ err: error }, "Error getting part work orders");
+      throw new AppError(500, "Les ordres de travail de cette pièce sont momentanément indisponibles.", { cause: error });
     }
   }
 
@@ -1958,8 +1958,8 @@ export class DatabaseStorage implements IStorage {
       
       return usageHistory;
     } catch (error) {
-      console.error('Error getting part usage history:', error);
-      return [];
+      storageLog.error({ err: error }, "Error getting part usage history");
+      throw new AppError(500, "L'historique d'utilisation de la pièce est momentanément indisponible.", { cause: error });
     }
   }
 
@@ -2304,8 +2304,8 @@ export class DatabaseStorage implements IStorage {
       
       return requirements;
     } catch (error) {
-      console.error('Error getting part requirements by part ID:', error);
-      return [];
+      storageLog.error({ err: error }, "Error getting part requirements by part ID");
+      throw new AppError(500, "Les demandes de cette pièce sont momentanément indisponibles.", { cause: error });
     }
   }
 
