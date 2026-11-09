@@ -65,6 +65,8 @@ export interface TireStatisticsAdvanced {
   averageWear: number;
   /** Nombre de références en stock faible mais non épuisé (`requiredActions.lowStock`). */
   lowStockCount: number;
+  /** Rotations (`tire_rotations.rotation_date`) du mois civil en cours à Africa/Douala (`KPI_TIME_ZONE`). */
+  rotationsThisMonth: number;
   requiredActions: TireRequiredActions;
 }
 

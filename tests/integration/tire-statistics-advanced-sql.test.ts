@@ -219,12 +219,14 @@ afterAll(async () => {
 describe("statistiques avancées des pneus en une requête", { timeout: 120000 }, () => {
   const withoutRotations = (stats: any) => ({
     ...stats,
+    rotationsThisMonth: undefined,
     requiredActions: { ...stats.requiredActions, rotationDue: undefined, rotationApproaching: undefined },
   });
 
   it("même résultat que l'ancien calcul en cinq requêtes, objets et JSON servi", async () => {
     const legacy = sorted(await legacyStatistics(sql`"vehicles"."id"`));
-    const current = sorted(await tiresService.getTireStatisticsAdvanced());
+    // `rotationsThisMonth` n'existait pas dans l'ancien calcul : comparé à part, plus bas.
+    const current = { ...sorted(await tiresService.getTireStatisticsAdvanced()), rotationsThisMonth: undefined };
 
     expect(current).toEqual(legacy);
     expect(JSON.parse(JSON.stringify(current))).toEqual(JSON.parse(JSON.stringify(legacy)));

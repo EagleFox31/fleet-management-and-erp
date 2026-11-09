@@ -1000,12 +1000,12 @@ export default function TiresInventoryPage() {
 
           {user?.role === "admin" && (
             <KpiTile
-              data-testid="kpi-replacement-rate"
+              data-testid="kpi-rotations-this-month"
               className="cursor-pointer transition-shadow hover:shadow-md"
               onClick={() => setActiveTab("rotations")}
-              label="Taux remplacement"
-              value={UNAVAILABLE /* `rotationsThisMonth` n'est pas servi par l'API : pas de 0 inventé */}
-              subValue="Remplacements ce mois"
+              label="Rotations ce mois"
+              value={statText(statistics?.rotationsThisMonth)}
+              subValue="Rotations enregistrées ce mois civil"
               icon={<TrendingUp className="h-4 w-4" />}
               iconWrapperClassName="bg-indigo-50 text-indigo-600"
             />
@@ -1129,12 +1129,12 @@ export default function TiresInventoryPage() {
 
           {user?.role === "technician" && (
             <KpiTile
-              data-testid="kpi-rotations-assigned"
+              data-testid="kpi-rotations-this-month"
               className="cursor-pointer transition-shadow hover:shadow-md"
               onClick={() => setActiveTab("inspections")}
-              label="Rotations assignees"
-              value={UNAVAILABLE /* `rotationsThisMonth` n'est pas servi par l'API : pas de 0 inventé */}
-              subValue="A executer ce mois"
+              label="Rotations ce mois"
+              value={statText(statistics?.rotationsThisMonth)}
+              subValue="Rotations enregistrées ce mois civil"
               valueClassName="text-green-600"
               icon={<RotateCcw className="h-4 w-4" />}
               iconWrapperClassName="bg-green-50 text-green-600"
