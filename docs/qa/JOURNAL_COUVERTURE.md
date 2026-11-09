@@ -2796,3 +2796,38 @@ soumission sans doublon.
   - campagnes : tsc 0, check:tests 0, unitaires verts (hors `db-pool-options`, échec local connu, vert en CI). Aucun fichier serveur modifié.
 - **RAIDER** : R : un helper générique pour les trois écrans ; D : ré-export à signature identique, aucun `data-testid` retiré. Ne s'appliquent pas : A, I, Retroactive (client seul, lecture seule).
 - **Reste / risques** : le reste du tableau de bord secrétaire (factures, documents, CPC, statistiques par client) traité dans la PR suivante, empilée sur #607.
+
+## 2026-11-09T16:04:00+01:00 — Ordres de travail : export PDF et alertes d'échéance lus en entier (cliquet 7 → 5)
+
+- **Statut** : fait (PR brouillon)
+- **Quoi** :
+  - `maintenance/work-orders.tsx` : la requête `/api/work-orders` des 300 derniers OT (relue toutes les 7 s) ne servait qu'à l'export PDF. Elle est supprimée : l'export lit toutes les pages au clic (`fetchAllWorkOrders`). « Export réussi » n'est annoncé qu'après une lecture complète ; une liste vide ne produit pas de PDF (« Aucun ordre de travail à exporter ») ; un refus s'affiche par `userMessageOf` et se journalise par `clientLogger.error(…, reportErrorContext(error))`. Double clic bloqué par une ref ;
+  - `maintenance/date-based-alerts.tsx` : « cette alerte a déjà son OT » se déduisait des 300 derniers OT. Un OT plus ancien était ignoré, l'alerte redevenait « à faire » et la génération en masse pouvait créer un doublon. Lecture complète (`["/api/work-orders", "all"]`, même préfixe pour les invalidations). Tant qu'elle n'a pas réussi, les boutons de création sont désactivés et un `InlineQueryError` propose « Réessayer » ;
+  - `capped-list-reads-hygiene` : 2 fichiers retirés de la liste gelée (7 → 5 cas).
+- **Comment tester (QA)** :
+  - `tests/unit/client/work-orders-full-reads.test.ts` : 4 cas de branchement sur l'export (rouges avant) ; rendu `react-dom/server` des alertes avec la lecture des OT en erreur : boutons « Créer OT atelier » et « Générer les OT atelier » désactivés, encart d'erreur présent (rouge sur l'ancien code : bouton actif) ; témoin sain ; OT existant reconnu ;
+  - campagnes : unitaires 327 fichiers / 3395 tests ; tsc 0 ; check:tests 0. Aucun code serveur touché.
+- **RAIDER** : D : contrat d'API inchangé ; les deux écrans ne concluent plus sur une liste partielle.
+- **Reste / risques** : 5 lectures plafonnées gelées (inventaire, interventions — 1000 demandés, 500 rendus —, pièces de l'OT, dialogue de montage ×2). La liste de véhicules des alertes (`["/api/vehicles"]`, sans `limit`) ne rend que 10 véhicules (`VEHICLE_LIST_DEFAULT_LIMIT = 10`) : alertes calculées sur 10 véhicules seulement, hors du cliquet (pas de `limit` en dur) ; signalé, lot à part.
+
+## 2026-11-09T16:18:17+01:00 — Secrétariat : une lecture en échec n'est plus un zéro ; le carburant estimé n'est plus présenté comme chiffre d'affaires
+
+- **Statut** : fait (PR brouillon #611)
+- **Quoi** :
+  - les 7 lectures du tableau de bord secrétaire (véhicules, documents, CPC, chauffeurs, statistiques par client, factures, alertes) passent par `queryView` / `listQueryView`. En échec, chaque tuile affiche « Indisponible », jamais 0 ;
+  - un total n'est jamais partiel : il vaut null si un terme est inconnu (`clientTotals`, `documentRenewals`, `client/src/lib/secretary-dashboard-stats.ts`) ;
+  - la tuile « Coûts » lisait `totalCost`, que `/api/operations/stats/by-client` ne sert pas : elle affichait toujours 0 F. Elle lit maintenant `totalFuelCost` ;
+  - **décision 0a du 2026-11-09** : `totalRevenue` de `stats/by-client` est la somme des carburants estimés des missions, pas un chiffre d'affaires. La tuile « Chiffre d'affaires » devient « Coût carburant estimé (missions) ». Par client, les colonnes deviennent « Carburant estimé » et « Carburant réel ». La marge, tirée de ce faux CA, est retirée ;
+  - le `data-testid` `secretary-kpi-missions` était porté par deux tuiles (Vue d'ensemble et Opérations) : la seconde devient `secretary-ops-kpi-missions`.
+- **Comment tester (QA)** :
+  - `tests/unit/client/secretary-dashboard-error-states.test.ts` (garde de source, 13 cas) :
+    - aucun libellé « Chiffre d'affaires », « CA », « Marge », « Bénéfice », ni lecture de `marginPercentage` ou `profit` : rouge sur 67b67730, vert sur la branche ;
+    - plus jamais `totalCost` ;
+    - chaque tuile chiffrée passe par `statDisplay` ;
+    - chaque `data-testid` est unique : rouge sur eda0942b (`secretary-kpi-missions` en double), vert après ;
+  - `tests/unit/client/secretary-dashboard-stats.test.ts` (14 cas) : totaux null dès qu'un terme manque, chaînes décimales acceptées, `revenue` n'est plus une clé ;
+  - `no-tailwind-palette-in-ui.test.ts` : cliquet du tableau de bord secrétaire abaissé de 47 à 46 ;
+  - campagnes : tsc 0, check:tests 0, unitaires verts (hors `db-pool-options`, échec local connu). Aucun fichier serveur modifié.
+- **Pourquoi** : un 0 affiché pendant une panne ou pour un champ jamais servi est lu comme un vrai chiffre. Présenter le carburant estimé comme chiffre d'affaires et en tirer une marge donnait une rentabilité fausse.
+- **RAIDER** : R : helpers de vue partagés avec #607 ; D : routes et contrats d'API inchangés, un seul `data-testid` renommé (aucun consommateur e2e). Ne s'appliquent pas : A, I, Retroactive (client seul, lecture seule).
+- **Reste / risques** : le vrai chiffre d'affaires (factures HT, hors annulées, par période) arrive avec le lot « CA réel » ; `operations/clients-panel` et `destinations-chart` traités dans la PR T2 (`c7-ops-fuel-estimate`), qui ajoute l'alias serveur `estimatedFuelCost`.
