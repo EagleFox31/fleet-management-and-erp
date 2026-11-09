@@ -312,11 +312,19 @@ export default function PreventiveMaintenancePage() {
 
   if (schedulesError) {
     return (
-      <InlineQueryError
-        error={schedulesError}
-        fallback="Le planning de maintenance est momentanément indisponible."
-        onRetry={() => void refetchSchedules()}
-      />
+      <div className="space-y-5">
+        <HeaderCard
+          moduleLabel="Maintenance · Préventif"
+          title="Planifications préventives"
+          subtitle="Gestion des échéances et cycles d'entretien"
+          icon={<ShieldCheck className="h-5 w-5" />}
+        />
+        <InlineQueryError
+          error={schedulesError}
+          fallback="Le planning de maintenance est momentanément indisponible."
+          onRetry={() => void refetchSchedules()}
+        />
+      </div>
     );
   }
 

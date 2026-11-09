@@ -61,6 +61,7 @@ describe("rendu: planning de maintenance en échec", () => {
     expect(html).not.toContain("Aucune planification préventive.");
     expect(html).not.toMatch(/ETIMEDOUT|5432/);
     expect(html).toContain(`role="alert"`);
+    expect(html, "en-tête gardé : l'utilisateur sait sur quel écran il est").toContain("Planifications préventives");
   });
 
   it("succès vide : l'état vide normal reste affiché", async () => {

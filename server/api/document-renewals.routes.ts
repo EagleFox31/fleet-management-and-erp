@@ -1227,10 +1227,10 @@ router.post("/quick-renew", isDocumentRenewalWriter, (req: Request, res: Respons
       // Un échec ici ne renvoie pas 500 et ne supprime rien.
       try {
         const recipients = [
-          ...(await storage.getUsersByRole("admin")),
-          ...(await storage.getUsersByRole("workshop_manager")),
-          ...(await storage.getUsersByRole("secretary")),
-          ...(await storage.getUsersByRole("logistics")),
+          ...(await usersByRolesBestEffort(["admin", "workshop_manager", "secretary", "logistics"], log, {
+            requestId: req.requestId,
+            vehicleDocumentId: payload.vehicleDocumentId,
+          })),
           actorUserId ? ({ id: actorUserId } as any) : null,
         ].filter(Boolean) as Array<{ id: number }>;
 
