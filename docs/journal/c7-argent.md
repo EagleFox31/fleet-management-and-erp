@@ -114,3 +114,39 @@ Entrées ajoutées en bas, une par commit (règles : `docs/journal/README.md`).
   - R : `queryView` est réutilisé, `computeWorkOrderCost` n'est pas modifié ;
   - D : les données lues s'affichent comme avant ;
   - A, I et le volet rétroactif sont sans objet (client uniquement, aucune écriture).
+
+## 2026-11-07T18:01:12+01:00 — Profil technicien : un coût d'OT non calculé n'est plus affiché à 0
+
+- **Statut** : fait, en relecture
+- **Quoi** : `technician-work-orders-service.ts` journalisait l'échec du calcul groupé des coûts et renvoyait une carte vide. Chaque OT recevait alors `ZERO_COST`, même avec un `work_orders.cost` renseigné. `GET /api/technician/my-work-orders` répondait 200 et le profil technicien affichait 0 comme un vrai coût. La page ne lisait que `isLoading` : sur une erreur, elle affichait aussi des 0.
+- **Comment** :
+  - serveur : `calculateWorkOrderCosts` relève `AppError(500, message lisible, { cause })` après le log, et `ZERO_COST` est supprimé ; un OT sans coût calculé lève aussi une `AppError` au lieu d'un 0 ;
+  - `getPendingWorkOrdersCount` relève au lieu de `return 0` et sort de la liste gelée de `swallowed-read-catch-hygiene` ; les `console.*` du fichier passent par `moduleLogger` ;
+  - client : `client/src/lib/technician-profile-stats.ts` (`technicianProfileView`, sur `queryView`). Une erreur sans données, ou une réponse sans liste d'OT, affiche « Indisponible » avec `InlineQueryError` (message lisible, référence, « Réessayer ») ;
+  - les routes de `routes.ts` (gelé) ne sont pas modifiées : elles répondaient déjà 500 sur une exception du service.
+- **Pourquoi** : un coût faux est de l'argent. C'est la troisième occurrence du défaut « échec pris pour du vide » (après `widgets-silent-errors.md` et #593).
+- **Preuve automatisée** :
+  - `tests/unit/server/technician-work-orders-cost-error.test.ts` : 4 rouges avant la correction (OT renvoyés à coût 0, statistiques résolues, comptage à 0), verts après ; le cas nominal (coût de base conservé) est vert des deux côtés ;
+  - `tests/unit/client/technician-profile-stats.test.ts` : états error, loading, ready, et calcul des coûts ;
+  - `tests/integration/work-order-cost.test.ts` sur Postgres local : 4/4 ;
+  - unitaires : 3 240 verts, seul `db-pool-options` échoue (node_modules local, connu) ; `npm run check` : 0 erreur TS ; `check:tests` : 0.
+- **RAIDER** :
+  - R : `queryView`, `InlineQueryError` et `UNAVAILABLE` sont réutilisés ;
+  - D : un calcul réussi renvoie les mêmes valeurs qu'avant ;
+  - E : `AppError`, `moduleLogger`, cliquet resserré d'une entrée ;
+  - A, I et le volet rétroactif sont sans objet (aucune écriture, aucun schéma).
+
+## 2026-11-08 23:06 — Coûts technicien, refonte après relecture (#594)
+
+Cette entrée remplace l'approche de l'entrée précédente, refusée en relecture : une AppError 500 sur toute la liste aurait privé le technicien de ses interventions pour un simple coût manquant.
+
+- **Quoi** :
+  - serveur : `GET /api/technician/my-work-orders` reste en 200. `calculateWorkOrderCosts` isole les quatre requêtes du coût (heures, pièces, rotations, taux) par `Promise.allSettled`. Seule la composante en échec passe à `null`, le total aussi, et l'OT porte `costUnavailable: true`. Chaque échec est journalisé par `moduleLogger`. Un OT absent de la table des coûts reçoit la même valeur `null`, plus aucun throw ;
+  - `getPendingWorkOrdersCount` relève toujours une `AppError` (comptage, pas une liste) ;
+  - client : `technicianWorkOrdersView` / `technicianProfileView` (sur `queryView`) et `InlineQueryError` sur le tableau de bord, « Mes OT » (start_url de la PWA) et le profil ; un coût inconnu s'affiche « Indisponible » (`workOrderCostLabel`, `formatKnownCost`). Les totaux du profil passent à `null` dès qu'un OT terminé est sans coût ; les `any[]` du profil sont typés.
+- **Pourquoi** : la liste des OT est l'écran de travail du technicien ; un coût est une donnée annexe. Une panne du coût ne doit ni cacher les OT, ni s'afficher comme 0.
+- **Preuve automatisée** :
+  - `tests/unit/server/technician-work-orders-cost-error.test.ts` : liste servie quand tout échoue ; une requête en échec à la fois (pièces, rotations, taux) ne met à `null` que sa composante ;
+  - `tests/unit/client/technician-profile-stats.test.ts` : un OT terminé sans coût met tous les totaux à `null` ;
+  - `tests/unit/client/technician-pages-query-errors.test.ts` : garde de branchement, rouge sur les trois pages de main (7a5ddefe), verte après ; cliquet sur les pages technicien qui lisent une requête sans traiter l'erreur (`fleet-status.tsx`, `vehicles.tsx` gelées).
+- **Mémoire** : `docs/analysis/LESSONS_LEARNED.md`, entrée du 2026-11-07, complétée avec la troisième occurrence et le contrôle renforcé.

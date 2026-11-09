@@ -36,7 +36,6 @@ const KNOWN_EMPTY_ON_ERROR: string[] = [
   "server/services/preventive-maintenance-service.ts#getMaintenanceStatistics",
   "server/services/preventive-maintenance-service.ts#getUpcomingMaintenances",
   "server/services/preventive-maintenance-service.ts#getVehicleMaintenanceSchedules",
-  "server/services/technician-work-orders-service.ts#getPendingWorkOrdersCount",
   "server/services/vehicle-status-service.ts#getFleetKPI",
   "server/services/vehicle-status-service.ts#getFleetStatusAtDate",
   "server/services/vehicle-status-service.ts#getFleetStatusHistory",

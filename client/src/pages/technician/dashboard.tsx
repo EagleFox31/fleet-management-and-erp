@@ -15,6 +15,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { HeaderCard, KpiGrid, KpiTile, CardShell, PremiumTabsNav } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
+import { technicianWorkOrdersView } from "@/lib/technician-profile-stats";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { cn, formatDate, getStatusColor, translatePriority, translateStatus } from "@/lib/utils";
 
 type WorkOrderStatus = "pending" | "in_progress" | "completed" | "cancelled";
@@ -61,15 +63,21 @@ function isSameDay(date: Date | null, other: Date) {
 export default function TechnicianDashboard() {
   const [, setLocation] = useLocation();
 
-  const { data: workOrdersData, isLoading: workOrdersLoading } = useQuery<TechnicianWorkOrdersResponse>({
+  const workOrdersQuery = useQuery<unknown>({
     queryKey: ["/api/technician/my-work-orders"],
   });
+  // Échec sans données : message et « Réessayer », jamais « aucun OT » ni des compteurs à 0.
+  const workOrdersView = technicianWorkOrdersView<TechnicianWorkOrder>(workOrdersQuery);
+  const workOrdersData: TechnicianWorkOrdersResponse | undefined =
+    workOrdersView.kind === "ready" ? (workOrdersView.data as TechnicianWorkOrdersResponse) : undefined;
 
   const { data: fleetStats } = useQuery<FleetStats>({
     queryKey: ["/api/statistics/fleet"],
   });
 
-  const workOrders = workOrdersData?.workOrders || [];
+  // Les compteurs ne sont affichés qu'en état « ready » : les gardes plus bas rendent le
+  // chargement et l'erreur avant tout usage de cette liste.
+  const workOrders: TechnicianWorkOrder[] = workOrdersData ? workOrdersData.workOrders : [];
   const activeWorkOrders = workOrders.filter((wo) => ACTIVE_STATUSES.has(wo.status));
 
   const completedToday = workOrders.filter(
@@ -97,10 +105,30 @@ export default function TechnicianDashboard() {
   const goToMyWorkOrders = (status?: "pending" | "in_progress" | "completed") =>
     setLocation(status ? `/technician/my-work-orders?status=${status}` : "/technician/my-work-orders");
 
-  if (workOrdersLoading) {
+  if (workOrdersView.kind === "loading") {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    );
+  }
+
+  if (workOrdersView.kind === "error") {
+    return (
+      <div className="space-y-5">
+        <HeaderCard
+          moduleLabel="Tableau de bord · Technicien"
+          title="Mes Interventions"
+          subtitle="Ordres de travail assignés et état de la flotte"
+          icon={<Wrench className="h-5 w-5" />}
+        />
+        <InlineQueryError
+          error={workOrdersView.error}
+          fallback="Vos ordres de travail sont momentanément indisponibles."
+          onRetry={() => void workOrdersQuery.refetch()}
+          isRetrying={workOrdersView.isRetrying}
+          data-testid="tech-dashboard-work-orders-error"
+        />
       </div>
     );
   }
