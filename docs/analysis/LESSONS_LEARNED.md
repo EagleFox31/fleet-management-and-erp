@@ -3481,3 +3481,23 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - Rejoué sur le `ci.yml` de main (31802e64), il est rouge sur les 4 lignes `54320:5432` et `5433:80`. Il est vert après correction.
   - Preuve de bout en bout : un run vert sur toutes les shards `contract` et sur `integration`.
 - **Leçon généralisée** : un service de CI ne réserve jamais un port hôte fixe. On laisse Docker choisir et on lit le port attribué. Un faux rouge d'infrastructure qui revient se corrige à la source, avec une garde ; une relance ne fait que le masquer.
+
+## 2026-11-09 — Journal à fichier unique : un conflit à chaque fusion
+
+- **Contexte** : `docs/qa/JOURNAL_COUVERTURE.md` reçoit une entrée par PR, toujours en fin de fichier. Le 9 novembre, 5 PR ont été bloquées en CONFLICTING sur ce seul fichier. Il a fallu à chaque fois fusionner main en local et garder les deux entrées.
+- **Cause racine** :
+  - Deux PR qui ajoutent chacune une entrée à la fin du même fichier modifient la même zone : git y voit un conflit.
+  - `merge=union` (`.gitattributes`) ne s'applique qu'à une fusion faite en local. GitHub ne l'applique pas : ni « Update branch », ni la fusion côté serveur.
+  - Le conflit revient donc à chaque paire de PR concurrentes, sans rapport avec le code livré.
+- **Classification** : défaut de structure documentaire. Récurrent (5 occurrences le même jour). Coût : temps de fusion, risque de perdre une entrée en résolvant à la main.
+- **Résolution** :
+  - le journal devient un dossier, `docs/qa/journal/`, avec un fichier par entrée nommé `AAAA-MM-JJTHHMM-<slug>.md` ;
+  - les 167 entrées existantes sont découpées par `scripts/doc-fragments.ts migrate`, avec un manifeste figé ;
+  - aucun index n'est commité, sinon il redeviendrait un fichier commun : `npm run journal:index` l'affiche à la demande ;
+  - `JOURNAL_COUVERTURE.md` devient un pointeur ;
+  - le hook `garde-journal` reconnaît le dossier.
+- **Prévention vérifiée** : `tests/unit/docs/journal-fragments.test.ts`. Il échoue dans trois cas :
+  - une entrée `## ` est ajoutée à l'ancien fichier, avec la consigne « Écris ton entrée dans docs/qa/journal/… » ;
+  - un fichier du dossier est mal nommé ou ne commence pas par `## ` ;
+  - le recollage des fragments migrés ne retrouve pas l'empreinte d'origine.
+- **Leçon généralisée** : tout document où plusieurs PR ajoutent du texte en parallèle s'écrit un fichier par entrée (comme towncrier ou changesets), pas en ajout de fin d'un fichier commun. `merge=union` ne soulage que les fusions faites en local.
