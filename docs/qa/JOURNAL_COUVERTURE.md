@@ -2704,6 +2704,24 @@ soumission sans doublon.
 - **RAIDER** : D : contrat de `GET /api/work-orders` inchangé, l'ordre à date égale était indéterminé ; aucune donnée touchée.
 - **Reste / risques** : `getWorkOrdersByOwner` et les autres listes paginées ne sont pas revues.
 
+## 2026-11-09T15:26:00+01:00 — Rendu serveur des tuiles de stock en échec (inventaire, magasin, atelier)
+
+- **Statut** : fait (PR brouillon)
+- **Quoi** :
+  - `tests/unit/client/money-stock-render-error-states.test.ts` : rendu `react-dom/server` des trois écrans avec `/api/parts/statistics` en erreur dans le cache (`queryCache.build(...).setState`) ; la tuile doit lire « Indisponible », jamais 0. Un témoin par écran avec données saines. Complète les regex de `money-stock-reads-error-states.test.ts`, qui lisent le source sans prouver l'affichage ;
+  - `warehouse/dashboard.tsx` : le sous-texte de « Valeur stock total » teste `statsFailed` et non `statistics.error` (une relance échouée avec données en cache masquait la valeur moyenne par pièce) ; couvert par un cas de rendu.
+- **Comment tester (QA)** : `npx vitest run tests/unit/client/money-stock-render-error-states.test.ts` (7 tests). Rouge avec chaque garde forcé à `false` (inventaire l.216, magasin l.162, atelier l.80) et avec `statistics.error` rétabli en l.214 ; vert sinon.
+- **RAIDER** : D : aucun contrat touché ; aucune dépendance ajoutée, `vitest.config.ts` inchangé.
+- **Reste / risques** : l'onglet « Alertes » du magasin (répartition) n'est pas rendu par défaut, donc non couvert ; tuile « Stock bas / épuisé » de l'atelier (onglet Inventaire) idem, la garde `stockStatsFailed` est prouvée via « Alertes stock magasin ».
+
+## 2026-11-09T14:31:03+01:00 — Alertes, demandes de pièces, catalogue de pannes, maintenance : une lecture en échec n'est plus un vide (6 lectures)
+- **Quoi** : `getPartRequirements`, `getFaultCatalogs`, `getMaintenanceCompliance`, `getScheduledMaintenanceCount`, `getAlertsByUserId`, `getUnreadAlertsByUserId` levaient `[]`, `0` ou `{0,0,0}` en cas d'erreur de base ; elles lèvent désormais une `AppError` 500 journalisée (`storageLog`, `{ err }`).
+- **Comment** : les deux appelants situés dans une mutation (`missions.routes.ts` demande de renouvellement, `routes.ts` déclenchement de maintenance par date) lisent les alertes non lues en meilleur effort (catch local, `log.warn` avec `requestId`, anti-doublon ignoré) : la mutation reste en 2xx. Écrans : badge et panneau des alertes (topnav), catalogue de pannes, tuile « Maintenances planifiées », tuile et compteur de conformité (tableau de bord atelier), encart des OT en attente de pièces affichent « Indisponible » ou un encart d'erreur, jamais 0.
+- **Pourquoi** : même défaut que #597 et l'incident du 7 novembre (zéros pendant une saturation du pool).
+- **Comment tester (QA)** : `tests/unit/server/alerts-maintenance-reads-error.test.ts` (6 lectures, rouge 6/6 sur main) ; `tests/contract/mission-renewal-alert-read-failure.contract.test.ts` (POST 201 quand la lecture lève ; rouge 500 sans le catch) ; `tests/unit/client/alerts-maintenance-reads-error-states.test.ts` ; cliquet `swallowed-read-catch-hygiene` 40 → 34 ; tsc 0.
+- **RAIDER** : R : `InlineQueryError`, `AppError`, `storageLog` existants ; D : réponses de succès inchangées ; failure memory : leçon du 2026-11-07 appliquée. Ne s'appliquent pas : A, I, Retroactive (aucune donnée ni schéma touchés).
+- **Reste** : ~34 cas gelés ; `getUsersByRole` (notification de renouvellement) à traiter avec son appelant en meilleur effort.
+
 ## 2026-11-09T15:19:00+01:00 — Rapports PDF : véhicules lus en entier, carburant sans repli à 0, logs migrés
 
 - **Statut** : fait (PR brouillon)

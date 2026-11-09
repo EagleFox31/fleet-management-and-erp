@@ -3665,7 +3665,13 @@ router.post("/:id/document-renewal-requests", async (req, res, next) => {
       }
 
       for (const recipientId of recipientIds) {
-        const unreadAlerts = await storage.getUnreadAlertsByUserId(recipientId);
+        // Meilleur effort : la lecture ne sert qu'à éviter un doublon, elle ne doit jamais faire échouer la demande.
+        let unreadAlerts: Awaited<ReturnType<typeof storage.getUnreadAlertsByUserId>> = [];
+        try {
+          unreadAlerts = await storage.getUnreadAlertsByUserId(recipientId);
+        } catch (err) {
+          log.warn({ err, requestId: req.requestId, recipientId }, "lecture des alertes non lues impossible, anti-doublon ignoré");
+        }
         const duplicate = unreadAlerts.some((alert) => {
           const sameTitle = alert.title === alertTitle;
           const sameLink = (alert.link || "") === requestLink;

@@ -27,6 +27,7 @@ import {
 import { formatCurrency } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 
 interface FaultCatalog {
   id: number;
@@ -231,7 +232,7 @@ export default function FaultCatalogPage() {
   };
 
   // Chargement des données
-  const { data: faultCatalog, isLoading } = useQuery<any>({
+  const { data: faultCatalog, isLoading, isError, error, refetch } = useQuery<any>({
     queryKey: ['/api/fault-catalog'],
   });
 
@@ -288,6 +289,14 @@ export default function FaultCatalogPage() {
 
   if (isLoading) {
     return <div className="flex justify-center items-center h-64">Chargement...</div>;
+  }
+
+  if (isError) {
+    return (
+      <div className="container mx-auto py-6">
+        <InlineQueryError error={error} fallback="Le catalogue d'interventions est momentanément indisponible." onRetry={() => void refetch()} />
+      </div>
+    );
   }
 
   return (
