@@ -24,6 +24,18 @@ export function queryView<T>(query: QueryStatus<T>): QueryView<T> {
   return { kind: "loading" };
 }
 
+/**
+ * `queryView` pour une liste : une réponse 200 qui n'est pas une liste est une erreur
+ * (sinon l'écran resterait sur « Chargement… » sans fin). L'erreur vaut `null` :
+ * `userMessageOf` affiche alors le message de repli.
+ */
+export function listQueryView<T>(query: QueryStatus<unknown>): QueryView<T[]> {
+  if (query.data !== undefined && !Array.isArray(query.data)) {
+    return { kind: "error", error: null, isRetrying: query.isFetching };
+  }
+  return queryView(query as QueryStatus<T[]>);
+}
+
 /** Données si la vue est prête, sinon `fallback` (à n'utiliser que là où l'erreur est déjà affichée). */
 export function readyData<T, F>(view: QueryView<T>, fallback: F): T | F {
   return view.kind === "ready" ? view.data : fallback;
