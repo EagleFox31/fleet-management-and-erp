@@ -61,12 +61,18 @@ export function isSessionGuard(fn: unknown): boolean {
 export const authenticate = sessionGuard(async (req: Request, res: Response, next: NextFunction) => {
   const debugAuth = process.env.AUTH_DEBUG !== "0";
   if (debugAuth) {
-    console.log(`🔐 [AUTH] ${req.method} ${req.path} - Session: ${!!req.session} - UserId: ${req.session?.userId || 'NONE'}`);
+    moduleLogger("auth").debug(
+      { requestId: req.requestId, method: req.method, path: req.path, hasSession: !!req.session, userId: req.session?.userId ?? null },
+      "Contrôle d'authentification",
+    );
   }
 
   if (!req.session || !req.session.userId) {
     if (debugAuth) {
-      console.log(`❌ [AUTH] Accès refusé - Non authentifié`);
+      moduleLogger("auth").info(
+        { requestId: req.requestId, method: req.method, path: req.path },
+        "Accès refusé : non authentifié",
+      );
     }
     return res.status(401).json({ message: 'Non authentifié' });
   }
@@ -89,7 +95,10 @@ export const authenticate = sessionGuard(async (req: Request, res: Response, nex
   }
 
   if (debugAuth) {
-    console.log(`✅ [AUTH] Accès autorisé - UserId: ${req.session.userId}`);
+    moduleLogger("auth").debug(
+      { requestId: req.requestId, method: req.method, path: req.path, userId: req.session.userId },
+      "Accès autorisé",
+    );
   }
   next();
 });
@@ -113,16 +122,18 @@ export const authorize = (roles: string[]) => {
 
       if (!normalizedAllowedRoles.includes(normalizedUserRole)) {
         if (debugAuth) {
-          console.log(
-            `❌ [AUTH] Accès refusé - Rôle utilisateur: "${user.role}" (${normalizedUserRole}), rôles autorisés: ${normalizedAllowedRoles.join(", ")}`
+          moduleLogger("auth").info(
+            { requestId: req.requestId, method: req.method, path: req.path, userId: user.id, role: normalizedUserRole, allowedRoles: normalizedAllowedRoles },
+            "Accès refusé : rôle non autorisé",
           );
         }
         return res.status(403).json({ message: 'Accès non autorisé' });
       }
 
       if (debugAuth) {
-        console.log(
-          `✅ [AUTH] Accès autorisé - Rôle utilisateur: "${user.role}" (${normalizedUserRole}), rôles autorisés: ${normalizedAllowedRoles.join(", ")}`
+        moduleLogger("auth").debug(
+          { requestId: req.requestId, method: req.method, path: req.path, userId: user.id, role: normalizedUserRole, allowedRoles: normalizedAllowedRoles },
+          "Accès autorisé",
         );
       }
       
