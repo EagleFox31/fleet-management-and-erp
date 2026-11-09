@@ -22,6 +22,8 @@ import { ImportExcelDialog } from "@/components/procurement/import-excel-dialog"
 import { ProcurementTutorialModal } from "@/components/procurement/procurement-tutorial-modal";
 import { formatPrice } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import { userMessageOf } from "@/lib/api-error";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 
 interface SupplierInvoice {
   id: number;
@@ -91,18 +93,23 @@ export default function SupplierInvoicesListPage() {
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const canCreateOrImport = ["admin", "secretary"].includes(user?.role || "");
 
-  const { data: rawInvoices = [], isLoading } = useQuery<SupplierInvoice[]>({
+  const { data: rawInvoicesData, isLoading, error: listError } = useQuery<SupplierInvoice[]>({
     queryKey: ["/api/supplier-invoices", { status: statusFilter }],
     staleTime: 0,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
   });
-  const { data: stats } = useQuery<SupplierInvoiceStatistics>({
+  const { data: stats, error: statsError } = useQuery<SupplierInvoiceStatistics>({
     queryKey: ["/api/supplier-invoices/statistics"],
     staleTime: 0,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
   });
+
+  // Échec de lecture : ni liste vide ni somme partielle ne tiennent lieu de valeur.
+  const rawInvoices = rawInvoicesData ?? [];
+  const listFailed = rawInvoicesData === undefined && !!listError;
+  const statsFailed = stats === undefined && !!statsError;
 
   const invoices = rawInvoices.map((invoice) => ({
     ...invoice,
@@ -123,11 +130,20 @@ export default function SupplierInvoicesListPage() {
   const totalPaidFromList = invoices
     .filter((inv) => inv.status === "paid")
     .reduce((sum, inv) => sum + parseFloat(inv.totalAmountTTC || "0"), 0);
-  const totalAmount = stats ? Number(stats.totalAmountTTC || "0") : totalAmountFromList;
-  const totalPaidAmount = stats ? Number(stats.totalPaid || "0") : totalPaidFromList;
-  const supplierDebtAmount = stats
+  // Les sommes viennent de /statistics. La liste ne sert de repli que pendant le chargement
+  // de /statistics (jamais après un échec, ni si la liste elle-même a échoué).
+  const moneyFromList = !stats && !statsFailed && !listFailed;
+  const totalAmount: number | null = stats
+    ? Number(stats.totalAmountTTC || "0")
+    : moneyFromList ? totalAmountFromList : null;
+  const totalPaidAmount: number | null = stats
+    ? Number(stats.totalPaid || "0")
+    : moneyFromList ? totalPaidFromList : null;
+  const supplierDebtAmount: number | null = stats
     ? Number(stats.totalBalance || "0")
-    : Math.max(totalAmountFromList - totalPaidFromList, 0);
+    : moneyFromList ? Math.max(totalAmountFromList - totalPaidFromList, 0) : null;
+  const money = (amount: number | null) => (amount === null ? UNAVAILABLE : formatPrice(amount));
+  const count = (n: number) => (listFailed ? UNAVAILABLE : String(n));
 
   const formatCurrency = (amount: string | number) => formatPrice(Number(amount));
 
@@ -167,7 +183,7 @@ export default function SupplierInvoicesListPage() {
                 <Button variant="outline" size="sm" data-testid="button-view-discrepancies"
                   className="border-orange-200 text-orange-600 hover:bg-orange-50 gap-1.5">
                   <AlertTriangle className="h-3.5 w-3.5" />
-                  Écarts ({discrepancyInvoices})
+                  Écarts ({count(discrepancyInvoices)})
                 </Button>
               </Link>
               {canCreateOrImport && (
@@ -182,12 +198,12 @@ export default function SupplierInvoicesListPage() {
 
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mt-5 pt-5 border-t border-gray-100">
             {[
-              { icon: <FileText className="h-4 w-4 text-green-600" />, iconBg: "bg-green-50", label: "Total Factures", value: String(totalInvoices), sub: "toutes périodes", testId: "stat-total-invoices" },
-              { icon: <Clock className="h-4 w-4 text-amber-500" />, iconBg: "bg-amber-50", label: "En Attente", value: String(pendingInvoices), sub: "à valider", testId: "stat-pending-invoices" },
-              { icon: <AlertTriangle className="h-4 w-4 text-orange-500" />, iconBg: "bg-orange-50", label: "Avec Écarts", value: String(discrepancyInvoices), sub: "à contrôler", testId: "stat-discrepancy-invoices" },
-              { icon: <DollarSign className="h-4 w-4 text-blue-500" />, iconBg: "bg-blue-50", label: "Montant Total", value: formatCurrency(totalAmount), sub: "facturé", testId: "stat-total-amount" },
-              { icon: <AlertTriangle className="h-4 w-4 text-red-500" />, iconBg: "bg-red-50", label: "Dette Fournisseurs", value: formatCurrency(supplierDebtAmount), sub: "facturé non payé", testId: "stat-supplier-debt" },
-              { icon: <CheckCircle className="h-4 w-4 text-emerald-600" />, iconBg: "bg-emerald-50", label: "Payé Fournisseurs", value: formatCurrency(totalPaidAmount), sub: "déjà réglé", testId: "stat-supplier-paid" },
+              { icon: <FileText className="h-4 w-4 text-green-600" />, iconBg: "bg-green-50", label: "Total Factures", value: count(totalInvoices), sub: "toutes périodes", testId: "stat-total-invoices" },
+              { icon: <Clock className="h-4 w-4 text-amber-500" />, iconBg: "bg-amber-50", label: "En Attente", value: count(pendingInvoices), sub: "à valider", testId: "stat-pending-invoices" },
+              { icon: <AlertTriangle className="h-4 w-4 text-orange-500" />, iconBg: "bg-orange-50", label: "Avec Écarts", value: count(discrepancyInvoices), sub: "à contrôler", testId: "stat-discrepancy-invoices" },
+              { icon: <DollarSign className="h-4 w-4 text-blue-500" />, iconBg: "bg-blue-50", label: "Montant Total", value: money(totalAmount), sub: "facturé", testId: "stat-total-amount" },
+              { icon: <AlertTriangle className="h-4 w-4 text-red-500" />, iconBg: "bg-red-50", label: "Dette Fournisseurs", value: money(supplierDebtAmount), sub: "facturé non payé", testId: "stat-supplier-debt" },
+              { icon: <CheckCircle className="h-4 w-4 text-emerald-600" />, iconBg: "bg-emerald-50", label: "Payé Fournisseurs", value: money(totalPaidAmount), sub: "déjà réglé", testId: "stat-supplier-paid" },
             ].map((kpi) => (
               <div key={kpi.label} className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3.5 flex flex-col gap-2">
                 <div className={`w-8 h-8 rounded-lg ${kpi.iconBg} flex items-center justify-center`}>{kpi.icon}</div>
@@ -231,7 +247,7 @@ export default function SupplierInvoicesListPage() {
             </SelectContent>
           </Select>
           <span className="text-xs text-gray-400 ml-auto">
-            {filteredInvoices.length} facture{filteredInvoices.length > 1 ? 's' : ''}
+            {listFailed ? UNAVAILABLE : `${filteredInvoices.length} facture${filteredInvoices.length > 1 ? 's' : ''}`}
           </span>
         </div>
 
@@ -258,6 +274,15 @@ export default function SupplierInvoicesListPage() {
                     ))}
                   </tr>
                 ))
+              ) : listFailed ? (
+                <tr>
+                  <td colSpan={8} className="px-4 py-16 text-center" role="alert" data-testid="invoices-load-error">
+                    <div className="flex flex-col items-center gap-2 text-gray-400">
+                      <AlertTriangle className="h-9 w-9 opacity-30" />
+                      <p className="text-sm font-medium">{userMessageOf(listError, "Impossible de charger les factures.")}</p>
+                    </div>
+                  </td>
+                </tr>
               ) : filteredInvoices.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="px-4 py-16 text-center">

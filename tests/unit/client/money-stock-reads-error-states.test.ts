@@ -276,3 +276,51 @@ describe("valeur du stock et alertes de réappro : jamais 0 sur une lecture en �
     expect(src).toMatch(/emptyState=\{\s*reorderAlertsFailed \?/);
   });
 });
+
+describe("factures : jamais 0 ni vide sur une lecture en échec", () => {
+  it("operations/invoices : tuiles, compteur et liste gardés par l'échec", () => {
+    const src = read("client/src/pages/operations/invoices/index.tsx");
+    expect(src).toMatch(/const failed = data === undefined && !!error/);
+    expect(src).toMatch(/failed \? UNAVAILABLE : formatCurrency\(summary\.totalAmountTTC\)/);
+    expect(src).toMatch(/failed \? UNAVAILABLE : formatCurrency\(summary\.totalPaid\)/);
+    expect(src).toMatch(/failed \? UNAVAILABLE : formatCurrency\(summary\.totalBalance\)/);
+    expect(src).toMatch(/\) : failed \? \(/);
+    expect(src).toMatch(/userMessageOf\(error,/);
+  });
+
+  it("invoicing-dashboard : l'échec a son état, distinct du vrai vide", () => {
+    const src = read("client/src/components/operations/invoicing-dashboard.tsx");
+    expect(src).toMatch(/if \(!stats && error\)/);
+    expect(src).toMatch(/data-testid="invoicing-dashboard-error"/);
+    expect(src).toMatch(/userMessageOf\(error,/);
+    expect(src).toMatch(/Aucune donnée disponible/);
+  });
+
+  it("procurement/invoices : plus de repli sur la liste après un échec de /statistics", () => {
+    const src = read("client/src/pages/procurement/invoices/index.tsx");
+    expect(src).toMatch(/const listFailed = rawInvoicesData === undefined && !!listError/);
+    expect(src).toMatch(/const statsFailed = stats === undefined && !!statsError/);
+    expect(src).toMatch(/const moneyFromList = !stats && !statsFailed && !listFailed/);
+    expect(src).toMatch(/amount === null \? UNAVAILABLE/);
+    expect(src).toMatch(/listFailed \? UNAVAILABLE : String\(n\)/);
+    expect(src).toMatch(/data-testid="invoices-load-error"/);
+  });
+
+  it("discrepancies : tuiles et liste gardées par l'échec", () => {
+    const src = read("client/src/pages/procurement/invoices/discrepancies.tsx");
+    expect(src).toMatch(/const failed = data === undefined && !!error/);
+    expect(src).toMatch(/failed \? UNAVAILABLE : discrepancies\.length/);
+    expect(src).toMatch(/failed \? UNAVAILABLE : formatCurrency\(totalDiscrepancyAmount\)/);
+    expect(src).toMatch(/data-testid="discrepancies-load-error"/);
+  });
+
+  it("procurement/invoices/[id] : règlements illisibles, pas de bouton de paiement ni de montant", () => {
+    const src = read("client/src/pages/procurement/invoices/[id].tsx");
+    expect(src).toMatch(/const settlementsFailed = settlementsData === undefined && !!settlementsError/);
+    expect(src).toMatch(/canPay && !settlementsFailed && remainingToRecord > 0\.01/);
+    expect(src).toMatch(/canPay && !settlementsFailed && hasRecordedSettlement/);
+    expect(src).toMatch(/settlementsFailed \? UNAVAILABLE : formatCurrency\(reconciledAmount\)/);
+    expect(src).toMatch(/settlementsFailed \? UNAVAILABLE : formatCurrency\(pendingReconciliationAmount\)/);
+    expect(src).toMatch(/data-testid="settlements-load-error"/);
+  });
+});
