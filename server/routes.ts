@@ -17,7 +17,7 @@ import multer from "multer";
 import { uploadVehicleDocument, deleteFile } from "./middleware/upload";
 import { storage } from "./storage";
 import { partsService } from "./services/parts-service";
-import { tiresService } from "./services/tires-service-simplified";
+import { POSITION_OCCUPIED_MESSAGE, tiresService } from "./services/tires-service-simplified";
 import { FuelService } from "./services/fuel-service";
 import { mileageService } from "./services/mileage-service";
 import { escapeLike } from "./lib/sql-like";
@@ -3944,7 +3944,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (error instanceof AppError) return next(error);
       if (error instanceof Error) {
         if (error.message === "POSITION_OCCUPIED") {
-          return res.status(409).json({ message: "Cette position est déjà occupée sur le véhicule" });
+          return res.status(409).json({ message: POSITION_OCCUPIED_MESSAGE });
         }
         if (error.message === "INSUFFICIENT_STOCK") {
           return res.status(409).json({ message: "Stock insuffisant pour cette référence pneu" });
@@ -3980,6 +3980,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const vehicleTire = await tiresService.updateVehicleTire(id, data);
       return res.status(200).json(vehicleTire);
     } catch (error) {
+      if (error instanceof AppError) return next(error);
       log.error({ err: error, requestId: req.requestId }, "Update vehicle tire error");
       return res.status(500).json({ message: "Erreur serveur" });
     }

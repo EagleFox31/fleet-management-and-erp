@@ -123,4 +123,19 @@ describe("écrans pneus branchés sur queryView", () => {
     expect(src).toMatch(/occupiedPositionsView\(/);
     expect(src).toContain("<InlineQueryError");
   });
+
+  it("dialogue de montage : sélecteur de véhicules par la queryFn par défaut, erreur distincte d'une flotte vide", () => {
+    const src = read("client/src/components/vehicles/vehicle-tire-mount-dialog.tsx");
+    expect(src).not.toMatch(/data:\s*vehiclesList\s*=\s*\[\]/);
+    expect(src).not.toMatch(/fetch\(["'`]\/api\/vehicles/);
+    expect(src).toMatch(/queryView\(vehiclesQuery\)/);
+    expect(src).toContain('data-testid="mount-vehicles-error"');
+  });
+
+  it("formulaire d'inspection : le Select des pneus montés signale l'échec au lieu de rester vide", () => {
+    const src = read("client/src/pages/inventory/tires/index.tsx");
+    const select = src.slice(src.indexOf('name="vehicleTireId"'), src.indexOf("Sélectionnez le pneu monté à inspecter"));
+    expect(select).toMatch(/disabled=\{vehicleTiresView\.kind !== "ready"\}/);
+    expect(select).toContain('data-testid="inspection-mounted-tires-error"');
+  });
 });

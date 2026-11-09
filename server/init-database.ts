@@ -767,6 +767,28 @@ EXCEPTION WHEN lock_not_available OR unique_violation THEN
 END $$;`;
 
 /**
+ * Un seul pneu actif par position d'un véhicule (index unique partiel uq_vehicle_tires_active_position).
+ * Doit rester identique à server/db/migrations/20261107_vehicle_tires_active_position_unique.sql :
+ * tests/unit/server/vehicle-tires-active-position-unique-schema.test.ts compare les deux. Doublons existants :
+ * index non posé, rien supprimé, écart relu par reportVehicleTireActivePositionGaps.
+ */
+export const VEHICLE_TIRES_ACTIVE_POSITION_UNIQUE_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'uq_vehicle_tires_active_position') THEN
+    IF EXISTS (SELECT 1 FROM vehicle_tires WHERE status = 'active' GROUP BY vehicle_id, position HAVING count(*) > 1) THEN
+      RAISE WARNING 'uq_vehicle_tires_active_position non posé : positions portant plusieurs pneus actifs dans vehicle_tires';
+    ELSE
+      CREATE UNIQUE INDEX uq_vehicle_tires_active_position ON vehicle_tires (vehicle_id, position) WHERE status = 'active';
+    END IF;
+  END IF;
+EXCEPTION WHEN lock_not_available OR unique_violation THEN
+  RAISE WARNING 'uq_vehicle_tires_active_position non posé : verrou indisponible ou doublon apparu pendant la création';
+END $$;`;
+
+/**
  * Retenues à la source (lot F1) : colonnes clients / client_invoices et leurs CHECK. Doit rester identique à
  * server/db/migrations/20261105_finance_withholding.sql : tests/unit/server/finance-withholding-schema.test.ts
  * compare les deux.
@@ -967,6 +989,43 @@ export async function reportDriverUserIdUniqueGaps(client: Queryable, log: WarnL
           "La logistique choisit la fiche gardée ; déplacer assignments.driver_id vers elle puis retirer le user_id " +
           "des autres fiches. L'index est posé au démarrage suivant."
       : "Index uq_drivers_user_id non posé : verrou de table indisponible, nouvel essai au démarrage suivant.",
+  );
+  return { missing: true, duplicates };
+}
+
+/**
+ * Relit pg_indexes après VEHICLE_TIRES_ACTIVE_POSITION_UNIQUE_SQL (le RAISE WARNING n'atteint pas les logs
+ * applicatifs). Index absent : journalise le nombre de positions en double et chaque couple (véhicule, position)
+ * avec ses montages actifs, identifiants seulement. Rien n'est démonté ni supprimé ici : l'atelier choisit.
+ * Lecture seule : aucun appel n'écrit, que l'index soit posé ou non. Le journal porte au plus
+ * VEHICLE_TIRE_DUPLICATES_LOG_LIMIT couples ; la valeur de retour les porte tous.
+ */
+export const VEHICLE_TIRE_DUPLICATES_LOG_LIMIT = 50;
+
+export async function reportVehicleTireActivePositionGaps(client: Queryable, log: WarnLogger = initLog) {
+  const { rows: index } = await client.query(
+    `SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'uq_vehicle_tires_active_position'`,
+  );
+  type Duplicate = { vehicleId: number; position: string; vehicleTireIds: number[] };
+  if (index.length) return { missing: false, duplicates: [] as Duplicate[] };
+  const { rows } = await client.query(
+    `SELECT vehicle_id, position, array_agg(id ORDER BY id) AS vehicle_tire_ids
+       FROM vehicle_tires WHERE status = 'active'
+      GROUP BY vehicle_id, position HAVING count(*) > 1 ORDER BY vehicle_id, position`,
+  );
+  const duplicates: Duplicate[] = rows.map((r) => ({
+    vehicleId: Number(r.vehicle_id),
+    position: String(r.position),
+    vehicleTireIds: (r.vehicle_tire_ids as unknown[]).map(Number),
+  }));
+  // Journal plafonné : le total reste exact, la liste n'en porte que les premiers couples.
+  const logged = duplicates.slice(0, VEHICLE_TIRE_DUPLICATES_LOG_LIMIT);
+  log.warn(
+    { duplicateCount: duplicates.length, duplicates: logged, truncated: duplicates.length > logged.length },
+    duplicates.length
+      ? `Index uq_vehicle_tires_active_position non posé : ${duplicates.length} position(s) de véhicule portent plusieurs pneus actifs. ` +
+          "L'atelier démonte le pneu en trop par l'action de démontage ; l'index est posé au démarrage suivant."
+      : "Index uq_vehicle_tires_active_position non posé : verrou de table indisponible, nouvel essai au démarrage suivant.",
   );
   return { missing: true, duplicates };
 }
@@ -2126,6 +2185,9 @@ export async function initializeDatabase() {
     // Une fiche chauffeur par compte (#113) — jumelle de server/db/migrations/20261103_drivers_user_id_unique.sql.
     await pool.query(DRIVERS_USER_ID_UNIQUE_SQL);
     await reportDriverUserIdUniqueGaps(pool);
+    // Un pneu actif par position — jumelle de server/db/migrations/20261107_vehicle_tires_active_position_unique.sql.
+    await pool.query(VEHICLE_TIRES_ACTIVE_POSITION_UNIQUE_SQL);
+    await reportVehicleTireActivePositionGaps(pool);
     // Contrôles inopinés QHSE (lot Q1) — jumelle de server/db/migrations/20261105_qhse_inspections.sql.
     await pool.query(QHSE_INSPECTIONS_SQL);
     // Cycle de vie du véhicule — jumelle de server/db/migrations/20261105_vehicle_lifecycle.sql.

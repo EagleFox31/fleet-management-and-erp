@@ -955,7 +955,10 @@ export const vehicleTires = pgTable("vehicle_tires", {
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull()
-});
+}, (table) => [
+  // Un seul pneu actif par position (server/db/migrations/20261107_vehicle_tires_active_position_unique.sql).
+  uniqueIndex("uq_vehicle_tires_active_position").on(table.vehicleId, table.position).where(sql`${table.status} = 'active'`),
+]);
 
 // Table pour l'historique des inspections des pneus
 export const tireInspections = pgTable("tire_inspections", {

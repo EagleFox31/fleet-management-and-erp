@@ -105,16 +105,15 @@ export function VehicleTireMountDialog({
 
   const effectiveVehicleId = isVehicleLocked ? vehicleId! : Number(selectedVehicleId);
 
-  const { data: vehiclesList = [], isLoading: vehiclesLoading } = useQuery<FleetVehicleRow[]>({
-    queryKey: ["/api/vehicles", "mount-picker"],
+  // Flotte par la queryFn par défaut (session, erreur normalisée). En échec sans données : encart
+  // « Réessayer », jamais « Aucun véhicule disponible », qui ferait croire à une flotte vide.
+  const vehiclesQuery = useQuery<{ vehicles: FleetVehicleRow[] }>({
+    queryKey: ["/api/vehicles", { limit: 500, status: "operational,maintenance" }],
     enabled: open && !isVehicleLocked,
-    queryFn: async () => {
-      const response = await fetch("/api/vehicles?limit=500&status=operational,maintenance");
-      if (!response.ok) throw new Error("Impossible de charger la flotte");
-      const data = await response.json();
-      return data.vehicles || [];
-    },
   });
+  const vehiclesView = queryView(vehiclesQuery);
+  const vehiclesLoading = vehiclesView.kind === "loading";
+  const vehiclesList = vehiclesView.kind === "ready" ? vehiclesView.data.vehicles ?? [] : [];
 
   // Positions occupées et catalogue : en échec sans données, encart « Réessayer » et montage
   // bloqué. Une liste vide passerait pour « toutes les positions libres » ou « aucun pneu en stock ».
@@ -272,9 +271,13 @@ export function VehicleTireMountDialog({
           {!isVehicleLocked && (
             <div className="grid gap-2">
               <Label htmlFor="mount-vehicle">Véhicule</Label>
-              <Select value={selectedVehicleId} onValueChange={setSelectedVehicleId} disabled={vehiclesLoading}>
+              <Select value={selectedVehicleId} onValueChange={setSelectedVehicleId} disabled={vehiclesView.kind !== "ready"}>
                 <SelectTrigger id="mount-vehicle">
-                  <SelectValue placeholder={vehiclesLoading ? "Chargement..." : "Choisir un véhicule"} />
+                  <SelectValue
+                    placeholder={
+                      vehiclesLoading ? "Chargement..." : vehiclesView.kind === "error" ? "Flotte inconnue" : "Choisir un véhicule"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
                   {vehiclesList.length === 0 ? (
@@ -291,6 +294,15 @@ export function VehicleTireMountDialog({
                   )}
                 </SelectContent>
               </Select>
+              {vehiclesView.kind === "error" ? (
+                <InlineQueryError
+                  error={vehiclesView.error}
+                  fallback="La liste des véhicules est momentanément indisponible."
+                  onRetry={() => void vehiclesQuery.refetch()}
+                  isRetrying={vehiclesView.isRetrying}
+                  data-testid="mount-vehicles-error"
+                />
+              ) : null}
             </div>
           )}
 
