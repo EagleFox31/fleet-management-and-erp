@@ -51,7 +51,7 @@ export default function Dashboard() {
 
   const { data: fleetStats } = useQuery<any>({ queryKey: ["/api/statistics/fleet"] });
   const { data: complianceStats } = useQuery<any>({ queryKey: ["/api/statistics/maintenance-compliance"] });
-  const { data: scheduledMaintenanceData } = useQuery<any>({
+  const { data: scheduledMaintenanceData, isError: scheduledError } = useQuery<any>({
     queryKey: ["/api/statistics/scheduled-maintenance", { period }],
   });
   const { data: fuelStats } = useQuery<any>({
@@ -132,7 +132,7 @@ export default function Dashboard() {
           />
           <KpiTile
             label="Maintenances planifiées"
-            value={formatNumber(scheduledCount)}
+            value={scheduledError ? "Indisponible" : formatNumber(scheduledCount)}
             subValue={periodLabel}
             icon={<Calendar className="h-4 w-4" />}
             iconWrapperClassName="bg-amber-50 text-amber-600"

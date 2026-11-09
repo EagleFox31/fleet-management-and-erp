@@ -47,7 +47,7 @@ export default function WorkshopManagerDashboard() {
   const { data: teamMembers = [] } = useQuery<any[]>({ queryKey: ["/api/users/technicians"] });
   const { data: workOrdersData } = useQuery<any>({ queryKey: ["/api/work-orders"] });
   const { data: fleetStats } = useQuery<any>({ queryKey: ["/api/statistics/fleet"] });
-  const { data: complianceStats } = useQuery<any>({ queryKey: ["/api/statistics/maintenance-compliance"] });
+  const { data: complianceStats, isError: complianceError } = useQuery<any>({ queryKey: ["/api/statistics/maintenance-compliance"] });
   const { data: cpcStats } = useQuery<any>({ queryKey: ["/api/drivers/cpc-statistics"] });
   const { data: driversStatus } = useQuery<any>({ queryKey: ["/api/drivers/cpc-status"] });
 
@@ -160,9 +160,11 @@ export default function WorkshopManagerDashboard() {
           <KpiTile
             data-testid="wm-kpi-compliance"
             label="Conformité maintenance"
-            value={maintenanceComplianceTotal > 0 ? `${complianceRate.toFixed(0)}%` : "N/A"}
+            value={complianceError ? "Indisponible" : maintenanceComplianceTotal > 0 ? `${complianceRate.toFixed(0)}%` : "N/A"}
             subValue={
-              maintenanceComplianceTotal === 0
+              complianceError
+                ? "Réessayez dans un instant"
+                : maintenanceComplianceTotal === 0
                 ? "Aucun entretien programmé"
                 : overdueMaintenance > 0
                   ? `${overdueMaintenance} en retard sur ${maintenanceComplianceTotal}`
@@ -369,7 +371,7 @@ export default function WorkshopManagerDashboard() {
                       <span className="text-[11px] text-muted-foreground block">Échéances kilométriques dépassées</span>
                     </div>
                     <span className="text-xl font-black text-warning-text dark:text-warning-text tabular-nums">
-                      {overdueMaintenance}
+                      {complianceError ? "—" : overdueMaintenance}
                     </span>
                   </div>
                 </div>
