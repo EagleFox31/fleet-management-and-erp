@@ -2796,3 +2796,24 @@ soumission sans doublon.
   - campagnes : tsc 0, check:tests 0, unitaires verts (hors `db-pool-options`, échec local connu, vert en CI). Aucun fichier serveur modifié.
 - **RAIDER** : R : un helper générique pour les trois écrans ; D : ré-export à signature identique, aucun `data-testid` retiré. Ne s'appliquent pas : A, I, Retroactive (client seul, lecture seule).
 - **Reste / risques** : le reste du tableau de bord secrétaire (factures, documents, CPC, statistiques par client) traité dans la PR suivante, empilée sur #607.
+
+## 2026-11-09T16:27:55+01:00 — Opérations : carburant estimé nommé comme tel, onglet Destinations lu sur la liste servie, clients sans faux zéro
+
+- **Statut** : fait (PR brouillon, lot T2 du chantier « CA réel »)
+- **Quoi** :
+  - serveur : `/api/operations/stats/by-client` et `/stats/by-destination` servent l'alias exact `estimatedFuelCost` (somme des carburants estimés). `totalRevenue`, `margin` et `marginPercentage` restent servis une version, marqués dépréciés. L'alias est masqué hors lecteurs du budget (Q19) comme les anciens noms ;
+  - onglet Destinations : le composant attendait un objet indexé, alors que le serveur sert une liste. Les cartes s'appelaient « 0 », « 1 » ; « Coût » lisait `totalCost` (jamais servi) et affichait N/A ; « Marge » valait NaN, affichée « N/A » en rouge. Réécrit sur la liste servie : vraies destinations, « Carburant réel » et « Carburant estimé » (ligne masquée si null), aucune marge. Encart d'erreur ; une réponse qui n'est pas une liste est une erreur ;
+  - onglet Clients : la liste et les statistiques passent par `listQueryView`. En échec : encart lisible au lieu de « Aucun client pour ce filtre » et des compteurs à 0. Statistiques illisibles : « Indisponible » (suppression de `EMPTY_CLIENT_STATS`). Colonne Finance : « Carburant estimé » et « Carburant réel », sans CA, Marge ni Bénéfice ;
+  - types client (`operationsService.ts`) alignés sur la réponse réelle.
+- **Comment tester (QA)** :
+  - `tests/unit/client/destinations-chart-render.test.ts` (6 cas, rendu serveur) : rouge 6/6 sur l'ancien composant (253c9a3a), vert après ;
+  - `tests/unit/client/operations-fuel-estimate-guard.test.ts` (6 cas, garde de source) : rouge 6/6 sur les fichiers de 253c9a3a, vert après ;
+  - `tests/contract/operations-budget-scope.contract.test.ts` : `estimatedFuelCost` null pour le technicien, égal au montant pour la logistique, `totalRevenue` toujours servi ;
+  - cliquet de palette abaissé (clients-panel 43 → 41, destinations-chart retiré : 0) ; contraste via `text-primary-text` ;
+  - campagnes : tsc 0, check:tests 0, unitaires verts (hors `db-pool-options`, échec local connu).
+- **Pourquoi** : décision du 2026-11-09, le carburant estimé n'est pas un chiffre d'affaires. Une marge qui en est tirée donne une rentabilité fausse, et un zéro affiché pendant une panne passe pour une vraie valeur.
+- **RAIDER** :
+  - D : contrats API rétrocompatibles (alias ajouté, anciens noms servis une version) ; `routes.ts` non touché ;
+  - R : helpers de vue existants (`listQueryView`, `parseStatNumber`, `InlineQueryError`).
+  - Ne s'appliquent pas : I, Retroactive (aucune écriture ni schéma).
+- **Reste / risques** : retirer `totalRevenue`, `margin` et `marginPercentage` à la version suivante. Le vrai CA (factures HT) arrive avec les lots A+B+C+F.

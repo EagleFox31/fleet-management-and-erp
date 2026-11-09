@@ -91,7 +91,7 @@ export function DestinationsChart({ data, error, isFetching = false, onRetry }: 
               <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                    <MapPin className="h-4 w-4 text-primary" />
+                    <MapPin className="h-4 w-4 text-primary-text" />
                   </div>
                   <div className="min-w-0">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
@@ -103,7 +103,7 @@ export function DestinationsChart({ data, error, isFetching = false, onRetry }: 
                   </div>
                 </div>
                 {pct != null && (
-                  <span className="ml-2 shrink-0 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
+                  <span className="ml-2 shrink-0 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary-text">
                     {pct.toFixed(1)}%
                   </span>
                 )}

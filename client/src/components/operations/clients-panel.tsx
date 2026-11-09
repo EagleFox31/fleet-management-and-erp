@@ -13,6 +13,10 @@ import { cn, formatNumber, formatPrice } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { exportsService } from "@/services/exportsService";
 import { operationsService, type ClientSummary } from "@/services/operationsService";
+import { listQueryView, readyData } from "@/lib/query-view";
+import { parseStatNumber } from "@/lib/tire-statistics-view";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { useToast } from "@/hooks/use-toast";
 import {
   CardShell,
@@ -89,14 +93,11 @@ const EMPTY_CLIENT_FORM: ClientFormValues = {
   notes: "",
 };
 
-const EMPTY_CLIENT_STATS: Omit<ClientSummary, "clientName"> = {
-  totalMissions: 0,
-  totalFuelConsumed: 0,
-  totalCost: 0,
-  totalRevenue: 0,
-  margin: 0,
-  marginPercentage: 0,
-};
+/** Valeur d'une statistique servie, « Indisponible » si elle est absente ou illisible (jamais 0). */
+function statText(value: unknown, format: (n: number) => string): string {
+  const n = parseStatNumber(value);
+  return n == null ? UNAVAILABLE : format(n);
+}
 
 function normalizeNullable(value: string): string | null {
   const normalized = value.trim();
@@ -165,24 +166,30 @@ export function ClientsPanel() {
   } as const;
 
   const clientsQueryKey = canManageClients ? "/api/clients/all" : "/api/clients";
-  const { data: clients = [], isLoading: isClientsLoading } = useQuery<DbClient[]>({
+  // Lectures gardées entières : un échec affiche un encart ou « Indisponible », jamais « aucun client » ni 0.
+  const clientsQuery = useQuery<unknown>({
     queryKey: [clientsQueryKey],
     ...liveQueryConfig,
   });
+  const clientsView = listQueryView<DbClient>(clientsQuery);
+  const clients = readyData(clientsView, [] as DbClient[]);
+  const isClientsLoading = clientsView.kind === "loading";
+  const countLabel = (count: number) => (clientsView.kind === "ready" ? ` (${count})` : "");
 
-  const { data: statsByClient = [], isFetching: isStatsFetching } = useQuery<ClientSummary[]>({
+  const statsQuery = useQuery<unknown>({
     queryKey: ["/api/operations/stats/by-client"],
     queryFn: () => operationsService.getStatsByClient(),
     ...liveQueryConfig,
   });
+  const statsView = listQueryView<ClientSummary>(statsQuery);
 
   const statsByClientName = useMemo(() => {
     const statsMap = new Map<string, ClientSummary>();
-    for (const item of statsByClient) {
+    for (const item of readyData(statsView, [] as ClientSummary[])) {
       statsMap.set(normalizeClientKey(item.clientName), item);
     }
     return statsMap;
-  }, [statsByClient]);
+  }, [statsQuery.data]);
 
   const getStatsForClient = (client: DbClient) => {
     return statsByClientName.get(normalizeClientKey(client.name));
@@ -461,20 +468,19 @@ export function ClientsPanel() {
       header: "Performance",
       widthClassName: "w-[170px]",
       cell: (row) => {
-        const stats = getStatsForClient(row);
-        const data = stats ?? EMPTY_CLIENT_STATS;
-
-        if (!stats && isStatsFetching) {
+        if (statsView.kind === "loading") {
           return <Skeleton className="h-4 w-28" />;
         }
+        // Statistiques en échec ou client absent de la réponse : inconnu, jamais 0.
+        const stats = getStatsForClient(row);
 
         return (
-          <div className="space-y-1 text-xs">
+          <div className="space-y-1 text-xs" data-testid={`client-${row.id}-performance`}>
             <p className="text-gray-500">
-              Missions: <span className="font-semibold text-gray-800">{formatNumber(data.totalMissions)}</span>
+              Missions: <span className="font-semibold text-gray-800">{statText(stats?.totalMissions, formatNumber)}</span>
             </p>
             <p className="text-gray-500">
-              Carburant: <span className="font-semibold text-gray-800">{formatNumber(data.totalFuelConsumed)} L</span>
+              Carburant: <span className="font-semibold text-gray-800">{statText(stats?.totalFuelConsumed, (n) => `${formatNumber(n)} L`)}</span>
             </p>
           </div>
         );
@@ -485,23 +491,22 @@ export function ClientsPanel() {
       header: "Finance",
       widthClassName: "w-[220px]",
       cell: (row) => {
-        const stats = getStatsForClient(row);
-        const data = stats ?? EMPTY_CLIENT_STATS;
-
-        if (!stats && isStatsFetching) {
+        if (statsView.kind === "loading") {
           return <Skeleton className="h-4 w-32" />;
         }
+        const stats = getStatsForClient(row);
 
+        // Pas de chiffre d'affaires ni de marge ici : `estimatedFuelCost` est un carburant estimé
+        // (décision du 2026-11-09). Masqué (null) hors lecteurs du budget (Q19) : la ligne disparaît.
         return (
-          <div className="space-y-1 text-xs">
+          <div className="space-y-1 text-xs" data-testid={`client-${row.id}-fuel-costs`}>
+            {stats?.estimatedFuelCost !== null && (
+              <p className="text-gray-500">
+                Carburant estimé: <span className="font-semibold text-gray-800">{statText(stats?.estimatedFuelCost, formatPrice)}</span>
+              </p>
+            )}
             <p className="text-gray-500">
-              CA: <span className="font-semibold text-green-600">{formatPrice(data.totalRevenue)}</span>
-            </p>
-            <p className="text-gray-500">
-              Marge: <span className="font-semibold text-violet-600">{data.marginPercentage.toFixed(1)}%</span>
-            </p>
-            <p className="text-gray-500">
-              Bénéfice: <span className="font-semibold text-gray-900">{formatPrice(data.margin)}</span>
+              Carburant réel: <span className="font-semibold text-gray-800">{statText(stats?.totalFuelCost, formatPrice)}</span>
             </p>
           </div>
         );
@@ -671,7 +676,7 @@ export function ClientsPanel() {
               className={statusFilter === "active" ? "bg-green-600 hover:bg-green-700" : "bg-white"}
               onClick={() => setStatusFilter("active")}
             >
-              Actifs ({activeClientsCount})
+              Actifs{countLabel(activeClientsCount)}
             </Button>
 
             {canManageClients && (
@@ -682,7 +687,7 @@ export function ClientsPanel() {
                   className={statusFilter === "archived" ? "bg-amber-600 hover:bg-amber-700" : "bg-white"}
                   onClick={() => setStatusFilter("archived")}
                 >
-                  Archivés ({archivedClientsCount})
+                  Archivés{countLabel(archivedClientsCount)}
                 </Button>
                 <Button
                   variant={statusFilter === "all" ? "default" : "outline"}
@@ -690,7 +695,7 @@ export function ClientsPanel() {
                   className={statusFilter === "all" ? "bg-slate-700 hover:bg-slate-800" : "bg-white"}
                   onClick={() => setStatusFilter("all")}
                 >
-                  Tous ({totalClientsCount})
+                  Tous{countLabel(totalClientsCount)}
                 </Button>
               </>
             )}
@@ -708,6 +713,15 @@ export function ClientsPanel() {
         </div>
       </CardShell>
 
+      {clientsView.kind === "error" ? (
+        <InlineQueryError
+          error={clientsView.error}
+          fallback="Liste des clients indisponible."
+          onRetry={() => clientsQuery.refetch()}
+          isRetrying={clientsView.isRetrying}
+          data-testid="clients-list-error"
+        />
+      ) : (
       <PremiumDataTable
         data-help-target="clients-list"
         columns={columns}
@@ -733,6 +747,16 @@ export function ClientsPanel() {
           </div>
         }
       />
+      )}
+      {statsView.kind === "error" && (
+        <InlineQueryError
+          error={statsView.error}
+          fallback="Statistiques des clients indisponibles."
+          onRetry={() => statsQuery.refetch()}
+          isRetrying={statsView.isRetrying}
+          data-testid="clients-stats-error"
+        />
+      )}
 
       <Dialog open={isDialogOpen} onOpenChange={handleDialogOpenChange}>
         <DialogContent className="sm:max-w-[980px] p-0 overflow-hidden rounded-2xl border border-emerald-100/70 shadow-2xl">
