@@ -2744,6 +2744,13 @@ soumission sans doublon.
 - **RAIDER** : R : `InlineQueryError`, `AppError`, `storageLog` existants ; D : réponses de succès inchangées ; failure memory : leçon du 2026-11-07 appliquée. Ne s'appliquent pas : A, I, Retroactive (aucune donnée ni schéma touchés).
 - **Reste** : ~34 cas gelés ; `getUsersByRole` (notification de renouvellement) à traiter avec son appelant en meilleur effort.
 
+## 2026-11-09T16:05:00+01:00 — Carte carburant et pleins : une lecture en échec lit Indisponible, jamais 0
+- **Statut** : fait (PR brouillon)
+- **Quoi** : `useFuelCard().balance.failed` (data indéfinie et erreur) ; `dashboard.tsx`, `logistics/dashboard.tsx` (en-tête et onglet Carburant), `client/dashboard.tsx`, `fuel/index.tsx` (solde, prix moyen, « Solde actuel » de la recharge, et pleins/litres/coût issus de `/api/fuel-records`), `fuel-statistics.tsx` (litres, coût, prix moyen, nb de pleins) affichent « Indisponible » avec une sous-ligne `userMessageOf`. Aucune somme partielle.
+- **Comment tester (QA)** : `tests/unit/client/fuel-card-render-error-states.test.ts` (12 tests, rendu `react-dom/server`, erreur et témoin 12 345 par écran) + regex dans `money-stock-reads-error-states.test.ts`. Rouge avec chaque garde forcé à `false` (5 écrans), vert restauré.
+- **RAIDER** : D : contrats et données saines inchangés, aucune dépendance. Ne s'appliquent pas : A, I, Retroactive.
+- **Reste / risques** : `logistics/dashboard.tsx` « Volume consommé » (`/api/fuel-records/statistics`) et `client/dashboard.tsx` « Volume carburant » affichent encore 0 L sur échec de cette requête (hors liste du brief).
+
 ## 2026-11-09T15:19:00+01:00 — Rapports PDF : véhicules lus en entier, carburant sans repli à 0, logs migrés
 
 - **Statut** : fait (PR brouillon)
@@ -2789,6 +2796,19 @@ soumission sans doublon.
   - campagnes : tsc 0, check:tests 0, unitaires verts (hors `db-pool-options`, échec local connu, vert en CI). Aucun fichier serveur modifié.
 - **RAIDER** : R : un helper générique pour les trois écrans ; D : ré-export à signature identique, aucun `data-testid` retiré. Ne s'appliquent pas : A, I, Retroactive (client seul, lecture seule).
 - **Reste / risques** : le reste du tableau de bord secrétaire (factures, documents, CPC, statistiques par client) traité dans la PR suivante, empilée sur #607.
+
+## 2026-11-09T16:04:00+01:00 — Ordres de travail : export PDF et alertes d'échéance lus en entier (cliquet 7 → 5)
+
+- **Statut** : fait (PR brouillon)
+- **Quoi** :
+  - `maintenance/work-orders.tsx` : la requête `/api/work-orders` des 300 derniers OT (relue toutes les 7 s) ne servait qu'à l'export PDF. Elle est supprimée : l'export lit toutes les pages au clic (`fetchAllWorkOrders`). « Export réussi » n'est annoncé qu'après une lecture complète ; une liste vide ne produit pas de PDF (« Aucun ordre de travail à exporter ») ; un refus s'affiche par `userMessageOf` et se journalise par `clientLogger.error(…, reportErrorContext(error))`. Double clic bloqué par une ref ;
+  - `maintenance/date-based-alerts.tsx` : « cette alerte a déjà son OT » se déduisait des 300 derniers OT. Un OT plus ancien était ignoré, l'alerte redevenait « à faire » et la génération en masse pouvait créer un doublon. Lecture complète (`["/api/work-orders", "all"]`, même préfixe pour les invalidations). Tant qu'elle n'a pas réussi, les boutons de création sont désactivés et un `InlineQueryError` propose « Réessayer » ;
+  - `capped-list-reads-hygiene` : 2 fichiers retirés de la liste gelée (7 → 5 cas).
+- **Comment tester (QA)** :
+  - `tests/unit/client/work-orders-full-reads.test.ts` : 4 cas de branchement sur l'export (rouges avant) ; rendu `react-dom/server` des alertes avec la lecture des OT en erreur : boutons « Créer OT atelier » et « Générer les OT atelier » désactivés, encart d'erreur présent (rouge sur l'ancien code : bouton actif) ; témoin sain ; OT existant reconnu ;
+  - campagnes : unitaires 327 fichiers / 3395 tests ; tsc 0 ; check:tests 0. Aucun code serveur touché.
+- **RAIDER** : D : contrat d'API inchangé ; les deux écrans ne concluent plus sur une liste partielle.
+- **Reste / risques** : 5 lectures plafonnées gelées (inventaire, interventions — 1000 demandés, 500 rendus —, pièces de l'OT, dialogue de montage ×2). La liste de véhicules des alertes (`["/api/vehicles"]`, sans `limit`) ne rend que 10 véhicules (`VEHICLE_LIST_DEFAULT_LIMIT = 10`) : alertes calculées sur 10 véhicules seulement, hors du cliquet (pas de `limit` en dur) ; signalé, lot à part.
 
 ## 2026-11-09T16:18:17+01:00 — Secrétariat : une lecture en échec n'est plus un zéro ; le carburant estimé n'est plus présenté comme chiffre d'affaires
 
