@@ -8,6 +8,7 @@ import { IDEMPOTENCY_HEADER, partStockKeyScope, sendWithSubmissionKey } from "@/
 import { userMessageOf } from "@/lib/api-error";
 import { queryView, readyData } from "@/lib/query-view";
 import { InlineQueryError } from "@/components/ui/inline-query-error";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
@@ -159,9 +160,13 @@ export function PartTable({ onRowClick }: PartTableProps) {
     placeholderData: keepPreviousData,
   });
 
-  const { data: activeRequirements = {} } = useQuery<Record<number, ActiveRequirement>>({
+  const activeRequirementsQuery = useQuery<Record<number, ActiveRequirement>>({
     queryKey: ["/api/part-requirements/active-by-part"],
   });
+  // Échec sans données : « Indisponible » dans la colonne et encart, jamais « - » (aucune demande).
+  const activeRequirementsView = queryView(activeRequirementsQuery);
+  const activeRequirementsFailed = activeRequirementsView.kind === "error";
+  const activeRequirements = readyData(activeRequirementsView, {} as Record<number, ActiveRequirement>);
 
   const partRequirementsQuery = useQuery<PartRequirementDetail[]>({
     queryKey: [`/api/part-requirements/by-part/${selectedPartForDialog}`],
@@ -311,6 +316,9 @@ export function PartTable({ onRowClick }: PartTableProps) {
       id: "requirementStatus",
       header: "Statut demande",
       cell: (part) => {
+        if (activeRequirementsFailed) {
+          return <span className="text-gray-400 text-xs" data-testid={`badge-reappro-unavailable-${part.id}`}>{UNAVAILABLE}</span>;
+        }
         const requirement = activeRequirements[part.id];
         if (!requirement) {
           return <span className="text-gray-300 text-xs select-none">—</span>;
@@ -555,6 +563,16 @@ export function PartTable({ onRowClick }: PartTableProps) {
           )}
         </DialogContent>
       </Dialog>
+
+      {activeRequirementsView.kind === "error" && (
+        <InlineQueryError
+          error={activeRequirementsView.error}
+          fallback="Le statut des demandes de pièce est momentanément indisponible."
+          onRetry={() => void activeRequirementsQuery.refetch()}
+          isRetrying={activeRequirementsView.isRetrying}
+          data-testid="active-requirements-error"
+        />
+      )}
 
       <PremiumDataTable
         columns={columns}

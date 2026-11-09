@@ -163,7 +163,7 @@ export default function WarehouseDashboard() {
   const totalUnitsCount = Number(warehouse.statistics.data?.totalQuantity || 0);
   const lowStockCount = Number(warehouse.statistics.data?.lowStockCount || 0);
   const outOfStockCount = Number(warehouse.statistics.data?.outOfStockCount || 0);
-  const reorderAlertsCount = Number((warehouse.reorderAlerts.data as any)?.totalAlerts || 0);
+  const reorderAlertsCount = Number((warehouse.reorderAlerts.data as any)?.totalAlerts ?? 0);
   const alertParts = (warehouse.reorderAlerts.data as any)?.parts || [];
   const reorderData = warehouse.reorderAlerts.data as any;
   const totalShortage = reorderData?.totalShortage || 0;
@@ -171,6 +171,19 @@ export default function WarehouseDashboard() {
   const otDemandShortage = reorderData?.otDemandShortage || 0;
   const otDemandEstimatedCost = reorderData?.otDemandEstimatedCost || 0;
   const atThreshold = reorderAlertsCount > 0 && totalShortage === 0;
+  // Stock bas ou demandes illisibles : « Indisponible » et encart, jamais « Aucune alerte ».
+  const reorderFailed = warehouse.reorderAlerts.failed;
+  const reorderView = warehouse.reorderAlerts.view;
+  const reorderLabel = (text: string | number) => (reorderFailed ? UNAVAILABLE : text);
+  const reorderAlertsError = reorderView.kind === "error" ? (
+    <InlineQueryError
+      error={reorderView.error}
+      fallback="Les alertes de réapprovisionnement sont momentanément indisponibles."
+      onRetry={() => void warehouse.reorderAlerts.refetch()}
+      isRetrying={reorderView.isRetrying}
+      data-testid="warehouse-reorder-error"
+    />
+  ) : null;
 
   return (
     <div className="space-y-5">
@@ -239,8 +252,8 @@ export default function WarehouseDashboard() {
             <KpiTile
               data-testid="warehouse-kpi-alerts"
               label="Alertes réappro"
-              value={reorderAlertsCount}
-              subValue={`${totalShortage} unités manquantes`}
+              value={reorderLabel(reorderAlertsCount)}
+              subValue={reorderFailed ? userMessageOf(warehouse.reorderAlerts.error, "Les alertes de réapprovisionnement sont momentanément indisponibles.") : `${totalShortage} unités manquantes`}
               icon={<AlertTriangle className="h-4 w-4" />}
               iconWrapperClassName={reorderAlertsCount > 0 ? "bg-red-50 text-red-600" : "bg-gray-100 text-gray-400"}
               valueClassName={reorderAlertsCount > 0 ? "text-red-600" : undefined}
@@ -271,7 +284,8 @@ export default function WarehouseDashboard() {
 
         {/* ── Stock ── */}
         <TabsContent value="stock" className="space-y-4">
-          {!warehouse.reorderAlerts.isLoading && alertParts.length === 0 && (
+          {reorderAlertsError}
+          {!warehouse.reorderAlerts.isLoading && !reorderFailed && alertParts.length === 0 && (
             <AlertBannerCard
               variant="info"
               icon={<Package className="h-4 w-4" />}
@@ -351,22 +365,22 @@ export default function WarehouseDashboard() {
                   <div className="flex items-center justify-between py-1.5 border-b border-gray-50">
                     <span className="text-sm text-gray-500">Coût estimé</span>
                     <span className={`text-sm font-bold ${atThreshold ? "text-amber-600" : estimatedCost > 0 ? "text-red-600" : "text-green-600"}`}>
-                      {atThreshold ? "Au seuil" : formatPrice(estimatedCost)}
+                      {reorderFailed ? UNAVAILABLE : atThreshold ? "Au seuil" : formatPrice(estimatedCost)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between py-1.5 border-b border-gray-50">
                     <span className="text-sm text-gray-500">Unités à commander</span>
-                    <span className="text-sm font-bold text-gray-800">{totalShortage}</span>
+                    <span className="text-sm font-bold text-gray-800">{reorderLabel(totalShortage)}</span>
                   </div>
                   <div className="flex items-center justify-between py-1.5 border-b border-gray-50">
                     <span className="text-sm text-gray-500">Dont besoins OT</span>
                     <span className={`text-sm font-bold ${otDemandShortage > 0 ? "text-orange-600" : "text-gray-400"}`}>
-                      {otDemandShortage > 0 ? `${otDemandShortage} (${formatPrice(otDemandEstimatedCost)})` : "0"}
+                      {reorderLabel(otDemandShortage > 0 ? `${otDemandShortage} (${formatPrice(otDemandEstimatedCost)})` : "0")}
                     </span>
                   </div>
                   <div className="flex items-center justify-between py-1.5">
                     <span className="text-sm text-gray-500">Alertes actives</span>
-                    <span className={`text-sm font-bold ${reorderAlertsCount > 0 ? "text-orange-600" : "text-green-600"}`}>{reorderAlertsCount}</span>
+                    <span className={`text-sm font-bold ${reorderAlertsCount > 0 ? "text-orange-600" : "text-green-600"}`}>{reorderLabel(reorderAlertsCount)}</span>
                   </div>
                   {atThreshold && (
                     <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-2 py-1.5 mt-1">
@@ -603,6 +617,7 @@ export default function WarehouseDashboard() {
                 <p className="text-xs text-gray-400 mb-3">Manques les plus critiques</p>
                 <div className="h-[220px]">
                   {warehouse.reorderAlerts.isLoading ? <Skeleton className="h-full w-full" />
+                    : reorderFailed ? (<div className="h-full flex items-center justify-center text-xs text-gray-400">{UNAVAILABLE}</div>)
                     : shortageTopData.length > 0 ? (
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={shortageTopData} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
@@ -624,10 +639,12 @@ export default function WarehouseDashboard() {
           <CardShell>
             <div className="px-5 py-4">
               <p className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">
-                Alertes de Réapprovisionnement ({reorderAlertsCount})
+                Alertes de Réapprovisionnement {!reorderFailed && `(${reorderAlertsCount})`}
               </p>
               {warehouse.reorderAlerts.isLoading ? (
                 <div className="space-y-2"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /></div>
+              ) : reorderFailed ? (
+                reorderAlertsError
               ) : alertParts.length > 0 ? (
                 <div className="space-y-2">
                   {alertParts.slice(0, 10).map((part: any) => (
