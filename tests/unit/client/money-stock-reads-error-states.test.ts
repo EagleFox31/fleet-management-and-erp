@@ -132,7 +132,12 @@ describe("rapport PDF des coûts de maintenance", () => {
     expect(report).not.toMatch(/realTotalCost \+= order\.estimatedCost/);
   });
 
-  it("ordres de travail illisibles : pas de rapport à « 0 intervention »", () => {
-    expect(report).toMatch(/if \(!workOrdersResponse\.ok\) \{\s*throw new Error/);
+  it("ordres de travail : tous lus page par page, pas les 50 premiers d'un appel sans limite", () => {
+    expect(report).toMatch(/const workOrders = await fetchAllWorkOrders\(\)/);
+    expect(report).not.toMatch(/fetch\(['"`]\/api\/work-orders['"`]\)/);
+  });
+
+  it("un refus de rapport garde son message lisible", () => {
+    expect(report).toMatch(/if \(error instanceof ReportRefusedError\) throw error;/);
   });
 });

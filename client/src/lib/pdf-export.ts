@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import headerImage from '@assets/TAY-header-final.png';
+import { fetchAllWorkOrders, ReportRefusedError } from '@/lib/fetch-all-work-orders';
 
 // Configuration de l'en-tête officiel
 const COMPANY_INFO = {
@@ -601,14 +602,9 @@ export async function exportVehicleUsageReport(startDate: Date, endDate: Date) {
 
 export async function exportMaintenanceCostReport(startDate: Date, endDate: Date) {
   try {
-    // Récupérer les ordres de travail
-    const workOrdersResponse = await fetch('/api/work-orders');
-    // Échec : pas de rapport plutôt qu'un rapport à « 0 intervention, 0 FCFA ».
-    if (!workOrdersResponse.ok) {
-      throw new Error(`Erreur API ordres de travail: ${workOrdersResponse.status}`);
-    }
-    const workOrdersData = await workOrdersResponse.json();
-    const workOrders = workOrdersData.workOrders || workOrdersData || [];
+    // Tous les ordres de travail, page par page : échec, liste incomplète ou volume au-delà
+    // de la borne refusent le rapport plutôt qu'un rapport sur une partie des OT.
+    const workOrders = await fetchAllWorkOrders();
 
     // Récupérer les véhicules
     const vehiclesResponse = await fetch('/api/vehicles?limit=1000');
@@ -738,6 +734,7 @@ export async function exportMaintenanceCostReport(startDate: Date, endDate: Date
     return true;
   } catch (error) {
     console.error('Erreur lors de la génération du rapport:', error);
+    if (error instanceof ReportRefusedError) throw error;
     throw new Error('Erreur lors de la génération du rapport des coûts de maintenance');
   }
 }
