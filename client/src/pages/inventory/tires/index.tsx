@@ -492,6 +492,8 @@ export default function TiresInventoryPage() {
     onSuccess: (result) => {
       clearDraftRotation(); // saisie enregistree: le brouillon n'a plus lieu d'etre
       queryClient.invalidateQueries({ queryKey: ['/api/tire-rotations'] });
+      // Tuile « Rotations ce mois » (couche 3, écran satellite).
+      queryClient.invalidateQueries({ queryKey: ['/api/tires/statistics-advanced'] });
       queryClient.invalidateQueries({ queryKey: ['/api/work-orders'] });
       queryClient.invalidateQueries({ queryKey: ['/api/work-orders/statistics'] });
       setShowRotationModal(false);

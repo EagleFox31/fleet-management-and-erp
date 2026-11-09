@@ -32,10 +32,26 @@ describe("page pneus : statistiques lues par le contrat", () => {
     expect(src).not.toMatch(/interface TireStatistics\b/);
   });
 
-  it("les tuiles chiffrées passent par statText (« Indisponible » si inconnu)", () => {
-    for (const field of ["totalTires", "totalValue", "averageWear", "rotationsThisMonth"]) {
-      expect(src, field).toMatch(new RegExp(`statText\\(statistics\\?\\.${field}\\b`));
+  it("chaque tuile chiffrée passe par statText (« Indisponible » si inconnu)", () => {
+    // Une occurrence par tuile, toutes vues confondues (admin, magasinier, technicien) : une
+    // tuile de plus ou de moins doit mettre ce décompte à jour, une tuile qui contourne
+    // statText le fait échouer.
+    const tiles = { totalTires: 1, totalValue: 3, averageWear: 1, rotationsThisMonth: 2 };
+    for (const [field, count] of Object.entries(tiles)) {
+      const viaStatText = new RegExp(`statText\\(statistics\\?\\.${field}\\b`, "g");
+      expect(src.match(viaStatText) ?? [], field).toHaveLength(count);
     }
+    const fields = Object.keys(tiles).join("|");
+    expect(src).not.toMatch(new RegExp(`String\\(\\s*statistics\\?\\.(${fields})\\b`));
+    expect(src).not.toMatch(new RegExp(`\\{\\s*statistics\\?\\.(${fields})\\s*\\}`));
+    expect(src).not.toMatch(new RegExp(`\\$\\{\\s*statistics\\?\\.(${fields})\\b`));
+  });
+
+  it("créer une rotation rafraîchit la tuile « Rotations ce mois » (couche 3)", () => {
+    const start = src.indexOf("const createRotationMutation = useMutation(");
+    expect(start, "createRotationMutation introuvable").toBeGreaterThan(-1);
+    const onSuccess = src.slice(src.indexOf("onSuccess", start), src.indexOf("onError", start));
+    expect(onSuccess).toMatch(/invalidateQueries\(\{ queryKey: \['\/api\/tires\/statistics-advanced'\] \}\)/);
   });
 
   it("sans inspection active : « Aucune inspection », pas 0 mm", () => {

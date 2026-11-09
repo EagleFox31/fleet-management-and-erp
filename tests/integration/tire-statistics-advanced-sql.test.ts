@@ -260,10 +260,13 @@ describe("statistiques avancées des pneus en une requête", { timeout: 120000 }
     expect(typeof stats.totalValue).toBe("string");
   });
 
-  it("rotationsThisMonth : rotations du mois civil en cours à Africa/Douala, pas celles du mois précédent", async () => {
+  it("rotationsThisMonth : mois civil en cours à Africa/Douala, ni le mois précédent ni le 1er du suivant", async () => {
     const today = isoDateInZone(new Date());
     const firstOfMonth = `${today.slice(0, 8)}01`;
     const lastOfPreviousMonth = new Date(Date.parse(`${firstOfMonth}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+    // Borne haute de l'intervalle semi-ouvert : le 1er du mois suivant est exclu.
+    const [year, month] = firstOfMonth.split("-").map(Number);
+    const firstOfNextMonth = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
 
     const before = (await tiresService.getTireStatisticsAdvanced()).rotationsThisMonth;
     const added = await db
@@ -271,6 +274,7 @@ describe("statistiques avancées des pneus en une requête", { timeout: 120000 }
       .values([
         { vehicleId: ids.vehicleIds[2], rotationDate: firstOfMonth, rotationMileage: 50500, rotationType: "front_to_back" },
         { vehicleId: ids.vehicleIds[2], rotationDate: lastOfPreviousMonth, rotationMileage: 50400, rotationType: "front_to_back" },
+        { vehicleId: ids.vehicleIds[2], rotationDate: firstOfNextMonth, rotationMileage: 50600, rotationType: "front_to_back" },
       ])
       .returning();
     rotationIds.push(...added.map((r) => r.id));
