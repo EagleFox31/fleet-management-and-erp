@@ -35,6 +35,8 @@ import { HeaderCard, KpiGrid, KpiTile, CardShell, SectionLabel, PremiumTabsNav }
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { formatPrice } from "@/lib/utils";
 import { useWarehouse } from "@/hooks/useWarehouse";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
+import { userMessageOf } from "@/lib/api-error";
 import { useAuth } from "@/hooks/useAuth";
 import { canManageDrivers } from "@shared/constants/roles";
 
@@ -66,9 +68,13 @@ export default function WorkshopManagerDashboard() {
 
   const lowStockCount = Number(warehouse.statistics.data?.lowStockCount || 0);
   const outOfStockCount = Number(warehouse.statistics.data?.outOfStockCount || 0);
-  const reorderAlertsCount = Number(warehouse.reorderAlerts.data?.totalAlerts || 0);
-  const stockValue = Number(warehouse.inventoryValue.data?.totalValue || 0);
-  const totalStockParts = Number(warehouse.inventoryValue.data?.totalParts || 0);
+  const reorderAlertsCount = Number(warehouse.reorderAlerts.data?.totalAlerts ?? 0);
+  const stockValue = Number(warehouse.inventoryValue.data?.totalValue ?? 0);
+  const totalStockParts = Number(warehouse.inventoryValue.data?.totalParts ?? 0);
+  const stockValueFailed = warehouse.inventoryValue.failed;
+  const reorderFailed = warehouse.reorderAlerts.failed;
+  /** « x/total » seulement si le total des références est connu. */
+  const ofStockParts = (count: number) => (stockValueFailed ? String(count) : `${count}/${totalStockParts}`);
   const stockRiskCount = lowStockCount + outOfStockCount;
 
   const cpcTotal = Number(cpcStats?.total || 0);
@@ -185,7 +191,7 @@ export default function WorkshopManagerDashboard() {
           />
           <KpiTile
             label="Alertes stock magasin"
-            value={reorderAlertsCount}
+            value={reorderFailed ? UNAVAILABLE : reorderAlertsCount}
             subValue={`${stockRiskCount} références sous seuil`}
             icon={<AlertTriangle className="h-4 w-4" />}
             iconWrapperClassName={reorderAlertsCount > 0 ? "bg-warning/10 text-warning-text" : "bg-gray-100 text-gray-400"}
@@ -401,8 +407,12 @@ export default function WorkshopManagerDashboard() {
                 data-testid="wm-kpi-stock-value"
                 label="Valeur stock pièces"
                 onClick={() => setLocation("/inventory")}
-                value={formatPrice(stockValue)}
-                subValue={`${totalStockParts} références · ${stockRiskCount} sous seuil`}
+                value={stockValueFailed ? UNAVAILABLE : formatPrice(stockValue)}
+                subValue={
+                  stockValueFailed
+                    ? userMessageOf(warehouse.inventoryValue.error, "La valeur du stock est momentanément indisponible.")
+                    : `${totalStockParts} références · ${stockRiskCount} sous seuil`
+                }
                 icon={<Package className="h-4 w-4" />}
                 iconWrapperClassName="bg-purple-50 text-purple-600"
               />
@@ -414,8 +424,12 @@ export default function WorkshopManagerDashboard() {
                 data-testid="wm-kpi-reorder"
                 label="Alertes réappro magasin"
                 onClick={() => setLocation("/inventory")}
-                value={`${reorderAlertsCount}/${totalStockParts}`}
-                subValue={`Coût estimé ${formatPrice(warehouse.reorderAlerts.data?.estimatedCost || 0)}`}
+                value={reorderFailed ? UNAVAILABLE : ofStockParts(reorderAlertsCount)}
+                subValue={
+                  reorderFailed
+                    ? userMessageOf(warehouse.reorderAlerts.error, "Les alertes de réapprovisionnement sont momentanément indisponibles.")
+                    : `Coût estimé ${formatPrice(warehouse.reorderAlerts.data?.estimatedCost ?? 0)}`
+                }
                 icon={<AlertTriangle className="h-4 w-4" />}
                 iconWrapperClassName={reorderAlertsCount > 0 ? "bg-orange-50 text-orange-600" : "bg-gray-100 text-gray-400"}
               />
@@ -427,7 +441,7 @@ export default function WorkshopManagerDashboard() {
                 data-testid="wm-kpi-lowstock"
                 label="Stock bas / épuisé"
                 onClick={() => setLocation("/inventory")}
-                value={`${stockRiskCount}/${totalStockParts}`}
+                value={ofStockParts(stockRiskCount)}
                 subValue={`${lowStockCount} bas · ${outOfStockCount} épuisés`}
                 icon={<Package className="h-4 w-4" />}
                 iconWrapperClassName={stockRiskCount > 0 ? "bg-destructive/10 text-destructive-text" : "bg-gray-100 text-gray-400"}

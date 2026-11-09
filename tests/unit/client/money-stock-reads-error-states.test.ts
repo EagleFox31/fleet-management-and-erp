@@ -54,13 +54,25 @@ const SCREENS: Array<{ path: string; queryKeys: string[]; shows: RegExp[] }> = [
   },
   {
     path: "client/src/components/inventory/part-table.tsx",
-    queryKeys: ["`/api/part-requirements/by-part/"],
-    shows: [/data-testid="part-requirements-error"/],
+    queryKeys: ["`/api/part-requirements/by-part/", '"/api/part-requirements/active-by-part"'],
+    shows: [/data-testid="part-requirements-error"/, /data-testid="active-requirements-error"/, /if \(activeRequirementsFailed\) \{\s*return <span[^>]*>\{UNAVAILABLE\}/],
+  },
+  {
+    path: "client/src/pages/inventory/[id].tsx",
+    queryKeys: ["`/api/parts/${partId}/stock-history`"],
+    shows: [
+      /stockHistoryView\.kind === "error" \? \(\s*stockHistoryError\("stock-history-recent-error"\)\s*\) : stockHistory\.length === 0/,
+      /stockHistoryView\.kind === "error" \? \(\s*stockHistoryError\("stock-history-error"\)\s*\) : stockHistory\.length === 0/,
+    ],
   },
   {
     path: "client/src/pages/maintenance/work-orders/[id].tsx",
-    queryKeys: ["`/api/work-orders/${workOrderId}/parts`", "`/api/part-requirements/by-part/"],
-    shows: [/data-testid="parts-used-error"/, /data-testid="existing-requests-error"/],
+    queryKeys: [
+      "`/api/work-orders/${workOrderId}/parts`",
+      "`/api/part-requirements/by-part/",
+      "`/api/work-orders/${workOrderId}/pending-part-requirements`",
+    ],
+    shows: [/data-testid="parts-used-error"/, /data-testid="existing-requests-error"/, /data-testid="pending-requirements-error"/],
   },
 ];
 
@@ -113,6 +125,11 @@ describe("fiche OT : pièces non lues", () => {
     expect(src).toMatch(/parts:\s*partsUsedView\.kind === "ready" \? partsUsed : undefined/);
   });
 
+  it("onglet Pièces : pas de compte tant que pièces utilisées et demandes en attente ne sont pas lues", () => {
+    expect(src).toMatch(/const partsCountKnown = partsUsedView\.kind === "ready" && pendingPartRequirementsView\.kind === "ready"/);
+    expect(src).toMatch(/label: partsCountKnown && displayedPartsCount > 0 \?/);
+  });
+
   it("l'impression est refusée tant que les pièces ne sont pas lues", () => {
     const print = src.slice(src.indexOf("const handlePrintWorkOrder"), src.indexOf("const doc = new jsPDF"));
     expect(print).toMatch(/partsUsedView\.kind !== "ready"[\s\S]*return;/);
@@ -132,7 +149,70 @@ describe("rapport PDF des coûts de maintenance", () => {
     expect(report).not.toMatch(/realTotalCost \+= order\.estimatedCost/);
   });
 
-  it("ordres de travail illisibles : pas de rapport à « 0 intervention »", () => {
-    expect(report).toMatch(/if \(!workOrdersResponse\.ok\) \{\s*throw new Error/);
+  it("ordres de travail : tous lus page par page, pas les 50 premiers d'un appel sans limite", () => {
+    expect(report).toMatch(/const workOrders = await fetchAllWorkOrders\(\)/);
+    expect(report).not.toMatch(/fetch\(['"`]\/api\/work-orders['"`]\)/);
+  });
+
+  it("véhicules ou utilisateurs illisibles : refus, pas des lignes « N/A »", () => {
+    expect(report).toMatch(/if \(!Array\.isArray\(vehiclesData\?\.vehicles\)\) \{\s*throw new ReportRefusedError/);
+    expect(report).toMatch(/if \(!Array\.isArray\(users\)\) \{\s*throw new ReportRefusedError/);
+  });
+
+  it("plus de lecture de /api/parts/used, qui ne nourrissait aucun calcul", () => {
+    expect(report).not.toMatch(/\/api\/parts\/used/);
+  });
+
+  it("un refus de rapport garde son message lisible", () => {
+    expect(report).toMatch(/if \(error instanceof ReportRefusedError\) throw error;/);
+  });
+});
+
+describe("valeur du stock et alertes de réappro : jamais 0 sur une lecture en échec", () => {
+  it("useWarehouse : pas d'alertes calculées sur une seule des deux sources, vue exposée", () => {
+    const src = read("client/src/hooks/useWarehouse.ts");
+    expect(src).toMatch(/const derivedReorderAlerts = reorderSourcesFailed\s*\?\s*undefined/);
+    expect(src).toMatch(/!!partRequirementsQuery\.error && !Array\.isArray\(partRequirementsQuery\.data\)/);
+    expect(src).toMatch(/view: inventoryValueView,\s*failed: inventoryValueView\.kind === "error"/);
+    expect(src).toMatch(/isFetching: reorderAlertsFetching,/);
+    expect(src).toMatch(/view: reorderAlertsView,\s*failed: reorderAlertsView\.kind === "error"/);
+  });
+
+  it("useWarehouse : l'échec de l'agrégat serveur (403) n'affiche pas « Indisponible » pendant que les sources chargent", () => {
+    const src = read("client/src/hooks/useWarehouse.ts");
+    expect(src).toMatch(/const reorderAlertsError = lowStockPartsQuery\.error \|\| partRequirementsQuery\.error;/);
+  });
+
+  const DASHBOARDS = [
+    "client/src/pages/admin/dashboard.tsx",
+    "client/src/pages/dashboard.tsx",
+    "client/src/pages/workshop-manager/dashboard.tsx",
+    "client/src/pages/warehouse/dashboard.tsx",
+  ];
+
+  it.each(DASHBOARDS)("%s : « Indisponible » au lieu de 0", (path) => {
+    const src = read(path);
+    expect(src).not.toMatch(/inventoryValue\.data\?\.total(Value|Parts) \|\| 0/);
+    expect(src).not.toMatch(/reorderAlerts\.data(\s*as any\))?\?\.(totalAlerts|estimatedCost) \|\| 0/);
+    expect(src).toMatch(/warehouse\.reorderAlerts\.failed/);
+    expect(src).toMatch(/UNAVAILABLE/);
+  });
+
+  it.each(DASHBOARDS.filter((p) => !p.includes("warehouse/")))("%s : valeur du stock « Indisponible »", (path) => {
+    expect(read(path)).toMatch(/warehouse\.inventoryValue\.failed/);
+  });
+
+  it("tableau de bord magasin : encart au lieu de « Aucune alerte de réapprovisionnement »", () => {
+    const src = read("client/src/pages/warehouse/dashboard.tsx");
+    expect(src).toMatch(/data-testid="warehouse-reorder-error"/);
+    expect(src).toMatch(/!warehouse\.reorderAlerts\.isLoading && !reorderFailed && alertParts\.length === 0/);
+    expect(src).toMatch(/\) : reorderFailed \? \(\s*reorderAlertsError\s*\) : alertParts\.length > 0/);
+  });
+
+  it("panneau d'alertes : encart, pas « Tout est à jour », si les alertes de stock sont illisibles", () => {
+    const src = read("client/src/components/alerts/alerts-panel.tsx");
+    expect(src).toMatch(/const reorderAlertsView = queryView\(reorderAlertsQuery\)/);
+    expect(src).toMatch(/data-testid="alerts-reorder-error"/);
+    expect(src).toMatch(/emptyState=\{\s*reorderAlertsFailed \?/);
   });
 });

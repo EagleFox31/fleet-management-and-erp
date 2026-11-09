@@ -1,6 +1,7 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { warehouseService } from "@/services/warehouseService";
+import { queryView } from "@/lib/query-view";
 
 export function useWarehouse() {
   const toNumber = (value: unknown): number => {
@@ -63,7 +64,15 @@ export function useWarehouse() {
     }),
   });
 
-  const derivedReorderAlerts = Array.isArray(lowStockPartsQuery.data)
+  // Les alertes croisent le stock bas ET les demandes de pièce. Si l'une des deux lectures
+  // a échoué, un calcul sur l'autre seule sous-compterait sans le dire : pas de données,
+  // l'écran affiche l'erreur. Pendant un chargement, l'agrégat serveur sert de repli.
+  const reorderSourcesFailed =
+    (!!lowStockPartsQuery.error && !Array.isArray(lowStockPartsQuery.data)) ||
+    (!!partRequirementsQuery.error && !Array.isArray(partRequirementsQuery.data));
+  const derivedReorderAlerts = reorderSourcesFailed
+    ? undefined
+    : Array.isArray(lowStockPartsQuery.data) && Array.isArray(partRequirementsQuery.data)
     ? (() => {
         const toDemandStatus = (statusRaw: unknown) => String(statusRaw || "").toLowerCase();
         const demandStatuses = new Set([
@@ -216,6 +225,17 @@ export function useWarehouse() {
         };
       })()
     : reorderAlertsQuery.data;
+  // L'agrégat serveur ne sert que de repli pendant le chargement des deux sources : son échec
+  // (403 selon le rôle) ne doit pas afficher « Indisponible » avant qu'elles aient répondu.
+  const reorderAlertsError = lowStockPartsQuery.error || partRequirementsQuery.error;
+  const reorderAlertsFetching =
+    reorderAlertsQuery.isFetching || lowStockPartsQuery.isFetching || partRequirementsQuery.isFetching;
+  const reorderAlertsView = queryView<any>({
+    data: derivedReorderAlerts,
+    error: reorderAlertsError,
+    isFetching: reorderAlertsFetching,
+  });
+  const inventoryValueView = queryView<any>(inventoryValueQuery);
 
   const derivedStatistics = (() => {
     const stats = statisticsQuery.data;
@@ -244,11 +264,18 @@ export function useWarehouse() {
       isFetching: inventoryValueQuery.isFetching,
       error: inventoryValueQuery.error,
       refetch: inventoryValueQuery.refetch,
+      /** Lecture en échec sans données : afficher « Indisponible », jamais 0. */
+      view: inventoryValueView,
+      failed: inventoryValueView.kind === "error",
     },
     reorderAlerts: {
       data: derivedReorderAlerts,
       isLoading: reorderAlertsQuery.isLoading || lowStockPartsQuery.isLoading || partRequirementsQuery.isLoading,
-      error: reorderAlertsQuery.error || lowStockPartsQuery.error || partRequirementsQuery.error,
+      isFetching: reorderAlertsFetching,
+      error: reorderAlertsError,
+      /** Stock bas ou demandes illisibles : afficher « Indisponible », jamais « 0 alerte ». */
+      view: reorderAlertsView,
+      failed: reorderAlertsView.kind === "error",
       refetch: async () => {
         await Promise.all([
           reorderAlertsQuery.refetch(),
