@@ -158,7 +158,7 @@ const GELES: Record<string, number> = {
   "client/src/pages/missions/[id].tsx": 39,
   "client/src/pages/missions/index.tsx": 33,
   "client/src/pages/missions/new.tsx": 7,
-  "client/src/pages/operations/dashboard.tsx": 19,
+  "client/src/pages/operations/dashboard.tsx": 10,
   "client/src/pages/operations/invoices/[id].tsx": 29,
   "client/src/pages/operations/invoices/index.tsx": 21,
   "client/src/pages/procurement/invoices/[id].tsx": 49,

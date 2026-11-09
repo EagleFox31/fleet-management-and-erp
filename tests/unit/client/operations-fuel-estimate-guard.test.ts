@@ -9,11 +9,12 @@ import { describe, expect, it } from "vitest";
 const panel = readFileSync(new URL("../../../client/src/components/operations/clients-panel.tsx", import.meta.url), "utf8");
 const chart = readFileSync(new URL("../../../client/src/components/operations/destinations-chart.tsx", import.meta.url), "utf8");
 const service = readFileSync(new URL("../../../client/src/services/operationsService.ts", import.meta.url), "utf8");
+const dashboard = readFileSync(new URL("../../../client/src/pages/operations/dashboard.tsx", import.meta.url), "utf8");
 
 const code = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
 
 describe("opérations : carburant estimé jamais présenté comme chiffre d'affaires", () => {
-  for (const [name, src] of [["clients-panel", panel], ["destinations-chart", chart]] as const) {
+  for (const [name, src] of [["clients-panel", panel], ["destinations-chart", chart], ["dashboard", dashboard]] as const) {
     it(`${name} : ni CA, ni marge, ni bénéfice ; champs dépréciés jamais lus`, () => {
       expect(code(src)).not.toMatch(/\bCA\b|Marge|Bénéfice|Revenu|Chiffre d'affaires/);
       expect(code(src)).not.toMatch(/\.(totalRevenue|margin|marginPercentage|totalCost)\b/);
@@ -25,6 +26,19 @@ describe("opérations : carburant estimé jamais présenté comme chiffre d'affa
     expect(code(types)).not.toMatch(/\b(totalRevenue|margin|marginPercentage|totalCost)\b/);
     expect(types).toMatch(/estimatedFuelCost: number \| null/);
     expect(service).toMatch(/getStatsByDestination\(\): Promise<DestinationStats\[\]>/);
+  });
+});
+
+describe("bandeau des opérations : une lecture en échec n'est pas un 0", () => {
+  it("chiffres lus par clientTotals et statDisplay, sans repli à zéro", () => {
+    expect(code(dashboard)).not.toMatch(/\|\|\s*0\b|\?\?\s*0\b|\.data \|\| \[\]/);
+    expect(dashboard).toMatch(/listQueryView<ClientSummary>\(statsByClient\)/);
+    for (const id of ["kpi-total-missions", "kpi-fuel-estimated", "kpi-fuel-actual"]) {
+      const at = dashboard.indexOf(`data-testid="${id}"`);
+      expect(at, `${id} introuvable`).toBeGreaterThan(-1);
+      const tile = dashboard.slice(dashboard.lastIndexOf("<KpiTile", at), at);
+      expect(tile, id).toMatch(/value=\{statDisplay\(statsView,/);
+    }
   });
 });
 
