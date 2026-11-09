@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from "express";
 import { z } from "zod";
 import { clientPayments } from "@shared/schema";
 import { clientBillingService } from "../services/client-billing-service";
+import { getRevenueByClient, resolveRevenuePeriod } from "../services/client-revenue-service";
 import { pdfGenerationService } from "../services/pdf-generation-service";
 import { authorize } from "../middleware/auth";
 import { CLIENT_BILLING_EVENT_ROLES, CLIENT_BILLING_STATS_ROLES } from "@shared/constants/roles";
@@ -469,6 +470,20 @@ router.get("/statistics", canReadBillingStatistics, async (req: Request, res: Re
     res.json(stats);
   } catch (error: unknown) {
     next(withLogContext(isAppError(error) ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching billing statistics" }));
+  }
+});
+
+/**
+ * GET /api/billing/revenue/by-client?from=AAAA-MM-JJ&to=AAAA-MM-JJ
+ * Chiffre d'affaires HT réel par client (factures émises de la période) et marge après carburant.
+ * Mêmes rôles que les statistiques de facturation ; sans période : le mois en cours (Douala).
+ */
+router.get("/revenue/by-client", canReadBillingStatistics, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const period = resolveRevenuePeriod({ from: req.query.from, to: req.query.to });
+    res.json(await getRevenueByClient(period));
+  } catch (error: unknown) {
+    next(withLogContext(isAppError(error) ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching revenue by client" }));
   }
 });
 
