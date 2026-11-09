@@ -123,16 +123,63 @@ export function fetchAllVehicles<T = any>(
   });
 }
 
+export interface FetchUnpaginatedListOptions {
+  path: string;
+  /** Message de refus pour une lecture en échec ou une réponse qui n'est pas une liste. */
+  unreadable: string;
+  /** Borne facultative : au-delà, refus avec `tooMany`. */
+  maxItems?: number;
+  tooMany?: (total: string, limit: string) => string;
+}
+
 /**
- * `GET /api/fuel-records` rend une liste non paginée. Une lecture en échec ne doit pas devenir
- * `[]` : un rapport de carburant à 0 litre et 0 FCFA est un faux chiffre.
+ * Liste non paginée par l'API (tableau rendu en entier) : une lecture en échec ne devient
+ * jamais `[]`, et un volume au-delà de la borne refuse le rapport.
  */
-export async function fetchFuelRecords<T = any>(fetchFn: FetchLike = defaultFetch): Promise<T[]> {
-  const unreadable = "Les pleins de carburant n'ont pas pu être lus : le rapport n'a pas été généré. Réessayez.";
-  const path = "/api/fuel-records";
+export async function fetchUnpaginatedList<T = any>(
+  fetchFn: FetchLike,
+  { path, unreadable, maxItems, tooMany }: FetchUnpaginatedListOptions,
+): Promise<T[]> {
   const response = await fetchFn(path);
   if (!response.ok) throw new ReportRefusedError(unreadable, { path, reason: "http", status: response.status });
   const body = await response.json();
   if (!Array.isArray(body)) throw new ReportRefusedError(unreadable, { path, reason: "shape" });
+  if (maxItems !== undefined && body.length > maxItems) {
+    throw new ReportRefusedError(
+      (tooMany ?? (() => unreadable))(body.length.toLocaleString("fr-FR"), maxItems.toLocaleString("fr-FR")),
+      { path, reason: "too-many", total: body.length },
+    );
+  }
   return body as T[];
+}
+
+/**
+ * `GET /api/fuel-records` rend une liste non paginée. Une lecture en échec ne doit pas devenir
+ * `[]` : un rapport de carburant à 0 litre et 0 FCFA est un faux chiffre.
+ */
+export function fetchFuelRecords<T = any>(fetchFn: FetchLike = defaultFetch): Promise<T[]> {
+  return fetchUnpaginatedList<T>(fetchFn, {
+    path: "/api/fuel-records",
+    unreadable: "Les pleins de carburant n'ont pas pu être lus : le rapport n'a pas été généré. Réessayez.",
+  });
+}
+
+/** Borne des utilisateurs d'un rapport, alignée sur celle des OT (500 × 20 pages). */
+export const REPORT_MAX_USERS = 10_000;
+
+/**
+ * `GET /api/users` ne pagine pas (`getAllUsers` sans limite) : la liste est complète, mais son
+ * volume n'est pas borné. Au-delà de `REPORT_MAX_USERS`, refus plutôt qu'un rapport ingérable.
+ */
+export function fetchAllUsers<T = any>(
+  fetchFn: FetchLike = defaultFetch,
+  { maxItems = REPORT_MAX_USERS } = {},
+): Promise<T[]> {
+  return fetchUnpaginatedList<T>(fetchFn, {
+    path: "/api/users",
+    unreadable: "Les utilisateurs n'ont pas pu être lus : le rapport n'a pas été généré. Réessayez.",
+    maxItems,
+    tooMany: (total, limit) =>
+      `Trop d'utilisateurs pour un seul rapport (${total}, limite ${limit}) : le rapport n'a pas été généré.`,
+  });
 }

@@ -2,7 +2,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import headerImage from '@assets/TAY-header-final.png';
 import { fetchAllWorkOrders, ReportRefusedError } from '@/lib/fetch-all-work-orders';
-import { fetchAllVehicles, fetchFuelRecords, reportErrorContext } from '@/lib/fetch-all-pages';
+import { fetchAllUsers, fetchAllVehicles, fetchFuelRecords, reportErrorContext } from '@/lib/fetch-all-pages';
 import { clientLogger } from '@/lib/logger';
 
 // Configuration de l'en-tête officiel
@@ -600,12 +600,8 @@ export async function exportMaintenanceCostReport(startDate: Date, endDate: Date
     // Véhicules lus page par page : `limit=1000` omettait les suivants.
     const vehicles = await fetchAllVehicles();
 
-    const usersResponse = await fetch('/api/users');
-    const users = usersResponse.ok ? await usersResponse.json() : null;
-    if (!Array.isArray(users)) {
-      throw new ReportRefusedError("Les utilisateurs n'ont pas pu être lus : le rapport n'a pas été généré. Réessayez.");
-    }
-    const usersList = users;
+    // `/api/users` ne pagine pas : liste complète, refus en cas d'échec ou au-delà de la borne.
+    const usersList = await fetchAllUsers();
 
     // Volumes seulement : des milliers d'OT resteraient dans le tampon de `clientLogger`.
     clientLogger.debug("Rapport des coûts : données lues", {
