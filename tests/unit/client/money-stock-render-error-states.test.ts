@@ -31,6 +31,29 @@ vi.mock("@/hooks/use-form-draft", () => ({
   useFormDraft: () => ({ draftSavedAt: null, clearDraft: () => {}, discardDraft: () => {} }),
 }));
 
+/**
+ * Onglets Radix : le contenu d'un onglet inactif n'est pas rendu, et `Tabs` n'a que `defaultValue`
+ * (aucun état, URL ou stockage ne permet d'ouvrir un autre onglet). Pour rendre « Alertes » du
+ * magasin et « Inventaire & Pièces » de l'atelier sans toucher au produit, ces primitives sont
+ * remplacées par des équivalents sans contexte Radix : `activeTab` (si défini) l'emporte sur
+ * `defaultValue`. Le contenu des onglets reste celui des pages.
+ */
+const tabs = vi.hoisted(() => ({ activeTab: undefined as string | undefined }));
+vi.mock("@/components/ui/tabs", async () => {
+  const R = await import("react");
+  const Ctx = R.createContext<string | undefined>(undefined);
+  return {
+    Tabs: ({ defaultValue, children }: { defaultValue?: string; children?: React.ReactNode }) =>
+      R.createElement(Ctx.Provider, { value: tabs.activeTab ?? defaultValue }, R.createElement("div", null, children)),
+    TabsList: ({ children }: { children?: React.ReactNode }) => R.createElement("div", null, children),
+    TabsTrigger: ({ children }: { children?: React.ReactNode }) => R.createElement("button", null, children),
+    TabsContent: ({ value, children }: { value: string; children?: React.ReactNode }) => {
+      const active = R.useContext(Ctx);
+      return value === active ? R.createElement("div", null, children) : null;
+    },
+  };
+});
+
 // Les pages utilisent le runtime JSX classique (React global) : absent en environnement node.
 (globalThis as { React?: typeof React }).React = React;
 // Premier import des pages (arbre de composants complet) : lent à froid.
@@ -39,7 +62,8 @@ vi.setConfig({ testTimeout: 60_000 });
 type Outcome = { data: unknown } | { error: Error } | { data: unknown; error: Error };
 type Seed = Array<[readonly unknown[], Outcome]>;
 
-function render(Page: React.ComponentType, seed: Seed): string {
+function render(Page: React.ComponentType, seed: Seed, activeTab?: string): string {
+  tabs.activeTab = activeTab;
   // `retryOnMount: false` : sans cela, une requête en erreur est relancée au montage et le rendu
   // la voit « en chargement », pas « en échec ».
   const client = new QueryClient({
@@ -165,6 +189,22 @@ describe("rendu: stock en échec affiche Indisponible, jamais 0", () => {
       expect(tileValue(html, "Pièces en stock")).toBe("120");
     });
 
+    it("onglet Alertes : la répartition lit Indisponible, pas un graphique vide", async () => {
+      const { default: Page } = await import("@/pages/warehouse/dashboard");
+      const html = render(Page, STATS_DOWN, "alerts");
+      expect(html).toContain("Répartition des alertes");
+      const cell = html.match(/data-testid="warehouse-alert-summary-unavailable">((?:(?!<\/div>).)*)<\/div>/);
+      expect(cell, "cellule Indisponible absente de l'onglet Alertes").not.toBeNull();
+      expect(cell![1]).toBe("Indisponible");
+    });
+
+    it("onglet Alertes, témoin : données saines, pas de cellule Indisponible", async () => {
+      const { default: Page } = await import("@/pages/warehouse/dashboard");
+      const html = render(Page, seedWith({}), "alerts");
+      expect(html).toContain("Répartition des alertes");
+      expect(html).not.toContain("warehouse-alert-summary-unavailable");
+    });
+
     it("témoin : données saines, les tuiles montrent 120 unités et 5 stocks bas", async () => {
       const { default: Page } = await import("@/pages/warehouse/dashboard");
       const html = render(Page, seedWith({}));
@@ -179,6 +219,18 @@ describe("rendu: stock en échec affiche Indisponible, jamais 0", () => {
       const html = render(Page, STATS_DOWN);
       expect(html).toContain("Indisponible");
       expect(tileSubValue(html, "Alertes stock magasin")).toBe("Indisponible");
+    });
+
+    it("onglet Inventaire : la tuile « Stock bas / épuisé » lit Indisponible", async () => {
+      const { default: Page } = await import("@/pages/workshop-manager/dashboard");
+      const html = render(Page, STATS_DOWN, "inventory");
+      expect(tileValue(html, "Stock bas / épuisé")).toBe("Indisponible");
+    });
+
+    it("onglet Inventaire, témoin : données saines, la tuile montre 7 sur 34 références", async () => {
+      const { default: Page } = await import("@/pages/workshop-manager/dashboard");
+      const html = render(Page, seedWith({}), "inventory");
+      expect(tileValue(html, "Stock bas / épuisé")).toBe("7/34");
     });
 
     it("témoin : données saines, la sous-valeur montre 7 références (5 + 2)", async () => {
