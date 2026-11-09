@@ -4,6 +4,9 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
+import { ReportRefusedError } from "@/lib/fetch-all-pages";
+import type { ExportToast } from "@/lib/work-orders-export";
+import { ALL_VEHICLES_UNREADABLE } from "@/hooks/use-all-vehicles";
 
 /**
  * Deux écrans lisaient `/api/work-orders` en un seul appel `limit: 300` :
@@ -18,32 +21,69 @@ import { describe, expect, it, vi } from "vitest";
 const root = path.resolve(__dirname, "../../..");
 const read = (rel: string) => fs.readFileSync(path.join(root, rel), "utf8");
 
+// ---- Export PDF de la liste des OT : exécuté, pas lu dans le source ----------------------------
+
+const exportMocks = vi.hoisted(() => ({
+  fetchAll: vi.fn<() => Promise<unknown[]>>(),
+  pdf: vi.fn<(list: unknown[]) => void>(),
+}));
+vi.mock("@/lib/fetch-all-work-orders", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/fetch-all-work-orders")>()),
+  fetchAllWorkOrders: exportMocks.fetchAll,
+}));
+vi.mock("@/lib/pdf-export", () => ({ exportWorkOrdersToPDF: exportMocks.pdf }));
+
 describe("liste des OT : export PDF sur la liste complète", () => {
   const src = read("client/src/pages/maintenance/work-orders.tsx");
-  const exportFn = src.slice(src.indexOf("const handleExport"), src.indexOf("const totalCount"));
 
-  it("plus de lecture plafonnée à 300", () => {
+  it("la page n'a plus de lecture plafonnée et délègue l'export au clic", () => {
     expect(src).not.toMatch(/limit\s*:\s*300/);
-    expect(src).not.toMatch(/allWorkOrders/);
+    expect(src).toMatch(/await runWorkOrdersExport\(toast\)/);
   });
 
-  it("l'export lit toutes les pages au clic", () => {
-    expect(exportFn.length).toBeGreaterThan(0);
-    expect(exportFn).toMatch(/await fetchAllWorkOrders\(\)/);
+  async function run(outcome: { data: unknown[] } | { error: Error }) {
+    exportMocks.fetchAll.mockReset();
+    exportMocks.pdf.mockReset();
+    if ("error" in outcome) exportMocks.fetchAll.mockRejectedValue(outcome.error);
+    else exportMocks.fetchAll.mockResolvedValue(outcome.data);
+    const { clientLogger } = await import("@/lib/logger");
+    const log = vi.spyOn(clientLogger, "error").mockImplementation(() => {});
+    const toasts: ExportToast[] = [];
+    const { runWorkOrdersExport } = await import("@/lib/work-orders-export");
+    await runWorkOrdersExport((t) => toasts.push(t));
+    const logged = log.mock.calls.slice();
+    log.mockRestore();
+    return { toasts, logged };
+  }
+
+  it("liste complète lue : PDF produit sur toutes les lignes, puis « Export réussi »", async () => {
+    const list = Array.from({ length: 1234 }, (_, i) => ({ id: i + 1 }));
+    const { toasts, logged } = await run({ data: list });
+    expect(exportMocks.fetchAll).toHaveBeenCalledTimes(1);
+    expect(exportMocks.pdf).toHaveBeenCalledWith(list);
+    expect(toasts.map((t) => t.title)).toEqual(["Export réussi"]);
+    expect(logged).toEqual([]);
   });
 
-  it("succès annoncé seulement après une lecture complète, jamais sur une liste vide", () => {
-    const readAt = exportFn.indexOf("await fetchAllWorkOrders()");
-    const success = exportFn.indexOf("Export réussi");
-    expect(readAt).toBeGreaterThanOrEqual(0);
-    expect(success).toBeGreaterThan(readAt);
-    expect(exportFn).toMatch(/\.length === 0/);
-    expect(exportFn).toMatch(/Aucun ordre de travail à exporter/);
+  it("liste vide : aucun PDF, jamais « Export réussi »", async () => {
+    const { toasts } = await run({ data: [] });
+    expect(exportMocks.pdf).not.toHaveBeenCalled();
+    expect(toasts.map((t) => t.title)).toEqual(["Aucun ordre de travail à exporter"]);
   });
 
-  it("échec : message lisible, erreur journalisée avec son détail", () => {
-    expect(exportFn).toMatch(/userMessageOf\(error,/);
-    expect(exportFn).toMatch(/clientLogger\.error\([^)]*, reportErrorContext\(error\)\);/);
+  it("lecture refusée : aucun PDF, message lisible, refus journalisé avec son détail", async () => {
+    const refusal = new ReportRefusedError("Les ordres de travail n'ont pas pu être lus en entier.", {
+      path: "/api/work-orders",
+      reason: "incomplete",
+      total: 60,
+      received: 50,
+    });
+    const { toasts, logged } = await run({ error: refusal });
+    expect(exportMocks.pdf).not.toHaveBeenCalled();
+    expect(toasts).toEqual([
+      { title: "Erreur d'export", description: "Les ordres de travail n'ont pas pu être lus en entier.", variant: "destructive" },
+    ]);
+    expect(logged).toEqual([["Export PDF des ordres de travail non généré", { err: refusal, refusal: refusal.detail }]]);
   });
 });
 
@@ -65,12 +105,26 @@ const ALL_KEY = ["/api/work-orders", "all"] as const;
 
 type Outcome = { data: unknown } | { error: Error };
 
-async function renderAlerts(workOrders: Outcome): Promise<string> {
+async function renderAlerts(workOrders: Outcome, vehicles: "ok" | "error" = "ok"): Promise<string> {
   const { default: Page } = await import("@/pages/maintenance/date-based-alerts");
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, retryOnMount: false, staleTime: Infinity } },
   });
-  client.setQueryData(["/api/vehicles"], { vehicles: [VEHICLE] });
+  // Cache partagé : `["/api/vehicles"]` (objet paginé, lu ailleurs) ; l'écran lit la flotte complète.
+  client.setQueryData(["/api/vehicles"], { vehicles: [VEHICLE], total: 1 });
+  if (vehicles === "error") {
+    const query = client.getQueryCache().build(client, { queryKey: ["/api/vehicles", "all"] });
+    query.setState({
+      status: "error",
+      error: new ReportRefusedError(ALL_VEHICLES_UNREADABLE, { path: "/api/vehicles", reason: "incomplete" }),
+      data: undefined,
+      fetchStatus: "idle",
+      errorUpdateCount: 1,
+      errorUpdatedAt: Date.now(),
+    } as never);
+  } else {
+    client.setQueryData(["/api/vehicles", "all"], [VEHICLE]);
+  }
   for (const [key, toData] of [
     [OLD_KEY, (list: unknown[]) => ({ workOrders: list, total: list.length })],
     [ALL_KEY, (list: unknown[]) => list],
@@ -124,5 +178,11 @@ describe("alertes d'échéance : création d'OT gardée par la lecture complète
     });
     expect(html).toMatch(/OT atelier créée/);
     expect(button(html, "Créer OT atelier")).toBeUndefined();
+  });
+
+  it("flotte illisible : encart d'erreur, jamais une liste d'alertes vide présentée comme saine", async () => {
+    const html = await renderAlerts({ data: [] }, "error");
+    expect(html).toMatch(/role="alert"/);
+    expect(html).toContain(ALL_VEHICLES_UNREADABLE.replace("'", "&#x27;"));
   });
 });
