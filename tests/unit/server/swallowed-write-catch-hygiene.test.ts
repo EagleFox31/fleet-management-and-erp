@@ -27,7 +27,6 @@ const KNOWN_SWALLOWING = [
   "server/services/preventive-maintenance-service.ts#createDateBasedWorkOrder",
   "server/services/preventive-maintenance-service.ts#deactivateSchedule",
   "server/services/preventive-maintenance-service.ts#reactivateSchedule",
-  "server/services/tires-service-simplified.ts#updateVehicleTire",
   "server/storage.ts#deleteAlert",
   "server/storage.ts#deleteFaultCatalog",
   "server/storage.ts#deleteMaintenanceSchedule",

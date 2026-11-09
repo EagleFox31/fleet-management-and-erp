@@ -1922,20 +1922,48 @@ export default function TiresInventoryPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Pneu monté *</FormLabel>
-                        <Select onValueChange={(value) => field.onChange(parseInt(value))} value={field.value?.toString()}>
+                        {/* En échec sans données : encart « Réessayer », pas une liste vide (`queryView`). */}
+                        <Select
+                          onValueChange={(value) => field.onChange(parseInt(value))}
+                          value={field.value?.toString()}
+                          disabled={vehicleTiresView.kind !== "ready"}
+                        >
                           <FormControl>
                             <SelectTrigger>
-                              <SelectValue placeholder="Sélectionnez un pneu monté" />
+                              <SelectValue
+                                placeholder={
+                                  vehicleTiresView.kind === "loading"
+                                    ? "Chargement..."
+                                    : vehicleTiresView.kind === "error"
+                                      ? "Pneus montés inconnus"
+                                      : "Sélectionnez un pneu monté"
+                                }
+                              />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            {mountedTires.map((vt: VehicleTire) => (
-                              <SelectItem key={vt.id} value={vt.id.toString()}>
-                                {vt.vehicleRegistration} - {translatePosition(vt.position)} ({vt.tireBrand} {vt.tireModel})
+                            {mountedTires.length === 0 ? (
+                              <SelectItem value="__empty" disabled>
+                                Aucun pneu monté sur un véhicule
                               </SelectItem>
-                            ))}
+                            ) : (
+                              mountedTires.map((vt: VehicleTire) => (
+                                <SelectItem key={vt.id} value={vt.id.toString()}>
+                                  {vt.vehicleRegistration} - {translatePosition(vt.position)} ({vt.tireBrand} {vt.tireModel})
+                                </SelectItem>
+                              ))
+                            )}
                           </SelectContent>
                         </Select>
+                        {vehicleTiresView.kind === "error" ? (
+                          <InlineQueryError
+                            error={vehicleTiresView.error}
+                            fallback="Les pneus montés sont momentanément indisponibles."
+                            onRetry={() => void vehicleTiresQuery.refetch()}
+                            isRetrying={vehicleTiresView.isRetrying}
+                            data-testid="inspection-mounted-tires-error"
+                          />
+                        ) : null}
                         <FormDescription>Sélectionnez le pneu monté à inspecter</FormDescription>
                         <FormMessage />
                       </FormItem>

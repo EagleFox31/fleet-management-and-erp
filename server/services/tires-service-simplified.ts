@@ -9,12 +9,24 @@ import { computeTireWearScore } from "@shared/constants/tires";
 import { vehicleTireStatusAfterRemoval, type TireRemoval } from "@shared/constants/tire-removal";
 import { usedTiresLabel } from "@shared/constants/tire-stock";
 import { AppError } from "../lib/app-error";
+import { isUniqueViolation, pgConstraintOf } from "../lib/pg-errors";
 import { moduleLogger } from "../lib/logger";
 import { preventiveDueDay } from "../lib/kpi-rules";
 import { stampPreventiveDue } from "../lib/preventive-due";
 
 import { PART_CATALOG_EVENT_ROLES, STAFF_ROLES } from "@shared/constants/roles";
 const log = moduleLogger("tires");
+
+/** Index unique partiel : un seul pneu actif par position (server/db/migrations/20261107_vehicle_tires_active_position_unique.sql). */
+export const ACTIVE_POSITION_INDEX = "uq_vehicle_tires_active_position";
+
+/** Message unique du 409 « position occupée », au montage (route POST) comme à la modification (PATCH). */
+export const POSITION_OCCUPIED_MESSAGE = "Cette position est déjà occupée sur le véhicule";
+
+/** L'écriture a été refusée parce que la position porte déjà un pneu actif. */
+export function isActivePositionConflict(error: unknown): boolean {
+  return isUniqueViolation(error) && pgConstraintOf(error) === ACTIVE_POSITION_INDEX;
+}
 
 const createdByUser = alias(users, "tires_created_by_user");
 const updatedByUser = alias(users, "tires_updated_by_user");
@@ -454,6 +466,12 @@ export class TiresService {
 
       return newVehicleTire;
     } catch (error) {
+      // Montage concurrent sur la même position : le SELECT n'a rien vu, l'index refuse l'INSERT et la
+      // transaction annule le décrément de stock. Même réponse que le contrôle applicatif.
+      if (isActivePositionConflict(error)) {
+        log.warn({ vehicleId: data.vehicleId, position: data.position, tireId: data.tireId }, "position prise par un montage concurrent");
+        throw new Error("POSITION_OCCUPIED");
+      }
       if (!(error instanceof AppError)) log.error({ err: error, tireId: data.tireId }, "montage de pneu en échec");
       throw error;
     }
@@ -466,13 +484,16 @@ export class TiresService {
         .set({ ...data, updatedAt: new Date() })
         .where(eq(vehicleTires.id, id))
         .returning();
-      
-      console.log(`✅ Vehicle tire updated: ID ${id}`);
-      
+
+      log.info({ vehicleTireId: id }, "pneu monté modifié");
+
       return updatedVehicleTire;
     } catch (error) {
-      console.error('Error updating vehicle tire:', error);
-      return undefined;
+      if (isActivePositionConflict(error)) {
+        throw new AppError(409, POSITION_OCCUPIED_MESSAGE, { cause: error });
+      }
+      log.error({ err: error, vehicleTireId: id }, "modification du pneu monté en échec");
+      throw new AppError(500, "La modification du pneu monté a échoué.", { cause: error });
     }
   }
 
