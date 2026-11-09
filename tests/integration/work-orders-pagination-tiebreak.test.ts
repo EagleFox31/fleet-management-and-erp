@@ -4,20 +4,25 @@ import { workOrders } from "../../shared/schema";
 import { db } from "../../server/db";
 import { storage } from "../../server/storage";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
-import { createTestVehicle } from "../support/factories";
+import { createTestUser, createTestVehicle } from "../support/factories";
 
 /**
  * #599 (relecture) : `getWorkOrders` triait par `createdAt` seul. Des OT de même date de
  * création (import en masse) n'avaient pas d'ordre stable entre deux pages : un OT pouvait
  * revenir sur deux pages et un autre être sauté, alors que le rapport des coûts lit tout
- * page par page. Départage par `id` décroissant.
+ * page par page. Départage par `id` décroissant. Même règle pour `getWorkOrdersByOwner`
+ * (liste d'un client), qui triait aussi par `createdAt` seul.
  */
 const ids = createIdBag();
 const created: number[] = [];
+let ownerId = 0;
 const SAME_DATE = new Date("2099-01-01T08:00:00Z");
 
 beforeAll(async () => {
-  const vehicle = await createTestVehicle();
+  const owner = await createTestUser({ role: "client" });
+  ids.userIds.push(owner.id);
+  ownerId = owner.id;
+  const vehicle = await createTestVehicle({ ownerId });
   ids.vehicleIds.push(vehicle.id);
   const rows = await db
     .insert(workOrders)
@@ -44,6 +49,15 @@ describe("liste des OT : pagination stable à date de création égale", { timeo
     const seen: number[] = [];
     for (let offset = 0; offset < created.length; offset++) {
       const page = await storage.getWorkOrders(undefined, undefined, 1, offset);
+      seen.push(...page.workOrders.map((w: { id: number }) => w.id));
+    }
+    expect(seen).toEqual([...created].sort((a, b) => b - a));
+  });
+
+  it("liste d'un client : page par page, chaque OT sort une fois, par id décroissant", async () => {
+    const seen: number[] = [];
+    for (let offset = 0; offset < created.length; offset++) {
+      const page = await storage.getWorkOrdersByOwner(ownerId, undefined, undefined, 1, offset);
       seen.push(...page.workOrders.map((w: { id: number }) => w.id));
     }
     expect(seen).toEqual([...created].sort((a, b) => b - a));

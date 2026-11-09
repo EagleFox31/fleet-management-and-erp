@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   fetchAllPages,
+  fetchAllUsers,
   fetchAllVehicles,
   fetchFuelRecords,
+  REPORT_MAX_USERS,
   ReportRefusedError,
   reportErrorContext,
 } from "@/lib/fetch-all-pages";
@@ -112,6 +114,40 @@ describe("pleins de carburant pour un rapport", () => {
   it("autre erreur qu'un refus : seule l'erreur est journalisée", () => {
     const error = new Error("x");
     expect(reportErrorContext(error)).toEqual({ err: error });
+  });
+});
+
+describe("utilisateurs pour un rapport (liste non paginée, bornée)", () => {
+  const list = (n: number) => async (url: string) => {
+    expect(url).toBe("/api/users");
+    return { ok: true, status: 200, json: async () => items(n) };
+  };
+
+  it("liste sous la borne : renvoyée en entier", async () => {
+    await expect(fetchAllUsers(list(REPORT_MAX_USERS))).resolves.toHaveLength(10_000);
+  });
+
+  it("au-delà de 10 000 : refus lisible, sans détail technique", async () => {
+    const error = await fetchAllUsers(list(REPORT_MAX_USERS + 1)).catch((e) => e);
+    expect(error).toBeInstanceOf(ReportRefusedError);
+    expect(userMessageOf(error, "repli")).toBe(
+      "Trop d'utilisateurs pour un seul rapport (10 001, limite 10 000) : le rapport n'a pas été généré.",
+    );
+  });
+
+  it("échec ou réponse qui n'est pas une liste : refus lisible", async () => {
+    const failed = async () => ({ ok: false, status: 403, json: async () => ({ message: "x" }) });
+    const notAList = async () => ({ ok: true, status: 200, json: async () => ({ users: [] }) });
+    for (const fetchFn of [failed, notAList]) {
+      const error = await fetchAllUsers(fetchFn).catch((e) => e);
+      expect(error).toBeInstanceOf(ReportRefusedError);
+      expect(userMessageOf(error, "repli")).toBe(
+        "Les utilisateurs n'ont pas pu être lus : le rapport n'a pas été généré. Réessayez.",
+      );
+    }
+    // Statut HTTP gardé pour les logs, jamais dans le message.
+    const error = await fetchAllUsers(failed).catch((e) => e);
+    expect(error.detail).toEqual({ path: "/api/users", reason: "http", status: 403 });
   });
 });
 
