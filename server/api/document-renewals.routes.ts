@@ -9,6 +9,7 @@ import { db } from "../db";
 import { isAnyUser, isDocumentRenewalWriter } from "../middleware/auth";
 import { assertVehicleWritable } from "../middleware/retired-vehicle-write-guard";
 import { storage } from "../storage";
+import { usersByRolesBestEffort } from "../lib/alert-recipients";
 import { isIsoCalendarDate } from "@shared/constants/calendar-date";
 import {
   DOCUMENT_RENEWAL_VIEWER_ROLES,
@@ -697,13 +698,12 @@ router.post("/requests", isDocumentRenewalWriter, async (req, res, next) => {
     const requestLink = `/vehicles/${payload.vehicleId}`;
     const documentLabel =
       DOCUMENT_LABELS[(documentRow.documentType as keyof typeof DOCUMENT_LABELS) || "autre"] || "Document";
-    const recipients = [
-      ...(await storage.getUsersByRole("admin")),
-      ...(await storage.getUsersByRole("workshop_manager")),
-      ...(await storage.getUsersByRole("secretary")),
-      ...(await storage.getUsersByRole("logistics")),
-      ...(await storage.getUsersByRole("technician")),
-    ];
+    // La demande est écrite : une lecture des destinataires en échec réduit la notification, sans 500.
+    const recipients = await usersByRolesBestEffort(
+      ["admin", "workshop_manager", "secretary", "logistics", "technician"],
+      log,
+      { requestId: req.requestId, renewalRequestId: createdRequest.id },
+    );
 
     const recipientIds = Array.from(new Set([...recipients.map((user) => user.id), actorUserId]));
     const messageParts = [

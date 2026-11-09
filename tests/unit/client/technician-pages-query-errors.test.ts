@@ -23,7 +23,7 @@ const read = (name: string) => readFileSync(join(pagesDir, name), "utf8");
 
 const ERROR_HANDLING = /technicianWorkOrdersView(<[^>]*>)?\(|technicianProfileView\(|queryView\(|isError|InlineQueryError/;
 
-const KNOWN_LOADING_ONLY: string[] = ["fleet-status.tsx", "vehicles.tsx"];
+const KNOWN_LOADING_ONLY: string[] = [];
 
 export function readsQueryWithoutError(text: string): boolean {
   return /\buseQuery\b/.test(text) && !ERROR_HANDLING.test(text);

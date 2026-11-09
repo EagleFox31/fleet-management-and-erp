@@ -40,6 +40,7 @@ import { fr } from "date-fns/locale";
 import { useLocation, Link } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/queryClient";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { HeaderCard, KpiGrid, KpiTile, PremiumTabsNav, SectionLabel } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
 
@@ -101,7 +102,7 @@ export default function GMAODashboard() {
     queryKey: ["/api/work-orders"],
   });
 
-  const { data: schedulesData } = useQuery<any>({
+  const { data: schedulesData, isError: schedulesFailed, error: schedulesError, refetch: refetchSchedules } = useQuery<any>({
     queryKey: ["/api/maintenance-schedules"],
   });
 
@@ -401,10 +402,10 @@ export default function GMAODashboard() {
           />
           <KpiTile
             label="En retard"
-            value={stats.overdueSchedules}
+            value={schedulesFailed ? "Indisponible" : stats.overdueSchedules}
             icon={<CalendarDays className="h-4 w-4" />}
             iconWrapperClassName="bg-rose-50 text-rose-600"
-            valueClassName={stats.overdueSchedules > 0 ? "text-rose-600" : undefined}
+            valueClassName={!schedulesFailed && stats.overdueSchedules > 0 ? "text-rose-600" : undefined}
             onClick={() => setLocation("/maintenance/preventive")}
           />
           <KpiTile
@@ -631,11 +632,18 @@ export default function GMAODashboard() {
                     <CalendarCheck className="h-3.5 w-3.5 text-blue-600" /> Échéances Programmées
                   </span>
                   <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                    {schedules.length}
+                    {schedulesFailed ? "—" : schedules.length}
                   </span>
                 </div>
 
                 <div className="space-y-2">
+                  {schedulesFailed && (
+                    <InlineQueryError
+                      error={schedulesError}
+                      fallback="Le planning de maintenance est momentanément indisponible."
+                      onRetry={() => void refetchSchedules()}
+                    />
+                  )}
                   {schedules.slice(0, 4).map((schedule: MaintenanceSchedule) => (
                     <div key={schedule.id} className="p-2.5 rounded-xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/40">
                       <p className="text-xs font-bold text-foreground truncate">{schedule.title}</p>
@@ -776,7 +784,7 @@ export default function GMAODashboard() {
               <div className="grid grid-cols-2 gap-3 pt-2">
                 <div className="p-3 rounded-2xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200/60">
                   <p className="text-[10px] text-rose-700 font-bold uppercase tracking-wider">Échéances en retard</p>
-                  <p className="text-2xl font-black text-rose-700 dark:text-rose-400 mt-0.5">{stats.overdueSchedules}</p>
+                  <p className="text-2xl font-black text-rose-700 dark:text-rose-400 mt-0.5">{schedulesFailed ? "Indisponible" : stats.overdueSchedules}</p>
                 </div>
                 <div className="p-3 rounded-2xl bg-blue-50 dark:bg-blue-950/30 border border-blue-200/60">
                   <p className="text-[10px] text-blue-700 font-bold uppercase tracking-wider">Délai moyen résolution</p>
