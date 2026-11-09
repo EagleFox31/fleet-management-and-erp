@@ -5,6 +5,7 @@ import { tireInspections, tireRotations, tires, vehicleTires, vehicles } from ".
 import { tiresService } from "../../server/services/tires-service-simplified";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestVehicle } from "../support/factories";
+import { isoDateInZone } from "../../shared/contracts/kpi-period";
 
 /**
  * `GET /api/tires/statistics-advanced` en une seule requête SQL.
@@ -218,12 +219,14 @@ afterAll(async () => {
 describe("statistiques avancées des pneus en une requête", { timeout: 120000 }, () => {
   const withoutRotations = (stats: any) => ({
     ...stats,
+    rotationsThisMonth: undefined,
     requiredActions: { ...stats.requiredActions, rotationDue: undefined, rotationApproaching: undefined },
   });
 
   it("même résultat que l'ancien calcul en cinq requêtes, objets et JSON servi", async () => {
     const legacy = sorted(await legacyStatistics(sql`"vehicles"."id"`));
-    const current = sorted(await tiresService.getTireStatisticsAdvanced());
+    // `rotationsThisMonth` n'existait pas dans l'ancien calcul : comparé à part, plus bas.
+    const current = { ...sorted(await tiresService.getTireStatisticsAdvanced()), rotationsThisMonth: undefined };
 
     expect(current).toEqual(legacy);
     expect(JSON.parse(JSON.stringify(current))).toEqual(JSON.parse(JSON.stringify(legacy)));
@@ -251,8 +254,34 @@ describe("statistiques avancées des pneus en une requête", { timeout: 120000 }
     expect(actions.criticalWear.map((a: any) => a.inspection.treadDepth)).not.toContain(1.1);
     expect(actions.rotationDue.some((a: any) => a.vehicle.vehicleId === ids.vehicleIds[0])).toBe(true);
     expect(actions.rotationApproaching.some((a: any) => a.vehicle.vehicleId === ids.vehicleIds[1])).toBe(true);
+    // Inspections actives seedées : la moyenne existe, l'ancien repli à 0 (null désormais) n'entre pas dans la comparaison.
+    expect(typeof stats.averageWear).toBe("number");
     expect(typeof stats.totalTires).toBe("string");
     expect(typeof stats.totalValue).toBe("string");
+  });
+
+  it("rotationsThisMonth : mois civil en cours à Africa/Douala, ni le mois précédent ni le 1er du suivant", async () => {
+    const today = isoDateInZone(new Date());
+    const firstOfMonth = `${today.slice(0, 8)}01`;
+    const lastOfPreviousMonth = new Date(Date.parse(`${firstOfMonth}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+    // Borne haute de l'intervalle semi-ouvert : le 1er du mois suivant est exclu.
+    const [year, month] = firstOfMonth.split("-").map(Number);
+    const firstOfNextMonth = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
+
+    const before = (await tiresService.getTireStatisticsAdvanced()).rotationsThisMonth;
+    const added = await db
+      .insert(tireRotations)
+      .values([
+        { vehicleId: ids.vehicleIds[2], rotationDate: firstOfMonth, rotationMileage: 50500, rotationType: "front_to_back" },
+        { vehicleId: ids.vehicleIds[2], rotationDate: lastOfPreviousMonth, rotationMileage: 50400, rotationType: "front_to_back" },
+        { vehicleId: ids.vehicleIds[2], rotationDate: firstOfNextMonth, rotationMileage: 50600, rotationType: "front_to_back" },
+      ])
+      .returning();
+    rotationIds.push(...added.map((r) => r.id));
+    const after = (await tiresService.getTireStatisticsAdvanced()).rotationsThisMonth;
+
+    expect(typeof after).toBe("number");
+    expect(after - before).toBe(1);
   });
 
   it("une seule requête, donc une seule connexion du pool", async () => {
