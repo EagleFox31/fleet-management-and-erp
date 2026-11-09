@@ -27,7 +27,8 @@ env:
   NODE_VERSION: 24
   # Hôte « postgres » = label du service ; résolu par wsproxy sur le réseau du job, pas par Node.
   DATABASE_URL_TEST: postgres://fleet:fleet@postgres:5432/fleet_test
-  DATABASE_WS_PROXY: localhost:5433/v1
+  # DATABASE_WS_PROXY est construit par étape avec le port hôte attribué au service wsproxy
+  # (contexte `job`, indisponible au niveau workflow).
 
 jobs:
   impact:
@@ -90,7 +91,8 @@ jobs:
           POSTGRES_PASSWORD: fleet
           POSTGRES_DB: fleet_test
         ports:
-          - 54320:5432
+          # Port hôte dynamique : un port fixe peut être déjà pris sur la VM (incidents du 9 novembre 2026).
+          - 5432
         options: >-
           --health-cmd "pg_isready -U fleet -d fleet_test"
           --health-interval 2s
@@ -102,7 +104,7 @@ jobs:
           ALLOW_ADDR_REGEX: "^postgres:5432$"
           LOG_TRAFFIC: "false"
         ports:
-          - 5433:80
+          - 80
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -111,8 +113,14 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       # Schéma Drizzle sur la base vide (initializeDatabase() ne crée pas les tables), via le port TCP direct.
-      - run: npm run test:db:schema
+      # Même commande que `npm run test:db:schema`, sur le port hôte attribué au service.
+      - name: Schéma Drizzle
+        env:
+          DATABASE_URL: postgres://fleet:fleet@localhost:${{ job.services.postgres.ports['5432'] }}/fleet_test
+        run: npx drizzle-kit push --force
       - run: npm run test:integration -- --reporter=dot
+        env:
+          DATABASE_WS_PROXY: localhost:${{ job.services.wsproxy.ports['80'] }}/v1
 
   contract:
     needs: impact
@@ -131,7 +139,8 @@ jobs:
           POSTGRES_PASSWORD: fleet
           POSTGRES_DB: fleet_test
         ports:
-          - 54320:5432
+          # Port hôte dynamique : un port fixe peut être déjà pris sur la VM (incidents du 9 novembre 2026).
+          - 5432
         options: >-
           --health-cmd "pg_isready -U fleet -d fleet_test"
           --health-interval 2s
@@ -143,7 +152,7 @@ jobs:
           ALLOW_ADDR_REGEX: "^postgres:5432$"
           LOG_TRAFFIC: "false"
         ports:
-          - 5433:80
+          - 80
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -151,5 +160,10 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci --no-audit --no-fund
-      - run: npm run test:db:schema
+      - name: Schéma Drizzle
+        env:
+          DATABASE_URL: postgres://fleet:fleet@localhost:${{ job.services.postgres.ports['5432'] }}/fleet_test
+        run: npx drizzle-kit push --force
       - run: npm run test:contract -- --reporter=dot --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+        env:
+          DATABASE_WS_PROXY: localhost:${{ job.services.wsproxy.ports['80'] }}/v1
