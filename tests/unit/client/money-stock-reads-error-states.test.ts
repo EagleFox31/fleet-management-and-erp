@@ -141,3 +141,47 @@ describe("rapport PDF des coûts de maintenance", () => {
     expect(report).toMatch(/if \(error instanceof ReportRefusedError\) throw error;/);
   });
 });
+
+describe("valeur du stock et alertes de réappro : jamais 0 sur une lecture en échec", () => {
+  it("useWarehouse : pas d'alertes calculées sur une seule des deux sources, vue exposée", () => {
+    const src = read("client/src/hooks/useWarehouse.ts");
+    expect(src).toMatch(/const derivedReorderAlerts = reorderSourcesFailed\s*\?\s*undefined/);
+    expect(src).toMatch(/!!partRequirementsQuery\.error && !Array\.isArray\(partRequirementsQuery\.data\)/);
+    expect(src).toMatch(/view: inventoryValueView,\s*failed: inventoryValueView\.kind === "error"/);
+    expect(src).toMatch(/isFetching: reorderAlertsFetching,/);
+    expect(src).toMatch(/view: reorderAlertsView,\s*failed: reorderAlertsView\.kind === "error"/);
+  });
+
+  const DASHBOARDS = [
+    "client/src/pages/admin/dashboard.tsx",
+    "client/src/pages/dashboard.tsx",
+    "client/src/pages/workshop-manager/dashboard.tsx",
+    "client/src/pages/warehouse/dashboard.tsx",
+  ];
+
+  it.each(DASHBOARDS)("%s : « Indisponible » au lieu de 0", (path) => {
+    const src = read(path);
+    expect(src).not.toMatch(/inventoryValue\.data\?\.total(Value|Parts) \|\| 0/);
+    expect(src).not.toMatch(/reorderAlerts\.data(\s*as any\))?\?\.(totalAlerts|estimatedCost) \|\| 0/);
+    expect(src).toMatch(/warehouse\.reorderAlerts\.failed/);
+    expect(src).toMatch(/UNAVAILABLE/);
+  });
+
+  it.each(DASHBOARDS.filter((p) => !p.includes("warehouse/")))("%s : valeur du stock « Indisponible »", (path) => {
+    expect(read(path)).toMatch(/warehouse\.inventoryValue\.failed/);
+  });
+
+  it("tableau de bord magasin : encart au lieu de « Aucune alerte de réapprovisionnement »", () => {
+    const src = read("client/src/pages/warehouse/dashboard.tsx");
+    expect(src).toMatch(/data-testid="warehouse-reorder-error"/);
+    expect(src).toMatch(/!warehouse\.reorderAlerts\.isLoading && !reorderFailed && alertParts\.length === 0/);
+    expect(src).toMatch(/\) : reorderFailed \? \(\s*reorderAlertsError\s*\) : alertParts\.length > 0/);
+  });
+
+  it("panneau d'alertes : encart, pas « Tout est à jour », si les alertes de stock sont illisibles", () => {
+    const src = read("client/src/components/alerts/alerts-panel.tsx");
+    expect(src).toMatch(/const reorderAlertsView = queryView\(reorderAlertsQuery\)/);
+    expect(src).toMatch(/data-testid="alerts-reorder-error"/);
+    expect(src).toMatch(/emptyState=\{\s*reorderAlertsFailed \?/);
+  });
+});

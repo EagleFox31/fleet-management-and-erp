@@ -26,6 +26,8 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { cn, formatDate } from "@/lib/utils";
 import { userMessageOf } from "@/lib/api-error";
+import { queryView } from "@/lib/query-view";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { ALERT_READ_ALL_PATH } from "@shared/contracts/alerts";
 import {
   AlertCircle,
@@ -235,14 +237,18 @@ export function AlertsPanel() {
     queryKey: ["/api/alerts"],
   });
 
+  const reorderAlertsQuery = useQuery<any>({
+    queryKey: ["/api/warehouse/reorder-alerts"],
+    enabled: shouldIncludeStockReorderAlerts,
+  });
   const {
     data: reorderAlertsData,
     isLoading: reorderAlertsLoading,
     refetch: refetchReorderAlerts,
-  } = useQuery<any>({
-    queryKey: ["/api/warehouse/reorder-alerts"],
-    enabled: shouldIncludeStockReorderAlerts,
-  });
+  } = reorderAlertsQuery;
+  // Alertes de stock illisibles : encart, pas une liste qui se dit « à jour ».
+  const reorderAlertsView = queryView(reorderAlertsQuery);
+  const reorderAlertsFailed = shouldIncludeStockReorderAlerts && reorderAlertsView.kind === "error";
 
   const markAsReadMutation = useMutation({
     mutationFn: async (id: number) => {
@@ -958,6 +964,16 @@ export function AlertsPanel() {
         </div>
       </CardShell>
 
+      {reorderAlertsFailed && reorderAlertsView.kind === "error" && (
+        <InlineQueryError
+          error={reorderAlertsView.error}
+          fallback="Les alertes de stock sont momentanément indisponibles : la liste ci-dessous ne les contient pas."
+          onRetry={() => void refetchReorderAlerts()}
+          isRetrying={reorderAlertsView.isRetrying}
+          data-testid="alerts-reorder-error"
+        />
+      )}
+
       <PremiumDataTable
         columns={columns}
         rows={filteredAlerts}
@@ -970,7 +986,11 @@ export function AlertsPanel() {
         }
         toolbar={<div className="text-sm text-gray-500">Liste des alertes ({filteredAlerts.length})</div>}
         emptyState={
-          <div className="flex flex-col items-center justify-center text-center py-6">
+          reorderAlertsFailed ? (
+            <p className="text-xs text-gray-400 text-center py-6" data-testid="alerts-empty-partial">
+              Aucune autre alerte ne correspond aux filtres.
+            </p>
+          ) : <div className="flex flex-col items-center justify-center text-center py-6">
             <CheckCircle2 className="h-8 w-8 text-green-500 mb-2" />
             <p className="text-sm font-medium text-gray-700">Tout est à jour</p>
             <p className="text-xs text-gray-400 mt-1">Aucune alerte ne correspond aux filtres.</p>
