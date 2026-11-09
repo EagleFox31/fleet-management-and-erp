@@ -67,8 +67,38 @@ describe("lecture complète des ordres de travail", () => {
     const { fetchFn, calls } = fakeApi(orders(1001), {});
     const error = await fetchAllWorkOrders(fetchFn, { pageSize: 50 }).catch((e) => e);
     expect(error).toBeInstanceOf(ReportRefusedError);
-    expect(userMessageOf(error, "repli")).toMatch(/Trop d'ordres de travail pour un seul rapport \(1001, limite 1\s000\)/);
+    expect(userMessageOf(error, "repli")).toMatch(/Trop d'ordres de travail pour un seul rapport \(1\s001, limite 1\s000\)/);
     expect(calls).toHaveLength(1);
+  });
+
+  it("un OT répété d'une page à l'autre (tri sans départage) : refus, pas un coût faux", async () => {
+    // Page 2 répète le dernier OT de la page 1 et saute le suivant : le compte vaut `total`.
+    const all = orders(100);
+    const fetchFn = async (url: string) => {
+      const offset = Number(new URL(url, "http://x").searchParams.get("offset"));
+      const page = offset === 0 ? all.slice(0, 50) : [all[49], ...all.slice(51, 100)];
+      return { ok: true, status: 200, json: async () => ({ workOrders: page, total: 100 }) };
+    };
+    await expect(fetchAllWorkOrders(fetchFn, { pageSize: 50 })).rejects.toBeInstanceOf(ReportRefusedError);
+  });
+
+  it("total qui change d'une page à l'autre : refus", async () => {
+    const all = orders(100);
+    const fetchFn = async (url: string) => {
+      const offset = Number(new URL(url, "http://x").searchParams.get("offset"));
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ workOrders: all.slice(offset, offset + 50), total: offset === 0 ? 100 : 101 }),
+      };
+    };
+    await expect(fetchAllWorkOrders(fetchFn, { pageSize: 50 })).rejects.toBeInstanceOf(ReportRefusedError);
+  });
+
+  it("borne dépassée : le total aussi est formaté en français", async () => {
+    const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ workOrders: [], total: 12345 }) });
+    const error = await fetchAllWorkOrders(fetchFn).catch((e) => e);
+    expect(userMessageOf(error, "repli")).toMatch(/\(12\s345, limite 10\s000\)/);
   });
 
   it("les messages de refus sont lisibles tels quels", async () => {
