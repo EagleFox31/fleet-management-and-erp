@@ -101,8 +101,9 @@ const SHADOWED_LEGACY_ROUTES_FROZEN: string[] = [];
  * `routes.ts` écrit `deletedAt` et révoque l'accès.
  * `PATCH /api/users/:id` (rôle), `DELETE /api/users/:id` et `DELETE /api/admin/users/:id` : `last-admin-guard.routes.ts`
  * refuse de retirer le dernier administrateur actif, `routes.ts` écrit.
- * `GET /api/statistics/maintenance-cost/:period` et `GET /api/statistics/fleet-kpi` : `statistics-cost-guard.routes.ts`
- * réserve les montants (`MAINTENANCE_COST_READ_ROLES`, `WORK_ORDER_COST_READ_ROLES`), `routes.ts` les calcule.
+ * `GET /api/statistics/fleet-kpi` : `statistics-cost-guard.routes.ts` réserve les montants
+ * (`WORK_ORDER_COST_READ_ROLES`), `routes.ts` les calcule. Le coût de maintenance a quitté `routes.ts`
+ * (`money-reads.routes.ts`).
  * `GET /api/parts/statistics` et `GET /api/invoices/:id/parts` : `stock-valuation-guard.routes.ts` réserve la valeur
  * du stock et le prix des pièces (`STOCK_VALUATION_READ_ROLES`).
  */
@@ -112,7 +113,6 @@ const CHAINED_GUARD_ROUTES: string[] = [
   "GET /api/invoices/:p/parts",
   "GET /api/parts/statistics",
   "GET /api/statistics/fleet-kpi",
-  "GET /api/statistics/maintenance-cost/:p",
   "PATCH /api/admin/users/:p/toggle",
   "PATCH /api/users/:p",
 ];
