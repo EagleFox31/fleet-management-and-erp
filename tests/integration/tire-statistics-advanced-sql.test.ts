@@ -148,7 +148,7 @@ async function legacyStatistics(rotationVehicleRef: SQL | typeof vehicles.id = v
 }
 
 const sortKey = (action: any) => action.tire?.id ?? action.inspection?.inspectionId ?? action.vehicle?.vehicleId;
-function sorted<T extends { requiredActions: Record<string, any[]> }>(stats: T): T {
+function sorted<T extends { requiredActions: object }>(stats: T): T {
   const requiredActions = Object.fromEntries(
     Object.entries(stats.requiredActions).map(([key, list]) => [key, [...list].sort((a, b) => sortKey(a) - sortKey(b))]),
   );
@@ -244,7 +244,7 @@ describe("statistiques avancées des pneus en une requête", { timeout: 120000 }
     const actions = stats.requiredActions;
     const lowTire = actions.lowStock.find((a: any) => a.tire.id === tireIds[1])?.tire;
     expect(lowTire).toMatchObject({ purchasePrice: "99999.99", manufactureDate: "2025-03-14", stockQuantity: 1 });
-    expect(lowTire.createdAt).toBeInstanceOf(Date);
+    expect(lowTire?.createdAt).toBeInstanceOf(Date);
     expect(actions.outOfStock.some((a: any) => a.tire.id === tireIds[0])).toBe(true);
     expect(actions.outOfStock.some((a: any) => a.tire.id === tireIds[3])).toBe(false);
     expect(actions.criticalWear.map((a: any) => a.inspection.treadDepth)).toContain(2.7);
