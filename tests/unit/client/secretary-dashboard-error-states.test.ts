@@ -53,7 +53,7 @@ describe("tableau de bord secrétaire : une lecture en échec n'est pas un zéro
   it("chaque tuile chiffrée passe par statDisplay (« Indisponible » si inconnu)", () => {
     const tiles = [
       "secretary-kpi-vehicles", "secretary-kpi-documents", "secretary-kpi-missions",
-      "secretary-kpi-revenue", "secretary-kpi-costs", "secretary-kpi-invoices",
+      "secretary-kpi-fuel-estimated", "secretary-kpi-costs", "secretary-kpi-invoices",
       "secretary-kpi-pending", "secretary-kpi-paid", "secretary-kpi-cpc-formed",
       "secretary-kpi-cpc-to-form", "secretary-kpi-cpc-not-formed",
     ];
@@ -63,6 +63,14 @@ describe("tableau de bord secrétaire : une lecture en échec n'est pas un zéro
       const tile = src.slice(at, src.indexOf("/>", at));
       expect(tile, id).toMatch(/value=\{statDisplay\(/);
     }
+  });
+
+  it("carburant estimé jamais présenté comme chiffre d'affaires, ni marge qui en découle", () => {
+    // Décision 0a du 2026-11-09 : `totalRevenue` de stats/by-client somme des carburants estimés.
+    const tile = src.slice(src.indexOf('data-testid="secretary-kpi-fuel-estimated"'));
+    expect(tile.slice(0, tile.indexOf("/>"))).toMatch(/label="Coût carburant estimé \(missions\)"/);
+    expect(src).not.toMatch(/Chiffre d'affaires|Facturé clients|>CA<|Marge|Bénéfice/i);
+    expect(src).not.toMatch(/marginPercentage|profit/i);
   });
 
   it("listes en échec : un encart, pas un vide", () => {

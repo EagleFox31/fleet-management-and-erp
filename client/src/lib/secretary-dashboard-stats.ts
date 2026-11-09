@@ -64,18 +64,22 @@ export function documentRenewals(stats: unknown): DocumentRenewals {
 
 export interface ClientTotals {
   missions: number | null;
-  revenue: number | null;
+  /** Somme des carburants estimés des missions (servie sous le nom `totalRevenue`). */
+  estimatedFuelCost: number | null;
   fuelCost: number | null;
 }
 
 /**
- * `GET /api/operations/stats/by-client`. Le coût servi par client est `totalFuelCost` (carburant
- * réel des missions) : l'ancien écran lisait un champ absent de la réponse et affichait 0.
+ * `GET /api/operations/stats/by-client`.
+ * - Le coût servi par client est `totalFuelCost` (carburant réel des missions) : l'ancien écran
+ *   lisait un champ absent de la réponse et affichait 0.
+ * - `totalRevenue` n'est pas un chiffre d'affaires : la route y somme les `estimatedFuelCost`.
+ *   Il est exposé comme coût carburant estimé ; aucune marge n'en est tirée.
  */
 export function clientTotals(list: readonly unknown[] | null): ClientTotals {
   return {
     missions: sumField(list, "totalMissions"),
-    revenue: sumField(list, "totalRevenue"),
+    estimatedFuelCost: sumField(list, "totalRevenue"),
     fuelCost: sumField(list, "totalFuelCost"),
   };
 }

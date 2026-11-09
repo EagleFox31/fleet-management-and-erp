@@ -267,12 +267,12 @@ export default function SecretaryDashboard() {
               iconWrapperClassName="bg-blue-50 text-blue-600"
             />
             <KpiTile
-              data-testid="secretary-kpi-revenue"
-              label="Chiffre d'affaires"
-              value={statDisplay(clientsView, totals.revenue, formatPrice)}
-              subValue="Facturé clients"
+              data-testid="secretary-kpi-fuel-estimated"
+              label="Coût carburant estimé (missions)"
+              value={statDisplay(clientsView, totals.estimatedFuelCost, formatPrice)}
+              subValue="Estimation saisie sur les missions"
               icon={<Banknote className="h-4 w-4" />}
-              iconWrapperClassName="bg-green-50 text-green-600"
+              iconWrapperClassName="bg-amber-50 text-amber-600"
             />
             <KpiTile
               data-testid="secretary-kpi-costs"
@@ -307,23 +307,19 @@ export default function SecretaryDashboard() {
                         {statDisplay(clientsView, statField(client, "totalMissions"))} missions
                       </span>
                     </div>
-                    <div className="grid grid-cols-3 gap-4 text-xs">
+                    {/* `totalRevenue` de la route = somme des carburants estimés : affiché comme tel,
+                        sans indicateur dérivé tant que la facturation n'est pas branchée. */}
+                    <div className="grid grid-cols-2 gap-4 text-xs">
                       <div>
-                        <p className="text-gray-400">CA</p>
-                        <p className="font-semibold text-green-600">
+                        <p className="text-gray-400">Carburant estimé</p>
+                        <p className="font-semibold text-amber-600">
                           {statDisplay(clientsView, statField(client, "totalRevenue"), formatPrice)}
                         </p>
                       </div>
                       <div>
-                        <p className="text-gray-400">Carburant</p>
+                        <p className="text-gray-400">Carburant réel</p>
                         <p className="font-semibold text-red-600">
                           {statDisplay(clientsView, statField(client, "totalFuelCost"), formatPrice)}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-gray-400">Marge</p>
-                        <p className="font-semibold text-purple-600">
-                          {statDisplay(clientsView, statField(client, "marginPercentage"), (n) => `${n.toFixed(1)}%`)}
                         </p>
                       </div>
                     </div>

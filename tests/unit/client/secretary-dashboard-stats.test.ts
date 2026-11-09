@@ -61,11 +61,17 @@ describe("clientTotals", () => {
       { totalMissions: 2, totalRevenue: 1000, totalFuelCost: 400 },
       { totalMissions: 1, totalRevenue: 500, totalFuelCost: 100 },
     ];
-    expect(clientTotals(list)).toEqual({ missions: 3, revenue: 1500, fuelCost: 500 });
+    expect(clientTotals(list)).toEqual({ missions: 3, estimatedFuelCost: 1500, fuelCost: 500 });
+  });
+
+  it("totalRevenue (somme des carburants estimés) n'est jamais exposé comme chiffre d'affaires", () => {
+    const totals = clientTotals([{ totalMissions: 1, totalRevenue: 700, totalFuelCost: 650 }]);
+    expect(totals.estimatedFuelCost).toBe(700);
+    expect(Object.keys(totals)).not.toContain("revenue");
   });
 
   it("liste illisible : tout inconnu, pas 0 F", () => {
-    expect(clientTotals(null)).toEqual({ missions: null, revenue: null, fuelCost: null });
+    expect(clientTotals(null)).toEqual({ missions: null, estimatedFuelCost: null, fuelCost: null });
   });
 });
 
