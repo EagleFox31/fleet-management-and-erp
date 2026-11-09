@@ -1440,7 +1440,8 @@ export class DatabaseStorage implements IStorage {
       .innerJoin(vehicles, eq(workOrders.vehicleId, vehicles.id))
       .leftJoin(users, eq(workOrders.technicianId, users.id))
       .where(and(...conditions))
-      .orderBy(desc(workOrders.createdAt))
+      // Départage par id : à date égale, un OT pouvait revenir sur deux pages et un autre être sauté.
+      .orderBy(desc(workOrders.createdAt), desc(workOrders.id))
       .limit(limit || 50)
       .offset(offset || 0);
 

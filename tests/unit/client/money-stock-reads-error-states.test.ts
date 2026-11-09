@@ -157,7 +157,9 @@ describe("rapport PDF des coûts de maintenance", () => {
   it("véhicules ou utilisateurs illisibles : refus, pas des lignes « N/A »", () => {
     // Véhicules : `fetchAllVehicles` refuse lui-même (ReportRefusedError) une lecture incomplète.
     expect(report).toMatch(/const vehicles = await fetchAllVehicles\(\)/);
-    expect(report).toMatch(/if \(!Array\.isArray\(users\)\) \{\s*throw new ReportRefusedError/);
+    // Utilisateurs : `/api/users` ne pagine pas ; `fetchAllUsers` refuse un échec et borne le volume.
+    expect(report).toMatch(/const usersList = await fetchAllUsers\(\)/);
+    expect(report).not.toMatch(/fetch\(['"`]\/api\/users['"`]\)/);
   });
 
   it("plus de lecture de /api/parts/used, qui ne nourrissait aucun calcul", () => {
