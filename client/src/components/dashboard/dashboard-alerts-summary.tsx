@@ -4,6 +4,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useLocation } from "wouter";
+import { listQueryView, readyData } from "@/lib/query-view";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { 
   AlertCircle, 
   AlertTriangle, 
@@ -40,12 +42,16 @@ export function DashboardAlertsSummary() {
   const [, setLocation] = useLocation();
   
   // Récupérer toutes les alertes depuis la base de données
-  const { data: allDatabaseAlerts, isLoading: alertsLoading } = useQuery<any>({
+  const alertsQuery = useQuery<unknown>({
     queryKey: ["/api/alerts"],
   });
+  // Alertes illisibles : erreur et « Réessayer », jamais « Aucune alerte récente ».
+  const alertsView = listQueryView<DatabaseAlert>(alertsQuery);
+  const alertsLoading = alertsView.kind === "loading";
+  const allDatabaseAlerts = readyData(alertsView, [] as DatabaseAlert[]);
 
   // Convertir les alertes de base de données en format uniforme
-  const convertedAlerts: Alert[] = Array.isArray(allDatabaseAlerts) ? allDatabaseAlerts.map((alert: DatabaseAlert) => {
+  const convertedAlerts: Alert[] = allDatabaseAlerts.map((alert: DatabaseAlert) => {
     // Mapper les types d'alertes des triggers vers les types du frontend
     let mappedType = alert.type;
     let mappedPriority = 'medium';
@@ -91,7 +97,7 @@ export function DashboardAlertsSummary() {
       isRead: alert.isRead,
       createdAt: alert.createdAt
     };
-  }) : [];
+  });
 
   // Trier par priorité puis par date et prendre les 3 plus récentes
   const priorityOrder = { critical: 3, high: 2, medium: 1, low: 0 };
@@ -188,14 +194,22 @@ export function DashboardAlertsSummary() {
               onClick={() => setLocation('/alerts')}
               className="h-8 px-2 text-xs"
             >
-              Voir toutes ({totalCount})
+              {alertsView.kind === "error" ? "Voir toutes" : `Voir toutes (${totalCount})`}
               <ChevronRight className="h-3 w-3 ml-1" />
             </Button>
           </div>
         </div>
       </CardHeader>
       <CardContent>
-        {alertsLoading ? (
+        {alertsView.kind === "error" ? (
+          <InlineQueryError
+            error={alertsView.error}
+            fallback="Les alertes sont momentanément indisponibles."
+            onRetry={() => void alertsQuery.refetch()}
+            isRetrying={alertsView.isRetrying}
+            data-testid="dashboard-alerts-error"
+          />
+        ) : alertsLoading ? (
           <div className="flex items-center justify-center h-20">
             <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
           </div>
