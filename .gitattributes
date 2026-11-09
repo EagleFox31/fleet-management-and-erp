@@ -8,5 +8,9 @@ deploy/*.sh text eol=lf
 docs/analysis/LESSONS_LEARNED.md merge=union
 docs/journal/*.md merge=union
 PASSATION*.md merge=union
+# Journal de couverture : un fichier par entrée, plus de conflit (tests/unit/docs/journal-fragments.test.ts).
+# LF fixé : le test de non-perte recolle les fragments et compare une empreinte.
+docs/qa/journal/** text eol=lf
+
 # Le README du journal se réécrit : fusion normale, conflit visible.
 docs/journal/README.md merge=text
