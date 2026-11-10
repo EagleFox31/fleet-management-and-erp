@@ -12,7 +12,7 @@ describe("page périmètre", () => {
     for (const f of trial) {
       expect(FEATURE_FLAGS[f.key].level).toBe("should");
       expect(f.label).toBe(FEATURE_FLAGS[f.key].label);
-      expect(f.enabled).toBe(false);
+      expect(f.enabled).toBe(FEATURE_FLAGS[f.key].defaultEnabled);
     }
   });
 

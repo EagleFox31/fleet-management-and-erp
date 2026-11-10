@@ -8,12 +8,19 @@
 import { z } from "zod";
 import { isoDateSchema, isoDateTimeSchema, MAX_DB_INTEGER_ID } from "./common";
 
+export const FUEL_ANOMALY_RULES = ["consumption-gap", "tank-overflow", "odometer-regression"] as const;
+export type FuelAnomalyRule = (typeof FUEL_ANOMALY_RULES)[number];
+
 export const fuelAnomalyPath = (anomalyKey: string) => `/api/fuel-card/anomalies/${encodeURIComponent(anomalyKey)}`;
 
-/** Le plein de la clé sert d'id en base : borné à l'int4, sinon la requête répond 500. */
+/**
+ * La règle est l'une des règles calculées (sinon on justifierait d'avance une anomalie inexistante).
+ * Le plein de la clé sert d'id en base : borné à l'int4, sinon la requête répond 500.
+ */
 export const fuelAnomalyKeySchema = z
   .string()
   .regex(/^[a-z][a-z0-9-]*:\d+$/, "Clé d'anomalie invalide.")
+  .refine((key) => (FUEL_ANOMALY_RULES as readonly string[]).includes(key.slice(0, key.indexOf(":"))), "Clé d'anomalie invalide.")
   .refine((key) => Number(key.slice(key.indexOf(":") + 1)) <= MAX_DB_INTEGER_ID, "Clé d'anomalie invalide.");
 export const fuelAnomalyParamsSchema = z.object({ id: fuelAnomalyKeySchema });
 
@@ -55,9 +62,6 @@ export type FuelAnomalyResolution = z.infer<typeof fuelAnomalyResolutionSchema>;
  * Le statut est celui de la dernière décision, `open` sans décision.
  */
 export const FUEL_ANOMALIES_PATH = "/api/fuel-card/anomalies";
-export const FUEL_ANOMALY_RULES = ["consumption-gap", "tank-overflow", "odometer-regression"] as const;
-export type FuelAnomalyRule = (typeof FUEL_ANOMALY_RULES)[number];
-
 /** Compteur de l'écran : véhicules sans capacité de réservoir, pour lesquels `tank-overflow` ne dit rien. */
 export const FUEL_ANOMALIES_SUMMARY_PATH = "/api/fuel-card/anomalies/summary";
 export const fuelAnomaliesSummarySchema = z.object({
