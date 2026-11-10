@@ -39,7 +39,6 @@ import {
 import { enqueueOfflineWrite, replayOfflineQueue } from "@/lib/offline-queue";
 import { RESUME_DB, RESUME_KEY } from "@/lib/offline-resume";
 import { offlineResume } from "@/lib/offline-kv";
-import { RESUME_DB, RESUME_KEY } from "@/lib/offline-resume";
 import { confirmOfflineSession, getActiveOfflineUserId, setActiveOfflineUserId } from "@/lib/offline-user-scope";
 
 const ON = { "driver-offline": true, "offline-writes": true };
