@@ -92,7 +92,7 @@ Plan établi le 2026-11-10 sur main e7b0f5ba. Les numéros de ligne ci-dessous v
 - **e. `cancelled` reste possible en base.** Le trigger le traite comme un statut terminal : aucune sortie, aucune modification de montant.
 
 ### Réserves
-1. Aucune route HTTP ne peut activer `withMoneyOverride`. Il ne sert qu'en migration, en script ou en restauration, et chaque usage est journalisé avec son motif. La garde d'hygiène l'interdit dans `server/api/**` et `server/routes.ts`.
+1. Aucune route HTTP ne lève le verrou, sauf une exception assumée (décision de 0a, 2026-11-10) : la restauration de sauvegarde. `server/services/backup-import-service.ts` appelle `withMoneyOverride(tx, "restauration de sauvegarde")` avant de vider `fuel_records`, et `server/api/admin-import-backup.routes.ts` (`POST /admin/import-backup`, `isAdmin`) l'atteint. Le motif est journalisé. La garde d'hygiène l'interdit ailleurs dans `server/api/**` et `server/routes.ts`, et fige que cette route est la seule à atteindre `backup-import-service` (scan des imports de `server/**`). Toute autre levée exige de modifier cette liste blanche, donc une revue.
 2. Les PR 2 et 3 (pleins) passent en priorité : b7 attend ce verrou pour activer fuel-vouchers. Prévenir b7 à la fusion.
 3. aa modifie `generateInvoiceFromMission` (vers la ligne 118) : éviter tout conflit sur ce fichier.
 4. Revue sécurité obligatoire sur les PR 2 à 5. Envoyer à 0a chaque SHA final.

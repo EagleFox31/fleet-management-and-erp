@@ -864,3 +864,7 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Pourquoi** : audit sécurité de #533, `validateInvoice` contournait le correctif.
 - **Preuve** : mutants tués : validate sans filtre (5 échecs), approve sans filtre (7), diffusion systématique validate (1) et approve (1).
 - **Hors périmètre** : `syncInvoiceFromReconciledSettlements` fait passer `disputed` à `paid`.
+
+## 2026-11-10 — Verrou d'argent : compléments de relecture de la PR1
+- **Quoi** : `deleteFuelRecordsWhere` et `deleteClientInvoicesWhere` exigent un `SQL` (un `undefined` viderait la table verrou levé) ; le ROLLBACK de `deleteFuelRecordsByVehiclesRaw` ne masque plus l'erreur d'origine (échec journalisé par `moduleLogger`, erreur d'origine relancée) ; exception de la restauration de sauvegarde écrite dans `docs/plans/v1-verrou-argent.md` (Réserves) et figée par un test d'hygiène sur les imports de `server/**` ; décompte corrigé dans le fragment de journal de la PR1 (43 DELETE migrés plus 2 en recette).
+- **Preuve** : `money-override-hygiene.test.ts` 6/6 ; `tsc --noEmit` 0 erreur.
