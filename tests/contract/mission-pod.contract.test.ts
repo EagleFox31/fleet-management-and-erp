@@ -48,7 +48,7 @@ const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]), Buff
 const HEIC = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypheic"), Buffer.alloc(16)]);
 const SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
 
-async function newMission(status: "draft" | "in_progress" | "delivered" = "in_progress", assignedDriver = false) {
+async function newMission(status: "draft" | "cancelled" | "in_progress" | "delivered" = "in_progress", assignedDriver = false) {
   const [mission] = await db
     .insert(missions)
     .values({ orderNumber: uniqueTestToken("POD"), pickupAddress: "TEST A", deliveryAddress: "TEST B", status } as any)
@@ -238,6 +238,93 @@ describe("POD : dépôt par la logistique", { timeout: 180000 }, () => {
     const mission = await newMission();
     const res = await upload(mission.id, []);
     expect(res.status).toBe(400);
+  });
+
+  it("mission annulée ou en brouillon : 409 avant multer, aucun dossier créé", async () => {
+    for (const status of ["draft", "cancelled"] as const) {
+      const mission = await newMission(status);
+      const res = await upload(mission.id, [{ name: "bon.pdf", type: "application/pdf", data: tinyPdf() }]);
+      expect(apiErrorProblems(res.status, res.body, 409)).toEqual([]);
+      expect(fs.existsSync(podDir(mission.id))).toBe(false);
+    }
+  });
+
+  it("plafond de 50 fichiers par mission : le 51e est refusé en 409, rien n'est gardé", async () => {
+    const mission = await newMission();
+    for (let i = 0; i < 49; i += 1) await seedPodFile(mission.id, actors.userIdOf("logistics"));
+    const ok = await upload(mission.id, [{ name: "cinquantieme.pdf", type: "application/pdf", data: tinyPdf() }]);
+    expect(ok.status).toBe(201);
+    expect(ok.body.fileCount).toBe(50);
+    const before = filesOnDisk(mission.id).length;
+    const res = await upload(mission.id, [{ name: "de-trop.pdf", type: "application/pdf", data: tinyPdf() }]);
+    expect(apiErrorProblems(res.status, res.body, 409)).toEqual([]);
+    expect(res.body.message).toBe("Cinquante fichiers au plus par mission : supprimez-en avant d'en ajouter.");
+    expect(JSON.stringify(res.body)).not.toMatch(/busboy|multer|select|insert/i);
+    expect(await rowsOf(mission.id)).toHaveLength(50);
+    expect(filesOnDisk(mission.id)).toHaveLength(before);
+  });
+});
+
+describe("POD : corps multipart refusé sans résidu", { timeout: 180000 }, () => {
+  const BOUNDARY = "----podboundary";
+  const rawPost = async (missionId: number, body: Buffer | string) => {
+    const response = await fetch(`${actors.baseUrl}/api/missions/${missionId}/pod-files`, {
+      method: "POST",
+      headers: { Cookie: actors.cookies.get("logistics")!, "Content-Type": `multipart/form-data; boundary=${BOUNDARY}` },
+      body: typeof body === "string" ? body : new Uint8Array(body),
+    });
+    return { status: response.status, body: await response.json().catch(() => null) };
+  };
+  const filePart = (name: string, content: Buffer) =>
+    Buffer.concat([
+      Buffer.from(`--${BOUNDARY}\r\nContent-Disposition: form-data; name="files"; filename="${name}"\r\nContent-Type: application/pdf\r\n\r\n`),
+      content,
+      Buffer.from("\r\n"),
+    ]);
+  const expectClean = (res: { status: number; body: any }, missionId: number) => {
+    expect(apiErrorProblems(res.status, res.body, 400)).toEqual([]);
+    expect(JSON.stringify(res.body)).not.toMatch(/busboy|multipart|unexpected end|boundary|multer/i);
+    expect(filesOnDisk(missionId)).toEqual([]);
+  };
+
+  it("multipart tronqué : 400 lisible, aucun fichier résiduel", async () => {
+    const mission = await newMission();
+    const truncated = Buffer.concat([filePart("bon.pdf", tinyPdf()).subarray(0, -40)]);
+    const res = await rawPost(mission.id, truncated);
+    expectClean(res, mission.id);
+    expect(await rowsOf(mission.id)).toHaveLength(0);
+  });
+
+  it("sixième champ texte : 400 lisible, aucun fichier résiduel", async () => {
+    const mission = await newMission();
+    const fields = Array.from({ length: 6 }, (_, i) => Buffer.from(`--${BOUNDARY}\r\nContent-Disposition: form-data; name="f${i}"\r\n\r\nx\r\n`));
+    const body = Buffer.concat([filePart("bon.pdf", tinyPdf()), ...fields, Buffer.from(`--${BOUNDARY}--\r\n`)]);
+    const res = await rawPost(mission.id, body);
+    expectClean(res, mission.id);
+    expect(await rowsOf(mission.id)).toHaveLength(0);
+  });
+
+  it("onze fichiers : 400 « Dix fichiers au plus », aucun fichier résiduel", async () => {
+    const mission = await newMission();
+    const files = Array.from({ length: 11 }, (_, i) => ({ name: `bon-${i}.pdf`, type: "application/pdf", data: tinyPdf() }));
+    const res = await upload(mission.id, files);
+    expectClean(res, mission.id);
+    expect(res.body.message).toContain("Dix fichiers au plus");
+    expect(await rowsOf(mission.id)).toHaveLength(0);
+  });
+
+  it("panne d'écriture (dossier de dépôt occupé par un fichier) : 5xx, jamais « dépôt invalide »", async () => {
+    const mission = await newMission();
+    fs.mkdirSync(path.dirname(podDir(mission.id)), { recursive: true });
+    fs.writeFileSync(podDir(mission.id), "occupe"); // mkdirSync échoue (EEXIST / ENOTDIR)
+    try {
+      const res = await upload(mission.id, [{ name: "bon.pdf", type: "application/pdf", data: tinyPdf() }]);
+      expect(res.status).toBeGreaterThanOrEqual(500);
+      expect(JSON.stringify(res.body)).not.toMatch(/ENOTDIR|EEXIST|mkdir|uploads/i);
+      expect(res.body.message).not.toBe("Dépôt de fichiers invalide.");
+    } finally {
+      fs.rmSync(podDir(mission.id), { force: true });
+    }
   });
 });
 

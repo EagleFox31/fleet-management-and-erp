@@ -98,6 +98,7 @@ export function PodDepositButton({
         data-testid={`${testId}-input`}
         onChange={(e) => {
           const picked = Array.from(e.target.files ?? []);
+          e.target.value = ""; // reprendre le même fichier après un échec
           if (picked.length > 0) upload.submit({ missionId, files: picked });
         }}
       />

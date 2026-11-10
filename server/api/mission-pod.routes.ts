@@ -35,6 +35,13 @@ const log = moduleLogger("mission-pod");
 
 export const POD_MAX_FILE_BYTES = 10 * 1024 * 1024;
 export const POD_MAX_FILES = 10;
+/** Plafond de fichiers conservés par mission, toutes remises confondues. */
+export const POD_MAX_FILES_PER_MISSION = 50;
+const POD_TOO_MANY_MESSAGE = "Cinquante fichiers au plus par mission : supprimez-en avant d'en ajouter.";
+const POD_INVALID_MESSAGE = "Dépôt de fichiers invalide.";
+const POD_STORAGE_MESSAGE = "Le dépôt n'a pas pu être enregistré. Réessayez dans un instant.";
+/** Messages de busboy / multer pour un corps multipart tronqué ou mal formé (erreur du client). */
+const MALFORMED_MULTIPART = /^(unexpected end of|malformed|missing content-type|unsupported content type|multipart: boundary not found|part terminated early)/i;
 const POD_ROOT = ["uploads", "missions", "pod"] as const;
 /** Statuts où une preuve a un sens : la livraison est en cours, faite ou close. */
 const POD_ALLOWED_STATUSES = ["in_progress", "delivered", "completed"] as const;
@@ -68,6 +75,9 @@ function refusedFormat(file: { mimetype: string; originalname: string }): AppErr
   return new AppError(400, heic ? HEIC_UPLOAD_MESSAGE : UNREADABLE_UPLOAD_MESSAGE);
 }
 
+/** État de la remise en cours : dossier validé et fichiers ouverts (terminés ou non). */
+type PodRequest = Request & { podDir?: string; podStarted?: string[] };
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, _file, cb) => {
@@ -80,13 +90,20 @@ const upload = multer({
           throw new AppError(400, MISSION_ID_INVALID_MESSAGE);
         }
         fs.mkdirSync(dir, { recursive: true });
+        (req as PodRequest).podDir = dir; // déjà validé ci-dessus
         cb(null, dir);
       } catch (error) {
         cb(error as Error, "");
       }
     },
     // Extension tirée du type déclaré (déjà filtré), jamais de `originalname`.
-    filename: (_req, file, cb) => cb(null, `${randomUUID()}.${EXTENSION_OF_MIME[file.mimetype as UploadMime]}`),
+    filename: (req, file, cb) => {
+      const name = `${randomUUID()}.${EXTENSION_OF_MIME[file.mimetype as UploadMime]}`;
+      // Noté dès l'ouverture : multer ne connaît que les fichiers terminés, pas celui qu'un flux tronqué laisse à moitié écrit.
+      const tracked = req as PodRequest;
+      (tracked.podStarted ??= []).push(path.join(tracked.podDir ?? "", name));
+      cb(null, name);
+    },
   }),
   fileFilter: (_req, file, cb) => {
     const extension = path.extname(file.originalname).toLowerCase();
@@ -99,12 +116,17 @@ const upload = multer({
   limits: { fileSize: POD_MAX_FILE_BYTES, files: POD_MAX_FILES, fields: 5, fieldSize: 1024 },
 }).array("files", POD_MAX_FILES);
 
-/** La mission doit exister avant multer : sinon un 404 laisse un dossier vide `mission-<id>` sur le disque. */
+/**
+ * La mission doit exister, et son statut accepter une preuve, avant multer : sinon un 404 ou un 409
+ * laisse un dossier vide `mission-<id>` (ou des fichiers à nettoyer) sur le disque.
+ * Contrôle de confort : le verrou FOR UPDATE de la transaction reste l'arbitre.
+ */
 async function ensureMissionExists(req: Request, _res: Response, next: NextFunction) {
   try {
     const missionId = parseMissionId(req.params.id);
-    const [mission] = await db.select({ id: missions.id }).from(missions).where(eq(missions.id, missionId)).limit(1);
+    const [mission] = await db.select({ id: missions.id, status: missions.status }).from(missions).where(eq(missions.id, missionId)).limit(1);
     if (!mission) throw new AppError(404, "Mission non trouvée.");
+    if (!(POD_ALLOWED_STATUSES as readonly string[]).includes(mission.status)) throw new AppError(409, POD_STATUS_MESSAGE);
     next();
   } catch (error) {
     next(error);
@@ -114,17 +136,23 @@ async function ensureMissionExists(req: Request, _res: Response, next: NextFunct
 function uploadFiles(req: Request, res: Response, next: NextFunction) {
   upload(req, res, (error: unknown) => {
     if (!error) return next();
+    removeFiles(((req as PodRequest).podStarted ?? []).map((started) => ({ path: started })));
     if (error instanceof multer.MulterError) {
       const message =
         error.code === "LIMIT_FILE_SIZE"
           ? "Un fichier dépasse 10 Mo."
           : error.code === "LIMIT_FILE_COUNT" || error.code === "LIMIT_UNEXPECTED_FILE"
             ? `Dix fichiers au plus par dépôt.`
-            : "Dépôt de fichiers invalide.";
+            : POD_INVALID_MESSAGE;
       return next(new AppError(400, message, { cause: error }));
     }
-    // Multipart tronqué ou mal formé : une erreur du client, pas un 500.
-    next(error instanceof AppError ? error : new AppError(400, "Dépôt de fichiers invalide.", { cause: error }));
+    if (error instanceof AppError) return next(error);
+    // Multipart tronqué ou mal formé : une erreur du client. Le reste (disque plein, droits) est une panne serveur.
+    if (error instanceof Error && MALFORMED_MULTIPART.test(error.message)) {
+      return next(new AppError(400, POD_INVALID_MESSAGE, { cause: error }));
+    }
+    log.error({ err: error, requestId: req.requestId, missionId: req.params.id }, "écriture d'un fichier POD impossible");
+    next(new AppError(500, POD_STORAGE_MESSAGE, { cause: error }));
   });
 }
 
@@ -242,6 +270,8 @@ router.post("/:id/pod-files", authorize([...MISSION_STATUS_ROLES]), ensureMissio
         .select({ total: count() })
         .from(missionPodFiles)
         .where(eq(missionPodFiles.missionId, missionId));
+      // Mission verrouillée : le décompte est exact. Le dépassement annule toute la remise.
+      if (total > POD_MAX_FILES_PER_MISSION) throw new AppError(409, POD_TOO_MANY_MESSAGE);
       const [latest] = await tx
         .select({ id: missionPodFiles.id })
         .from(missionPodFiles)
