@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { clientLogger } from "@/lib/logger";
 import { applyRestoredQueries } from "@/lib/offline-restore";
 import { pendingServerLogout } from "@/lib/pending-logout";
+import { purgeBrowserUserState } from "@/lib/form-draft-storage";
 import {
   DRIVER_READ_PROFILE,
   confirmOfflineSession,
@@ -124,6 +125,13 @@ export async function purgeOfflineSession(
     complete = false;
     clientLogger.error("Purge du stockage hors ligne en échec", { err });
   }
+  return complete;
+}
+
+/** Même purge locale que la déconnexion (`auth.ts`) : magasins hors ligne, cache TanStack, état navigateur. */
+async function purgeAfterLogout(queryClient: QueryClient): Promise<boolean> {
+  const complete = await purgeOfflineSession(queryClient);
+  purgeBrowserUserState();
   return complete;
 }
 
@@ -389,8 +397,10 @@ export function setupOfflinePersistence(queryClient: QueryClient): () => void {
   // Retour du réseau : déconnexion différée d'abord, puis rejeu de la file. La barrière
   // du resync temps réel est levée dans tous les cas (voir offline-replay-gate.ts).
   const handleOnline = () => {
+    // La purge locale est refaite avant d'effacer le repère : une purge restée incomplète à la déconnexion
+    // ne doit pas être oubliée parce que le serveur a fini par répondre. Repère gardé si elle échoue encore.
     void pendingServerLogout
-      .flush()
+      .flush({ beforeClear: () => purgeAfterLogout(queryClient) })
       .then((outcome) => (outcome !== "pending" ? replayOnReconnect() : undefined))
       .finally(() => releaseReplayGate());
   };
