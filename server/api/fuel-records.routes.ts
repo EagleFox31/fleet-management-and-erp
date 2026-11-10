@@ -170,7 +170,9 @@ router.delete("/fuel-records/:id", authorize([...FUEL_CARD_MANAGER_ROLES, "works
 router.post("/fuel-records/:id/cancel", authorize([...FUEL_CARD_MANAGER_ROLES, "workshop_manager"]), async (req, res, next) => {
   try {
     const id = idParam(req.params.id, "Identifiant d'enregistrement de carburant");
-    const { reason } = fuelRecordCancelSchema.parse(req.body ?? {});
+    // Seul le motif est retenu du corps : aucun autre champ ne peut atteindre la base.
+    const { reason: rawReason } = req.body ?? {};
+    const { reason } = fuelRecordCancelSchema.parse({ reason: rawReason });
     const user = req.user!;
     const result = await fuelService.cancelFuelRecord(id, { id: user.id, role: user.role }, reason);
     if (!result) throw new AppError(404, "Enregistrement de carburant non trouvé");

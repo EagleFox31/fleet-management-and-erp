@@ -34,6 +34,7 @@ const NOT_GUARDED: Record<string, string> = {
   "POST /api/missions/:p/assignments": "garde en ligne historique, 400 (vehicle-soft-delete.contract.test.ts)",
   "PUT /api/missions/:p/status": "plusieurs véhicules par affectation ; retrait refusé tant qu'une mission est ouverte",
   "POST /api/missions/:p/document-renewal-requests": "plusieurs véhicules par affectation ; retrait refusé tant qu'une mission est ouverte",
+  "POST /api/fuel-records/:p/cancel": "annule un plein existant par son id (ligne verrouillée), aucune saisie sur le véhicule",
   "PATCH /api/fuel-card/anomalies/:p": "traitement d'une anomalie (clé d'anomalie), aucune saisie sur le véhicule",
   "DELETE /api/work-orders/bulk-pending-unassigned": "purge administrative en masse, pas une saisie sur un véhicule",
   "POST /api/vehicles/activate-from-workflow": "crée le véhicule, ne vise pas un véhicule existant",
