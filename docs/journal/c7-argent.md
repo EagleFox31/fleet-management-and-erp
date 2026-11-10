@@ -208,3 +208,9 @@ Cette entrée remplace l'approche de l'entrée précédente, refusée en relectu
 - **Comment** : `createCreditNote` boucle sur `createCreditNoteOnce` ; `finance-receivables-service` lit la somme des avoirs par sous-requête et la retranche avant `computeWithholdings`.
 - **Pourquoi** : le net à payer figé au dépôt sur le TTC brut dépassait le solde après un avoir ; le rejeu muet rendait un ancien avoir pour une demande différente.
 - **Preuve** : contrats et intégration dans `client-credit-notes*.test.ts`.
+
+## 2026-11-11 - Rejeu refusé : messages lisibles, sans « clé de requête » (#691)
+- **Quoi** : les 409 de rejeu (avoirs, échéances, trésorerie : écriture, opération, virement) et les réponses de la garde d'idempotence des chauffeurs (422, 400) parlent de « saisie » ; les messages d'avoir sont des constantes du contrat (`CREDIT_NOTE_KEY_CONFLICT_MESSAGE`, `CREDIT_NOTE_KEY_OTHER_INVOICE_MESSAGE`), les messages zod de `requestKey` aussi.
+- **Comment** : constantes dans `shared/contracts/client-credit-notes.ts` et dans chaque service ; garde AST `tests/unit/server/request-key-jargon-hygiene.test.ts` (chaînes de `server/` et `shared/`, journaux exclus, liste gelée vide).
+- **Pourquoi** : relecture de #685, un comptable qui corrigeait le montant d'un avoir après une coupure lisait « Cette clé de requête est déjà utilisée » (règle LESSONS_LEARNED : pas de libellé technique dans l'UI).
+- **Preuve** : garde rouge sur main (11 occurrences), verte ici ; contrats avoirs, idempotence chauffeurs, échéances, trésorerie 6 fichiers 90/90 ; intégration `client-credit-notes-replay` et `treasury-schema-reconcile` vertes ; `tsc` 0, `check:tests` 0.

@@ -3755,3 +3755,13 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
 - **Résolution** : `purgeGpsBuffersOfOthers` appelé par `activateOfflineUser` (donc aussi par `session-changed`) ; l'époque est relevée par l'appelant et passée à `sendBuffered` ; le paquet déclare son propriétaire (`X-Offline-Owner`), le serveur répond 409 `OFFLINE_OWNER_MISMATCH` s'il diffère de la session.
 - **Prévention vérifiable** : `tests/unit/client/gps-account-switch.test.ts` rejoue le scénario A/B (autre onglet et même onglet). Règle : tout stockage local par utilisateur s'abonne au canal de changement de compte (`activateOfflineUser`) et son test A/B le prouve ; sans ce test, le stockage n'est pas livré.
 - **Leçon généralisée** : une règle de cloison se branche sur l'événement « le compte actif change », pas sur la déconnexion seule ; la déconnexion n'est qu'un cas.
+
+## 2026-11-11 — « Clé de requête » affiché à l'utilisateur sur un rejeu refusé (#685, #691)
+
+- **Contexte** : l'idempotence des écritures d'argent (avoirs, échéances, trésorerie, saisies chauffeur) repose sur une `requestKey` générée par le client. Le serveur refuse en 409 une même clé avec un autre contenu.
+- **Symptôme** : relecture de #685 : un comptable qui modifie le montant d'un avoir après une coupure réseau lit « Cette clé de requête est déjà utilisée… », qu'il ne peut ni comprendre ni corriger. Le même terme existait dans 11 chaînes de `server/` et `shared/`.
+- **Cause racine** : le message d'erreur a été écrit du point de vue du mécanisme (la clé) et non de l'action de l'utilisateur (sa saisie) ; chaque service a recopié le message du précédent.
+- **Classification** : near miss UX, règle connue (pas de libellé technique dans l'UI) non outillée, donc répétée.
+- **Résolution** : messages métier autour de « saisie », avec la conduite à tenir (recharger, recommencer) ; constantes partagées pour les avoirs, assertées à l'identique par le contrat.
+- **Prévention vérifiable** : `tests/unit/server/request-key-jargon-hygiene.test.ts` (AST) échoue sur toute chaîne de `server/` ou `shared/` contenant « clé de requête » ou « clé d'idempotence », hors arguments de journal ; liste gelée vide.
+- **Leçon généralisée** : un message d'erreur décrit ce que l'utilisateur a fait et ce qu'il peut faire, jamais le mécanisme qui l'a refusé. Une règle de vocabulaire qui revient se transforme en garde automatique.
