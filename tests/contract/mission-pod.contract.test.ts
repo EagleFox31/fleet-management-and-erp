@@ -293,9 +293,23 @@ describe("POD : lecture", { timeout: 180000 }, () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("content-type")).toMatch(/^application\/pdf/);
-    expect(response.headers.get("content-disposition")).toMatch(/^inline/);
+    expect(response.headers.get("content-disposition")).toMatch(/^attachment/);
     expect(response.headers.get("content-security-policy")).toBe("sandbox");
     expect((await response.text()).startsWith("%PDF-")).toBe(true);
+  });
+
+  it("image : affichée en ligne, sous bac à sable", async () => {
+    const mission = await newMission();
+    const up = await upload(mission.id, [{ name: "photo.jpg", type: "image/jpeg", data: JPEG }]);
+    expect(up.status).toBe(201);
+    const [row] = await db.select().from(missionPodFiles).where(eq(missionPodFiles.missionId, mission.id));
+    const response = await fetch(`${actors.baseUrl}/api/missions/${mission.id}/pod-files/${row.id}`, {
+      headers: { Cookie: actors.cookies.get("logistics")! },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-disposition")).toMatch(/^inline/);
+    expect(response.headers.get("content-security-policy")).toBe("sandbox");
+    await response.arrayBuffer();
   });
 
   it("nom d'origine non ASCII ou avec CR/LF : 200 et Content-Disposition valide, cache interdit", async () => {
@@ -308,7 +322,7 @@ describe("POD : lecture", { timeout: 180000 }, () => {
       });
       expect(response.status).toBe(200);
       const disposition = response.headers.get("content-disposition") ?? "";
-      expect(disposition).toMatch(/^inline; filename="[\x20-\x7e]+"/);
+      expect(disposition).toMatch(/^attachment; filename="[\x20-\x7e]+"/);
       expect(response.headers.get("x-injected")).toBeNull();
       expect(response.headers.get("cache-control")).toBe("private, no-store");
       await response.arrayBuffer();

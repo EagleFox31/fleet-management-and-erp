@@ -338,10 +338,12 @@ router.get("/:id/pod-files/:fileId", async (req, res, next) => {
     const diskPath = uploadedFileCandidates(row?.path).find((candidate) => fs.existsSync(candidate));
     if (!row || !diskPath) throw new AppError(404, "Fichier POD introuvable.");
 
-    const inline = ALLOWED_MIMES.includes(row.mime);
+    // Les PDF sortent en pièce jointe : le visionneur PDF de Chrome refuse un document sous CSP sandbox.
+    // Seules les images sont affichées en ligne.
+    const inline = row.mime.startsWith("image/");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Cache-Control", "private, no-store");
-    if (inline) res.setHeader("Content-Security-Policy", "sandbox");
+    res.setHeader("Content-Security-Policy", "sandbox");
     const headers = {
       "Content-Type": row.mime,
       "Content-Disposition": contentDisposition(inline ? "inline" : "attachment", row.originalName ?? path.basename(diskPath)),

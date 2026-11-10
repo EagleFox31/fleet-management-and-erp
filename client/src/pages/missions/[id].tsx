@@ -29,6 +29,9 @@ import { useFuelPrice } from "@/hooks/use-fuel-price";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { localDateKey } from "@/lib/fuel-price-policy";
 import { createSubmissionKeyStore, isIndeterminateOutcome, missionFuelKeyScope } from "@/lib/submission-key";
+import { MissionPodPanel, PodDepositButton } from "@/components/missions/mission-pod-panel";
+import { useMissionPodFiles } from "@/hooks/use-mission-pod";
+import { invoiceGate } from "@/lib/mission-pod";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-100 text-gray-800",
@@ -562,6 +565,8 @@ export default function MissionDetailsPage() {
     queryKey: [`/api/missions/${missionId}`],
     enabled: !!missionId,
   });
+  // Preuves de livraison : elles conditionnent la facturation. Une lecture en échec n'est jamais « aucun POD ».
+  const podFiles = useMissionPodFiles(missionId);
 
   const { data: renewalRequests } = useQuery<any[]>({
     queryKey: [`/api/missions/${missionId}/document-renewal-requests`],
@@ -707,6 +712,8 @@ export default function MissionDetailsPage() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: [`/api/missions/${missionId}`] });
       queryClient.invalidateQueries({ queryKey: ["/api/billing/invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/billing/pending-invoices"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/missions"] });
       toast({ title: "Facture créée avec succès", description: `Facture ${data.invoice.invoiceNumber} créée` });
       setOpenInvoiceDialog(false);
       setLocation(`/operations/invoices/${data.invoice.id}`);
@@ -1283,7 +1290,9 @@ export default function MissionDetailsPage() {
           : null;
 
   const canTriggerPrimaryAction = Boolean(primaryMissionAction);
-  const canGenerateClientInvoice = ["delivered", "completed"].includes(String(mission.status || ""));
+  const invoiceGateState = invoiceGate(mission.status, podFiles.read);
+  const canGenerateClientInvoice = invoiceGateState.allowed;
+  const invoiceButtonTitle = invoiceGateState.reason ?? "Créer une facture client pour cette mission";
 
   // Calcul retard départ (utilisé dans header + suivi d'exécution)
   const departureDelay: { type: "late_not_started" | "late_started" | "on_time"; parts: string } | null = (() => {
@@ -2005,7 +2014,7 @@ export default function MissionDetailsPage() {
             <div className="flex items-center gap-2 flex-wrap justify-end">
               {/* Édition et budgets : gestionnaires de missions seulement (PATCH /api/missions/:id, R3). */}
               {canManageMission && (
-                <Button variant="outline" size="sm" className="h-8 px-3 text-xs gap-1.5" onClick={openEditMissionDialog}>
+                <Button variant="outline" size="sm" className="h-8 px-3 text-xs gap-1.5" onClick={openEditMissionDialog} data-testid="button-edit-mission">
                   <FileText className="h-3.5 w-3.5" /> Modifier
                 </Button>
               )}
@@ -2045,20 +2054,18 @@ export default function MissionDetailsPage() {
                 className="h-8 px-3 text-xs gap-1.5"
                 onClick={() => setOpenInvoiceDialog(true)}
                 disabled={!canGenerateClientInvoice}
-                title={canGenerateClientInvoice ? "Créer une facture client pour cette mission" : "Disponible une fois la mission livrée"}
+                title={invoiceButtonTitle}
                 data-testid="button-open-generate-invoice-dialog"
               >
                 <FileText className="h-3.5 w-3.5" /> Générer facture
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 px-3 text-xs gap-1.5 opacity-50 cursor-not-allowed"
-                disabled
-                title={mission.status === "delivered" || mission.status === "completed" ? undefined : "Disponible une fois la mission livrée"}
-              >
-                <Package className="h-3.5 w-3.5" /> POD {(mission.status === "delivered" || mission.status === "completed") ? "" : "non disponible"}
-              </Button>
+              <PodDepositButton
+                missionId={mission.id}
+                status={mission.status}
+                role={user?.role}
+                className="h-8 px-3 text-xs gap-1.5"
+                testId="button-pod-deposit-header"
+              />
               {primaryMissionAction && canChangeMissionStatus && (
                 <Button
                   size="sm"
@@ -2073,6 +2080,12 @@ export default function MissionDetailsPage() {
               )}
             </div>
           </div>
+
+          {invoiceGateState.reason && (
+            <p className="mb-3 text-xs text-muted-foreground" data-testid="invoice-gate-reason" role="status">
+              Facturation : {invoiceGateState.reason}
+            </p>
+          )}
 
           {/* Status badge */}
           <div className="flex gap-2 mb-4 flex-wrap items-center">
@@ -2178,6 +2191,7 @@ export default function MissionDetailsPage() {
         ]} />
 
         <TabsContent value="details" className="space-y-4 mt-4">
+          <MissionPodPanel missionId={mission.id} status={mission.status} role={user?.role} />
           <MissionPriceCard
             missionId={mission.id}
             status={mission.status}
@@ -2860,7 +2874,7 @@ export default function MissionDetailsPage() {
               className="h-8 px-3 text-xs gap-1.5 bg-success hover:brightness-90 text-white"
               onClick={() => setOpenInvoiceDialog(true)}
               disabled={!canGenerateClientInvoice}
-              title={canGenerateClientInvoice ? "Créer une facture client pour cette mission" : "Disponible une fois la mission livrée"}
+              title={invoiceButtonTitle}
               data-testid="button-open-generate-invoice-dialog-tab"
             >
               <FileText className="h-3.5 w-3.5" />
