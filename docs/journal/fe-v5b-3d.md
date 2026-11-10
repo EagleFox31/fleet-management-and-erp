@@ -54,3 +54,10 @@
 - Pourquoi : avec une reprise accordée (`isLoading` faux), le voile habituel ne s'affiche pas, et la garde rendait `null` : écran blanc pour un profil ajouté au marqueur sans accueil.
 - Preuve du rouge : le cas « profil sans accueil restreint » échouait (« expected '' not to be '' »), puis vert. Les trois autres cas de la garde (routes, accueil chauffeur, renvoi vers l'accueil) sont figés aussi : c'est le test unitaire du voile du mineur 3 de la relecture (un seul commit pour les deux).
 - Tester : `node node_modules/vitest/vitest.mjs run tests/unit/client/offline-shell-gate.test.ts`.
+
+## Relecture de #682, mineur 1 : purge refaite sur le chemin 401 de la déconnexion en attente
+
+- Quoi : trois cas dans `pending-logout-purge.test.ts` pour le chemin « le serveur répond 401 au POST de déconnexion » (`pending-logout.ts`, `run`) : purge appelée avec le repère encore présent puis repère effacé, purge incomplète (faux) et purge qui lève : le repère reste.
+- Pourquoi : seul le chemin « 200 » était couvert ; la purge du chemin 401 pouvait disparaître sans qu'un test rougisse.
+- Preuve du rouge : purge retirée du chemin 401 (mutation temporaire) : 3 échecs ; code restauré : 8 verts. Aucun changement de code produit.
+- Tester : `node node_modules/vitest/vitest.mjs run tests/unit/client/pending-logout-purge.test.ts`.
