@@ -31,7 +31,14 @@ if (!existsSync(path.join(root, "index.html"))) {
 
 createServer((req, res) => {
   const url = new URL(req.url || "/", "http://localhost");
-  const pathname = decodeURIComponent(url.pathname);
+  let pathname;
+  try {
+    pathname = decodeURIComponent(url.pathname);
+  } catch {
+    // Pourcentage mal formé (%E0%A4%A) : requête invalide, pas une exception du serveur.
+    res.writeHead(400).end();
+    return;
+  }
   if (/^\/api(\/|$)/i.test(pathname.replace(/\/{2,}/g, "/"))) {
     res.writeHead(401, { "content-type": "application/json" });
     res.end(JSON.stringify({ message: "Non authentifié", code: "UNAUTHENTICATED" }));

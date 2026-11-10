@@ -75,3 +75,10 @@
 - Appelants de `listOfflineDbs` : `cacheOwnership` (lecture seule, unknown si incomplet), `purgeAll` (purge les noms, lève si incomplet), `purgeOthers` (purge les noms, `false` si incomplet). Seul `offline-kv.listDbs` implémente l'énumération réelle.
 - Rouge avant correctif : 3 échecs ("expected +0 to be false", "expected [ { …(2) } ] to deeply equal []", "expected 'unknown' to be 'foreign'").
 - Reste (non fait) : 2 échecs à examiner dans `offline-resume-replay.test.ts` (C1, vus sous `--pool=vmThreads`, car le pool par défaut échoue ici sur "Vitest failed to find the runner" pour une raison d'environnement), constat 2 (update() du SW, controllerchange, bandeau), mineur decodeURIComponent, notes polices/5,5 Mo, specs 21 et 33 sur base locale.
+
+## Audit de #687, constat 2 et mineurs
+
+- Constat 2 : `sw.js` appelle `self.registration.update()` quand la coquille en cache est servie après le délai de 4 s (rouge « expected +0 to be 1 », puis vert ; test inverse : réponse réseau dans le délai, aucun update). `pwa-update.ts` recharge une seule fois au `controllerchange` (sauf première prise de contrôle) et, si un brouillon de formulaire non vide existe (clés `fleetos-<forme>-v<n>-<user>`), affiche `PwaUpdateBanner` (« Nouvelle version disponible. Recharger », icône lucide) à la place. Tests : `tests/unit/client/pwa-update.test.ts` (rouge par mutation : retirer la garde « une seule fois » donne 2 échecs, « called 1 times, but got 3 times »).
+- Mineur : `scripts/e2e-static-shell.mjs` répond 400 à un pourcentage mal formé au lieu de lever.
+- Accepté : les polices Google (autre origine) ne sont pas en cache, la police système prend le relais hors ligne. Backlog : auto-héberger les polices.
+- Accepté : le précache pèse environ 5,5 Mo (30 fichiers) au premier chargement.
