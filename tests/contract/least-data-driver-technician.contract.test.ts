@@ -8,6 +8,7 @@ import { uniqueTestToken } from "../support/ids";
 /**
  * Moindre donnée pour le chauffeur et le technicien : ni l'un ni l'autre n'a d'écran sur l'annuaire
  * des chauffeurs, leurs CPC, les missions d'un autre chauffeur ou les preuves de livraison. Le
+ * technicien n'a en plus aucune lecture de mission ni d'exploitation (MISSION_READ_ROLES). Le
  * chauffeur garde ses propres missions et le POD des siennes ; le reste du personnel garde tout.
  */
 type Actor = "logistics" | "warehouse" | "driver" | "technician";
@@ -112,5 +113,43 @@ describe("POD d'une mission en lecture", { timeout: 60000 }, () => {
     expect(own.status).toBe(200);
     const other = await session.call("GET", `/api/missions/${otherMissionId}/pod-files`, { actor: "driver" });
     expect(other.status).toBe(403);
+  });
+});
+
+describe("autres lectures de mission et d'exploitation", { timeout: 60000 }, () => {
+  const missionPaths = () => [
+    `/api/missions/${otherMissionId}/launch-readiness`,
+    `/api/missions/${otherMissionId}/document-renewal-requests`,
+    "/api/operations/missions",
+    "/api/operations/missions/upcoming",
+    "/api/operations/missions/active",
+    "/api/operations/missions/by-client/TEST",
+    "/api/operations/stats/by-client",
+    "/api/operations/stats/by-destination",
+    `/api/operations/missions/${otherMissionId}/costs`,
+  ];
+
+  it("technicien refusé partout, sans donnée de mission dans le refus", async () => {
+    for (const path of missionPaths()) {
+      const res = await session.call("GET", path, { actor: "technician" });
+      expect(res.status, path).toBe(403);
+      expect(JSON.stringify(res.body), path).not.toContain("TEST B");
+    }
+  });
+
+  it("logistique garde l'accès", async () => {
+    for (const path of missionPaths()) {
+      const res = await session.call("GET", path, { actor: "logistics" });
+      expect([401, 403], path).not.toContain(res.status);
+    }
+  });
+
+  it("chauffeur : sa mission et ses listes d'exploitation restent lisibles", async () => {
+    const readiness = await session.call("GET", `/api/missions/${ownMissionId}/launch-readiness`, { actor: "driver" });
+    expect(readiness.status).toBe(200);
+    const active = await session.call("GET", "/api/operations/missions/active", { actor: "driver" });
+    expect(active.status).toBe(200);
+    expect(active.body.map((m: any) => m.id)).toContain(ownMissionId);
+    expect(active.body.map((m: any) => m.id)).not.toContain(otherMissionId);
   });
 });

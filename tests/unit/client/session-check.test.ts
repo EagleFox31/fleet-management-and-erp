@@ -34,6 +34,21 @@ describe("checkSession : seul un 401 vaut déconnexion", () => {
   });
 });
 
+describe("checkSession : 200 JSON qui n'est pas un utilisateur", () => {
+  it.each([
+    ["objet vide", {}],
+    ["null", null],
+    ["tableau", []],
+    ["id absent", { username: "x" }],
+    ["id en texte", { id: "7" }],
+    ["id nul", { id: 0 }],
+    ["id négatif", { id: -3 }],
+    ["id décimal", { id: 1.5 }],
+  ])("%s : injoignable avec httpStatus 200 (comme un 200 non JSON), jamais authentifié", async (_label, body) => {
+    expect(await checkSession(respond(200, body))).toEqual({ status: "unreachable", httpStatus: 200 });
+  });
+});
+
 describe("nextSessionRetryDelay", () => {
   it("double jusqu'à 10 s puis plafonne", () => {
     expect([1, 2, 3, 4, 5, 9].map(nextSessionRetryDelay)).toEqual([1_000, 2_000, 4_000, 8_000, 10_000, 10_000]);

@@ -3,6 +3,7 @@ import { routeIdSchema } from "@shared/contracts/common";
 import { requireFeature } from "../lib/feature-flags";
 import { gpsBatchSchema, parseOsmandReport, toGpsPoint } from "../lib/gps-points";
 import { AppError } from "../lib/app-error";
+import { OFFLINE_OWNER_HEADER } from "../lib/idempotency-config";
 import { authorize } from "../middleware/auth";
 import { activeMissionIdOf, ingestDriverPositions } from "../services/vehicle-positions-service";
 
@@ -35,6 +36,21 @@ const jsonOnly: RequestHandler = (req, _res, next) => {
   next();
 };
 
+/**
+ * Propriétaire déclaré du paquet (`X-Offline-Owner`, posé par le tampon du navigateur) : le cookie est
+ * partagé entre onglets, un autre compte connecté entre-temps ne doit pas recevoir les points de l'ancien.
+ * Sans l'en-tête, la requête passe comme avant.
+ */
+const ownerMatchesSession: RequestHandler = (req, _res, next) => {
+  const owner = req.get(OFFLINE_OWNER_HEADER);
+  if (owner === undefined || (/^\d{1,9}$/.test(owner.trim()) && Number(owner.trim()) === req.user?.id)) return next();
+  next(
+    new AppError(409, "Ces envois appartiennent à un autre compte. Reconnectez-vous avec le compte qui les a enregistrés.", {
+      code: "OFFLINE_OWNER_MISMATCH",
+    }),
+  );
+};
+
 const postBatch: RequestHandler = async (req, res, next) => {
   try {
     const missionId = routeIdSchema.parse(req.params.id);
@@ -60,7 +76,7 @@ const postOsmand: RequestHandler = async (req, res, next) => {
   }
 };
 
-router.post("/driver/missions/:id/positions", requireFeature("gps"), authorize(["driver"]), jsonOnly, postBatch);
+router.post("/driver/missions/:id/positions", requireFeature("gps"), authorize(["driver"]), jsonOnly, ownerMatchesSession, postBatch);
 router.post("/driver/positions", requireFeature("gps"), authorize(["driver"]), jsonOnly, postOsmand);
 
 export default router;

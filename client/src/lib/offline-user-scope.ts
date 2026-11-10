@@ -524,6 +524,22 @@ export function createOfflineScope(kv: OfflineKv) {
       return persistable.length;
     },
 
+    /**
+     * Avant toute reprise hors ligne : le cache de lecture appartient-il bien à `userId` ? « foreign » si
+     * l'enveloppe de son magasin porte un autre propriétaire, ou si un autre compte garde une copie de
+     * lecture sur l'appareil (il n'y en a qu'une à la fois). Lecture seule, rien n'est supprimé ici.
+     */
+    async cacheOwnership(userId: number): Promise<"ok" | "foreign"> {
+      const own = offlineDbName(userId);
+      const saved = await kv.get<CacheEnvelope>(own, CACHE_RECORD_KEY);
+      if (saved !== undefined && (saved === null || typeof saved !== "object" || saved.userId !== userId)) return "foreign";
+      const others = ((await listOfflineDbs()) ?? []).filter((name) => name !== own);
+      for (const name of others) {
+        if ((await kv.get<unknown>(name, CACHE_RECORD_KEY)) !== undefined) return "foreign";
+      }
+      return "ok";
+    },
+
     async loadCache(userId: number, now = Date.now(), isFlagOn?: FlagReader): Promise<PersistedQuery[]> {
       const db = offlineDbName(userId);
       const saved = await kv.get<CacheEnvelope>(db, CACHE_RECORD_KEY);
