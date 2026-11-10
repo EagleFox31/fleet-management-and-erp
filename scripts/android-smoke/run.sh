@@ -42,18 +42,10 @@ relaunch() {
 }
 
 # --- 1. En ligne ---------------------------------------------------------------------------
-# localhost:<port> de l'émulateur -> serveur témoin de l'hôte. On vérifie qu'il répond avant le
-# premier lancement : sinon l'APK afficherait sa page hors ligne.
+# localhost:<port> de l'émulateur -> serveur témoin de l'hôte. Si le premier lancement tombe
+# sur la page hors ligne (serveur pas encore prêt), la boucle ci-dessous relance l'app.
 adb wait-for-device
 adb reverse "tcp:$PORT" "tcp:$PORT"
-for i in $(seq 1 60); do
-  if adb shell "nc -z -w 2 127.0.0.1 $PORT" > /dev/null 2>&1; then
-    echo "Serveur témoin joignable depuis l'émulateur (essai $i)."
-    break
-  fi
-  [ "$i" = 60 ] && echo "::warning::nc n'a pas joint localhost:$PORT en 120 s, lancement quand même."
-  sleep 2
-done
 adb install -r "$APK"
 for attempt in 1 2 3; do
   if [ "$attempt" = 1 ]; then adb shell am start -W -n "$APP/.MainActivity"; else relaunch; fi
