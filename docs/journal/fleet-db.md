@@ -110,3 +110,11 @@ Règles : `docs/journal/README.md`.
 - **Écarts au plan §5** : `mission_id` en CASCADE (SET NULL violerait `vehicle_positions_phone_check`) ; pas de `geo_source` (déduit du code de hub) ; `device_id` sans FK (`telemetry_devices` absente) ; `suspect` ajouté (§6).
 - **Incident évité** : l'insertion scriptée de la constante dans `init-database.ts` par `String.replace` avait changé `$$` en `$` ; le test des jumelles l'a détecté avant tout commit (remplacement par fonction depuis).
 - **Reste / risques** : le serveur doit refuser un point plus vieux que la rétention (sinon un rejeu après purge le réinsère) et planifier la purge quotidienne.
+
+## 2026-11-10T16:45:00+01:00 — GPS-DB — Suites de relecture de #657
+
+- **Agent** : fleet-db · **Branche** : `feat/gps-phone-db` · **Commit** : voir `git log` (nouveau commit, pas d'amend : le lot API est empilé)
+- **Statut** : fait
+- **Quoi** : 1. `insertMissionSchema` omet les six colonnes A/B (sinon `POST /api/missions` les écrivait sans validation de hub et un 23514 donnait une 500 ; le lot API les rouvrira avec validation). 2. Bloc des contraintes : les CHECK `missions_*_geo_check` sont sautées (WARNING) si les colonnes A/B manquent, cas d'un bloc colonnes abandonné sur `lock_not_available` (sinon 42703 et démarrage en échec) ; les deux jumelles identiques. 3. Doc : points `tracker` non dédoublonnés par la contrainte unique (NULL distincts), à traiter au lot balises. 4. Leçon `$$` → `$` par `String.replace`.
+- **Preuve automatisée** : unitaire « insertMissionSchema ferme les six colonnes A/B » ; intégration « missions verrouillée à l'ajout des colonnes A/B » (verrou simulé par un event trigger annulé avec la transaction : démarrage poursuivi sans les deux CHECK, puis posées et validées au démarrage suivant).
+- **Reste / risques** : aucun effet en base partagée.

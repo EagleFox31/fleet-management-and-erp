@@ -85,6 +85,14 @@ BEGIN
     ('missions', 'missions_pickup_geo_check', 'CHECK ((pickup_lat IS NULL) = (pickup_lng IS NULL) AND (pickup_lat IS NULL OR (pickup_lat BETWEEN -90 AND 90 AND pickup_lng BETWEEN -180 AND 180)) AND (pickup_hub_code IS NULL OR (pickup_lat IS NOT NULL AND pickup_hub_code <> '''')))'),
     ('missions', 'missions_delivery_geo_check', 'CHECK ((delivery_lat IS NULL) = (delivery_lng IS NULL) AND (delivery_lat IS NULL OR (delivery_lat BETWEEN -90 AND 90 AND delivery_lng BETWEEN -180 AND 180)) AND (delivery_hub_code IS NULL OR (delivery_lat IS NOT NULL AND delivery_hub_code <> '''')))')
   ) AS v(tbl, name, def) LOOP
+    -- Bloc précédent abandonné sur verrou : colonnes A/B absentes, contrainte sautée (sinon 42703 et démarrage
+    -- en échec) ; reportCdcConstraintGaps la signale, le démarrage suivant la pose.
+    IF c.tbl = 'missions' AND (SELECT count(*) FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'missions'
+          AND column_name IN ('pickup_lat', 'pickup_lng', 'pickup_hub_code', 'delivery_lat', 'delivery_lng', 'delivery_hub_code')) < 6 THEN
+      RAISE WARNING 'missions : colonnes A/B absentes, contrainte % non posée', c.name;
+      CONTINUE;
+    END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name) THEN
       EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I %s NOT VALID', c.tbl, c.name, c.def);
     END IF;

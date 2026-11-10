@@ -6,7 +6,7 @@ import {
   gpsPositionRetentionDays,
   purgeVehiclePositions,
 } from "../../../server/lib/gps-retention";
-import { missions, vehiclePositions } from "../../../shared/schema";
+import { insertMissionSchema, missions, vehiclePositions } from "../../../shared/schema";
 
 const norm = (s: string) => s.replace(/\r\n/g, "\n").trim();
 
@@ -75,6 +75,22 @@ describe("GPS V1 : vehicle_positions, points A/B, purge — init-database, migra
       expect(config.checks.map((c) => c.name)).toContain(name);
       expect(sql, name).toContain(`('missions', '${name}', 'CHECK (`);
     }
+  });
+
+  it("insertMissionSchema ferme les six colonnes A/B : un corps de requête ne peut pas les écrire", () => {
+    const geoKeys = ["pickupLat", "pickupLng", "pickupHubCode", "deliveryLat", "deliveryLng", "deliveryHubCode"];
+    const shape = Object.keys(insertMissionSchema.shape);
+    for (const key of geoKeys) expect(shape, key).not.toContain(key);
+    // Zod (objet non strict) retire les clés inconnues : rien n'atteint l'insertion.
+    const parsed = insertMissionSchema.partial().parse({
+      pickupLat: 3.86,
+      pickupLng: 11.52,
+      pickupHubCode: "YDE",
+      deliveryLat: 4.05,
+      deliveryLng: 9.7,
+      deliveryHubCode: "DLA",
+    });
+    for (const key of geoKeys) expect(parsed, key).not.toHaveProperty(key);
   });
 
   it("la réconciliation au démarrage relit les douze contraintes", () => {

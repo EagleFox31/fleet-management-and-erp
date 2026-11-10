@@ -41,6 +41,10 @@ position d'un véhicule (`DISTINCT ON (vehicle_id)`).
 Pourquoi en base : un point refusé ici l'est quel que soit l'appelant (route téléphone, futur récepteur de balise,
 import), et le rejeu hors ligne ne peut pas créer de doublon même sous course.
 
+Limite connue : les points `tracker` ne sont pas dédoublonnés par `vehicle_positions_client_point_unique`
+(`submitted_by` et `client_point_id` y sont NULL, et deux NULL sont distincts pour une contrainte unique). À traiter au
+lot balises (par exemple unicité `(device_id, recorded_at)` pour la source `tracker`).
+
 ## Clés étrangères
 
 | Colonne | Cible | ON DELETE | Raison |

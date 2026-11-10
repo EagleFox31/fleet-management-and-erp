@@ -1825,6 +1825,14 @@ export const insertMissionSchema = createInsertSchema(missions).omit({
   // Preuve de livraison : posée par le dépôt de fichier (mission_pod_files), jamais par le corps d'une requête.
   podUrl: true,
   podUploadedAt: true,
+  // Points A/B (GPS V1) : fermés tant que le lot API n'a pas sa validation (hub connu, paire complète) ;
+  // sinon un corps de requête les écrirait et un 23514 deviendrait une 500.
+  pickupLat: true,
+  pickupLng: true,
+  pickupHubCode: true,
+  deliveryLat: true,
+  deliveryLng: true,
+  deliveryHubCode: true,
 }).extend({
   pickupDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),
   deliveryDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),

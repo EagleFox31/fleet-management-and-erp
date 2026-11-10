@@ -123,6 +123,34 @@ describe("GPS V1 en base", { timeout: 120_000 }, () => {
     });
   });
 
+  it("missions verrouillée à l'ajout des colonnes A/B : contraintes missions sautées, démarrage poursuivi, posées au suivant", async () => {
+    await inRolledBackTx(async (client) => {
+      await client.query(`ALTER TABLE missions DROP COLUMN pickup_lat, DROP COLUMN pickup_lng, DROP COLUMN pickup_hub_code,
+        DROP COLUMN delivery_lat, DROP COLUMN delivery_lng, DROP COLUMN delivery_hub_code`);
+      // Verrou indisponible simulé : tout ALTER TABLE visant missions lève lock_not_available (55P03).
+      await client.query(`CREATE FUNCTION gps_test_missions_locked() RETURNS event_trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF EXISTS (SELECT 1 FROM pg_event_trigger_ddl_commands() WHERE objid = 'missions'::regclass) THEN
+            RAISE EXCEPTION 'missions verrouillée (simulation)' USING ERRCODE = 'lock_not_available';
+          END IF;
+        END $$`);
+      await client.query(`CREATE EVENT TRIGGER gps_test_missions_locked ON ddl_command_end
+        WHEN TAG IN ('ALTER TABLE') EXECUTE FUNCTION gps_test_missions_locked()`);
+
+      await expect(client.query(VEHICLE_POSITIONS_GPS_SQL)).resolves.toBeDefined();
+      const names = (await constraintStates(client)).map((s) => s.conname);
+      expect(names).not.toContain("missions_pickup_geo_check");
+      expect(names).not.toContain("missions_delivery_geo_check");
+      expect(names).toContain("vehicle_positions_phone_check");
+
+      await client.query("DROP EVENT TRIGGER gps_test_missions_locked");
+      await client.query(VEHICLE_POSITIONS_GPS_SQL);
+      const states = await constraintStates(client);
+      expect(states.map((s) => s.conname).sort()).toEqual([...CONSTRAINTS].sort());
+      expect(states.every((s) => s.convalidated)).toBe(true);
+    });
+  });
+
   it("missions déjà hors règle : contrainte posée NOT VALID, aucune ligne modifiée, démarrage poursuivi", async () => {
     await inRolledBackTx(async (client) => {
       const { missionId } = await fixtures(client);

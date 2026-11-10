@@ -3660,3 +3660,12 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - Seule la forme `%xx` contournait la garde de double affectation : la casse (`/API/...`) et la barre finale étaient déjà reconnues, car le montage est insensible à la casse et la regex acceptait `/?`. Ces deux cas sont rejoués par le test de contrat comme régression, pas comme preuve du correctif.
   - Limite du cliquet lexical : il lit des lignes, pas le flux de données. Un chemin copié dans une variable (`const p = req.path; p.match(...)`) ou lu par un autre module échappe aux motifs interdits. Le second cliquet (`DECLARED_PATH_READS`) borne donc l'ensemble : toute lecture du chemin dans une `*guard*` est déclarée avec son motif, et la liste ne peut que rétrécir.
   - Course restante, hors périmètre de ce correctif : la garde lit le planning puis la route écrit, sans verrou commun (`booking-guard.ts` puis `routes.ts`, PATCH d'un OT). Deux PATCH simultanés sur le même technicien peuvent passer tous deux. Une contrainte d'exclusion en base (créneau par technicien) est la prévention juste ; un verrou advisory pris dans un middleware ne couvrirait pas l'écriture de la route.
+
+## 2026-11-10 — `$$` devenu `$` en insérant du SQL par `String.replace` (GPS-DB, #657)
+
+- **Contexte** : la constante `VEHICLE_POSITIONS_GPS_SQL` a été insérée dans `server/init-database.ts` par un script `content.replace(ancre, ancre + sql)`. Les blocs `DO $$ … END $$;` sont devenus `DO $ … END $;`. Trouvé avant tout commit, par le test des jumelles.
+- **Cause racine** : dans une chaîne de remplacement, `String.prototype.replace` interprète les motifs spéciaux (`$$` = un `$`, `$&`, `` $` ``, `$'`). Tout texte SQL PL/pgSQL ou Postgres (`$1`, `$$`) y est corrompu sans erreur.
+- **Classification** : outil d'édition scriptée, corruption silencieuse ; near miss.
+- **Résolution** : remplacement par fonction (`content.replace(ancre, () => ancre + sql)`), qui insère le texte tel quel ; constante corrigée.
+- **Prévention vérifiée** : le test des jumelles (`tests/unit/server/vehicle-positions-gps-schema.test.ts`, premier cas, et ses équivalents pour chaque migration) compare la migration et la constante d'`init-database.ts` ; il est rouge sur ce défaut.
+- **Leçon généralisée** : pour insérer du code ou du SQL par script, toujours passer une fonction de remplacement (ou `split`/`join`), jamais une chaîne qui contient `$`. Une migration a toujours sa jumelle testée.
