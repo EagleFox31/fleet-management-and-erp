@@ -332,8 +332,10 @@ const KNOWN_LOOSE_ZOD_PARAM_IDS = ["shared/contracts/fuel-vouchers.ts"];
 /** `idSchema` sur `req.params`, ou dans un schéma de paramètres de route (`*ParamsSchema = z.object({ ... })`). */
 export function readsLooseZodParamId(source: string): boolean {
   const text = stripComments(source);
-  const onParams = text.split(/\r?\n/).some((line) => /\bidSchema\b/.test(line) && /req\.params/.test(line));
-  const inParamsSchema = /[pP]aramsSchema\s*=\s*z\s*\.object\(\{[^}]*\bidSchema\b/.test(text);
+  // `idSchema` et `z.coerce.number()` convertissent tous deux `0x3e`, ` 62` ou `6.2e1` en 62.
+  const loose = /\bidSchema\b|\bz\s*\.\s*coerce\s*\.\s*number\s*\(/;
+  const onParams = text.split(/\r?\n/).some((line) => loose.test(line) && /req\.params/.test(line));
+  const inParamsSchema = new RegExp(String.raw`[pP]aramsSchema\s*=\s*z\s*\.object\(\{[^}]*(?:${loose.source})`).test(text);
   return onParams || inParamsSchema;
 }
 
@@ -343,6 +345,9 @@ describe("ids de route par Zod : routeIdSchema, jamais idSchema", () => {
     expect(readsLooseZodParamId("const id = idSchema.safeParse(req.params.id);")).toBe(true);
     expect(readsLooseZodParamId("const paramsSchema = z.object({ id: routeIdSchema });")).toBe(false);
     expect(readsLooseZodParamId("const body = z.object({ vehicleId: idSchema });")).toBe(false);
+    expect(readsLooseZodParamId("const paramsSchema = z.object({ id: z.coerce.number().int() });")).toBe(true);
+    expect(readsLooseZodParamId("const id = z.coerce.number().parse(req.params.id);")).toBe(true);
+    expect(readsLooseZodParamId("const query = z.object({ page: z.coerce.number() });")).toBe(false);
   });
 
   it(

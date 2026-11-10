@@ -1,9 +1,9 @@
 import { createServer, type Server } from "http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { inArray } from "drizzle-orm";
-import { fuelVoucherValidationResponseSchema } from "../../shared/contracts/fuel-vouchers";
+import { eq, inArray } from "drizzle-orm";
+import { FUEL_VOUCHER_STALE_MESSAGE, fuelVoucherValidationResponseSchema } from "../../shared/contracts/fuel-vouchers";
 import { fuelPricesResponseSchema } from "../../shared/contracts/fuel-prices";
-import { fuelPrices } from "../../shared/schema";
+import { fuelPrices, fuelRecords } from "../../shared/schema";
 import { db } from "../../server/db";
 import { getFuelPriceAt } from "../../server/services/fuel-price-service";
 import { getContractApp } from "../support/app";
@@ -80,9 +80,15 @@ describe("POST /api/fuel-vouchers/:id/validate", () => {
     expect(parsed.validationStatus).toBe("validated");
     expect(parsed.validatedBy).toBe(userIds.logistics);
 
+    // F3 (lot V1) : un bon déjà validé répond 409 lisible, au lieu de 200 ; l'auteur et la date restent.
     const second = await call("POST", `/api/fuel-vouchers/${recordId}/validate`, { cookie: cookies.logistics });
-    expect(second.status).toBe(200);
-    expect(second.body.validatedAt).toBe(parsed.validatedAt);
+    expect(second.status).toBe(409);
+    expect(second.body.message).toBe(FUEL_VOUCHER_STALE_MESSAGE);
+    const [row] = await db
+      .select({ at: fuelRecords.validatedAt, by: fuelRecords.validatedBy })
+      .from(fuelRecords)
+      .where(eq(fuelRecords.id, recordId));
+    expect({ at: row.at?.toISOString(), by: row.by }).toEqual({ at: parsed.validatedAt, by: userIds.logistics });
   });
 });
 

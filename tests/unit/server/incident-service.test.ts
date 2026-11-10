@@ -46,6 +46,7 @@ function makeDeps(assigned: number[], vehicles: { registrationNumber: string }[]
       select: () => ({ from: () => ({ where: () => ({ limit: async () => vehicles }) }) }),
       transaction: async (fn: (tx: any) => Promise<any>) =>
         fn({
+          select: () => ({ from: () => ({ where: () => ({ limit: async () => [{ id: 10, registrationNumber: "TEST-1", brand: "B", model: "M", deletedAt: null }] }) }) }),
           insert: () => ({
             values: (v: any) => {
               calls.inserted.push(v);
