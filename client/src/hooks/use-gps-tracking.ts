@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { isApiError, userMessageOf } from "@/lib/api-error";
 import { clientLogger } from "@/lib/logger";
+import { OFFLINE_OWNER_HEADER } from "@shared/idempotency-routes";
 import {
   appendBounded,
   foreignBufferKeys,
@@ -69,17 +70,18 @@ export interface SendResult {
  * Un refus définitif (4xx hors 401/408/429) retire le paquet. Travaille sur la copie reçue, jamais sur
  * un état partagé : un changement de mission pendant l'envoi ne mélange pas les tampons.
  */
-export async function sendBuffered(missionId: number, buffer: readonly GpsPoint[]): Promise<SendResult> {
+export async function sendBuffered(missionId: number, buffer: readonly GpsPoint[], epoch: number, ownerUserId: number): Promise<SendResult> {
   let remaining = [...buffer];
   let sentAny = false;
   let error: string | null = null;
-  const epoch = gpsPurgeEpoch();
   while (remaining.length > 0) {
-    // Déconnexion pendant l'envoi : plus rien ne part sous le compte suivant (cloison #56).
+    // Déconnexion ou changement de compte depuis que l'appelant a relevé l'époque : plus rien ne part sous le compte suivant (cloison #56).
     if (epoch !== gpsPurgeEpoch()) break;
     const batch = nextBatch(remaining);
     try {
-      const response = await apiRequest("POST", driverMissionPositionsPath(missionId), { points: batch });
+      const response = await apiRequest("POST", driverMissionPositionsPath(missionId), { points: batch }, {
+        headers: { [OFFLINE_OWNER_HEADER]: String(ownerUserId) },
+      });
       const result = driverPositionsResponseSchema.safeParse(await response.json());
       if (!result.success || !isBatchSettled(result.data, batch.length)) break;
       remaining = removeSent(remaining, batch);
@@ -127,7 +129,7 @@ async function withKeyLock(key: string, task: () => Promise<void>): Promise<void
 /**
  * Rejoue les tampons restés au navigateur pour d'autres missions de `userId` (livrées, terminées ou
  * annulées entre-temps : le serveur les accepte encore). Une clé est retirée une fois ses points réglés,
- * ou si le tampon a plus de 7 jours (y compris ceux des autres comptes, retirés sans envoi). `exceptMissionId` est la mission suivie en direct, gérée par son hook.
+ * ou si le tampon a plus de 7 jours (ceux des autres comptes sont détruits sans envoi ni délai). `exceptMissionId` est la mission suivie en direct, gérée par son hook.
  */
 export async function replayOrphanBuffers(userId: number, exceptMissionId?: number): Promise<void> {
   if (replaying) return;
@@ -140,12 +142,9 @@ export async function replayOrphanBuffers(userId: number, exceptMissionId?: numb
     } catch {
       return;
     }
-    // Session expirée sans déconnexion : les tampons d'un autre compte de ce navigateur ne sont jamais
-    // envoyés, mais ils ne restent pas indéfiniment sur un téléphone partagé.
+    // Les tampons d'un autre compte de ce navigateur ne sont jamais envoyés et sont détruits sans délai (S1).
     try {
-      for (const key of foreignBufferKeys(window.localStorage, userId)) {
-        if (isBufferExpired(readBuffer(key), Date.now())) writeBuffer(key, [], epoch);
-      }
+      for (const key of foreignBufferKeys(window.localStorage, userId)) writeBuffer(key, [], epoch);
     } catch {
       // Stockage inaccessible : rien à nettoyer.
     }
@@ -158,7 +157,7 @@ export async function replayOrphanBuffers(userId: number, exceptMissionId?: numb
           writeBuffer(key, [], epoch);
           return;
         }
-        const result = await sendBuffered(missionId, buffer);
+        const result = await sendBuffered(missionId, buffer, epoch, userId);
         writeBuffer(key, result.remaining, epoch);
         if (result.sentAny) refreshTrack(missionId);
       });
@@ -203,6 +202,7 @@ export interface GpsTracking {
 
 export interface TrackingSession {
   key: string;
+  userId: number;
   missionId: number;
   epoch: number;
   buffer: GpsPoint[];
@@ -222,7 +222,7 @@ export async function flushTrackingSession(session: TrackingSession, onResult?: 
   try {
     await withKeyLock(session.key, async () => {
       const snapshot = session.buffer;
-      const result = await sendBuffered(session.missionId, snapshot);
+      const result = await sendBuffered(session.missionId, snapshot, session.epoch, session.userId);
       // Les points relevés pendant l'envoi sont ajoutés au tampon, pas écrasés.
       const sentIds = new Set(snapshot.map((p) => p.clientPointId));
       const remainingIds = new Set(result.remaining.map((p) => p.clientPointId));
@@ -263,6 +263,7 @@ export function useGpsTracking(opts: { userId: number | undefined; missionId: nu
     const key = gpsBufferKey(userId, missionId);
     const session: TrackingSession = {
       key,
+      userId,
       missionId,
       epoch: gpsPurgeEpoch(),
       buffer: readBuffer(key),
