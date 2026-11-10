@@ -3683,3 +3683,43 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/unit/server/corridor-fleet.test.ts` : aucun véhicule sans mission en transit sur 30 rangs, aucune coordonnée ni progression sans source, aucune valeur de repli.
   - `tests/contract/management-dashboard-kpis.contract.test.ts` (GPS-FE-4) : sur `GET /api/management/dashboard`, véhicule sans mission en `stopped`, aucun véhicule avec coordonnée tant qu'aucune source n'existe. Rouge sur l'ancien service (1 échec), vert après.
 - **Leçon généralisée** : un champ de contrat obligatoire pousse à fabriquer une valeur quand la donnée manque. Toute donnée dont la source n'existe pas encore est optionnelle et accompagnée d'un champ qui dit d'où elle vient (ici `positionSource`) ; un repli « plausible » n'est jamais acceptable dans une réponse que lit la direction.
+
+## 2026-11-10 — APK FleetOS Tech : elle appelait `https://localhost/api` sans le signaler
+
+- **Contexte** : l'APK construite par `build-android-apk.yml` embarquait le bundle client (`dist/public`) servi par Capacitor sur `https://localhost`. Le client appelle l'API en chemin relatif (`fetch("/api…")`, `/ws`) : tous les appels partaient vers `https://localhost/api`, sur le téléphone lui-même. Le build était vert, l'APK s'installait, aucune connexion n'aboutissait. Rien ne le disait.
+- **Cause racine** : l'origine du serveur n'était une donnée ni du build ni de la config Capacitor. Le workflow ne vérifiait que la compilation, jamais qu'une APK installée joint un serveur.
+- **Classification** : livraison, artefact vert mais inutilisable (faux succès CI). Préexistant.
+- **Résolution** (#664) :
+  - `server.url` = origine servie, lue par `capacitor.config.ts` dans `CAP_SERVER_URL` (variable de dépôt `FLEETOS_APP_URL`), validée par `resolveNativeServer` (`shared/native-shell.ts`) : origine seule, http(s), sans identifiants.
+  - Le workflow avertit si la variable manque, refuse un keystore sans origine, ne signe qu'une origine `https`, et affiche l'origine réellement embarquée.
+  - Page hors ligne embarquée (`errorPath`) au lieu d'un écran blanc.
+- **Prévention vérifiable** :
+  - Job `smoke` : APK debug lancée sur émulateur contre un serveur témoin ; bridge, `/api`, cookie, `/ws`, service worker, IndexedDB, relance serveur coupé et page hors ligne vérifiés.
+  - `tests/unit/shared/native-shell.test.ts` : validation de l'origine, verrous de `capacitor.config.ts` (`cleartext: false` en https, aucun `allowNavigation`), manifeste sans trafic en clair, signature https seulement, keystore effacé, géolocalisation au premier plan seulement.
+- **Leçon généralisée** : un artefact qui parle à un serveur se prouve par un test qui l'exécute contre un serveur, pas par sa compilation. Et une preuve dans un environnement non sécurisé (`http://10.0.2.2`) peut masquer des API réservées aux contextes sécurisés (`navigator.serviceWorker`) : le banc doit avoir le même statut de sécurité que la prod (ici `localhost` par `adb reverse`).
+## 2026-11-10 — Écriture déclenchable en GET avec un cookie SameSite=None (GPS V1 API, #660)
+
+- **Contexte** : le lot API des positions téléphone exposait `GET /api/driver/positions?lat=&lon=&timestamp=` (format OsmAnd) qui déposait une position, à côté du POST. L'audit sécurité de #660 l'a relevé avant tout allumage du drapeau `gps`.
+- **Cause racine** : le protocole OsmAnd/Traccar envoie ses relevés en GET ou en formulaire ; le format a été repris tel quel sans se demander qui peut émettre une telle requête. Le cookie de session est en `SameSite=None` et il n'existe pas de jeton CSRF : une image, un lien ou un formulaire d'une page tierce ouverte dans le navigateur d'un chauffeur connecté aurait écrit des positions sous son identité (pollution de la trace, plafond de points consommé).
+- **Classification** : sécurité (CSRF), near miss relevé en revue avant mise en production.
+- **Résolution** : le GET est supprimé ; `POST /api/driver/positions` et le POST par paquets refusent tout corps autre que `application/json` (415) ; `parseOsmandReport` ne lit plus la requête ; GET et formulaire reviendront avec le jeton d'appareil du lot balises.
+- **Prévention vérifiable** :
+  - `tests/unit/server/get-no-write-hygiene.test.ts` : échoue sur un `router.get` de `server/api/` qui écrit (`.insert/.update/.delete`, `ingest*`, `create*`), liste gelée vide.
+  - `tests/contract/gps-phone-api.contract.test.ts` : GET 404, formulaire / `text/plain` / sans type 415, nombre de lignes de `vehicle_positions` inchangé.
+  - Règle ajoutée à `AGENTS.md` §10.
+- **Leçon généralisée** : un protocole tiers impose son transport ; on ne l'adopte pas avant d'avoir nommé qui peut émettre la requête. Sans jeton CSRF, une écriture exige POST et `application/json` (le navigateur envoie alors une requête préalable CORS), et le client qui ne sait pas faire attend un jeton d'appareil plutôt que d'ouvrir le cookie.
+
+## 2026-11-10 — File hors ligne : le propriétaire vérifié avant la boucle ne couvre pas la boucle (V5b-2b)
+
+- **Contexte** : la file d'écritures différées (V5b-2, #645) contrôlait une fois, avant la boucle de rejeu, que la session ouverte appartenait au propriétaire de la file (`/api/auth/me`). Revue sécurité de #645.
+- **Cause racine** : le cookie de session est partagé entre tous les onglets du navigateur. Onglet 1 rejoue la file du compte A ; dans l'onglet 2, B se connecte. Les envois suivants de A partent avec le cookie de B, une clé neuve, et sont exécutés puis attribués à B. Un contrôle d'identité fait avant une boucle ne vaut que pour l'instant où il est fait.
+- **Classification** : sécurité, attribution d'une écriture à un autre compte (intégrité du stock, du kilométrage, des pannes). Détecté en revue, avant que `offline-writes` soit allumé.
+- **Résolution** :
+  - Chaque envoi porte `X-Offline-Owner` (propriétaire de la file). `server/middleware/offline-owner-guard.ts`, générique (toute écriture portant aussi `Idempotency-Key`, aucun `if` par route), compare à la session et répond 409 `OFFLINE_OWNER_MISMATCH` avant toute écriture ni réservation de clé.
+  - Le client classe ce code en « auth » : boucle arrêtée, file gardée, jamais « À revoir ». Le login diffuse `session-changed` aux autres onglets, qui adoptent le compte et arrêtent leur rejeu.
+  - Même revue : le registre rejouait des routes non protégées (`work_order_note` POST, `odometer_reading` en POST alors que la route protégée est PUT). La liste des routes protégées vit désormais dans `shared/idempotency-routes.ts` ; la file refuse de rejouer automatiquement ce qui n'y figure pas.
+- **Prévention vérifiable** :
+  - `tests/contract/offline-owner-guard.contract.test.ts` : propriétaire différent de la session donne 409 et aucune clé réservée ; propriétaire égal passe ; en-tête absent inchangé. Rouge sans le garde (2 échecs).
+  - `tests/unit/client/offline-queue-core.test.ts` : « bascule de compte pendant la boucle : aucun envoi après le changement », 409 propriétaire classé auth, route non protégée jamais envoyée, envoi trop ancien non rejoué, plafond des 409 « en cours ».
+  - `tests/unit/client/offline-registry-routes.test.ts` : chaque type du registre doit correspondre à une route protégée. Rouge sur les anciennes déclarations (3 échecs).
+- **Leçon généralisée** : un contrôle d'identité avant une boucle ne couvre pas la boucle, et le cookie est partagé entre onglets. L'identité se porte par requête et se vérifie côté serveur à chaque écriture, pas une fois côté client. Ne rejouer automatiquement qu'une écriture dont la protection contre le doublon est prouvée par un test, pas par une déclaration.

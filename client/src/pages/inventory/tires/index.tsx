@@ -682,7 +682,8 @@ export default function TiresInventoryPage() {
   // Flotte complète (toutes les pages) : le sélecteur de rotation ne se limite pas aux 10 premiers.
   const { data: vehicles = [], isLoading: vehiclesLoading } = useAllVehicles({ enabled: isRotationsTab || showRotationModal });
 
-  // Query pour récupérer les rotations
+  // Toutes les rotations : la route lit `limit` sans l'appliquer et rend la liste entière
+  // (vérifié par le garde-fou des lectures paginées).
   const rotationsQuery = useQuery<any[]>({
     queryKey: ["/api/tire-rotations"],
     enabled: isRotationsTab,

@@ -52,8 +52,8 @@ const declared = declaredQueryKeys();
  * `KPI_MAINTENANCE_COSTS_PATH` dans shared/contracts/kpi.ts). Liste figée : retirer l'entrée quand la clé existe côté client.
  */
 const AWAITING_SCREEN: Record<string, string> = {
+  "/api/missions/:id/track": "GPS V1 : écran de trace d'une mission (clé par mission, invalidée par préfixe + identifiant)",
   "/api/part-sales": "CDC-4 : écran des ventes de pièces",
-  "/api/vehicle-positions": "CDC-6 : carte de la flotte",
 };
 
 describe("événements temps réel : clés d'invalidation", () => {
@@ -80,8 +80,8 @@ describe("événements temps réel : clés d'invalidation", () => {
 
   it("la liste des clés en attente d'écran est figée", () => {
     expect(Object.keys(AWAITING_SCREEN).sort()).toEqual([
+      "/api/missions/:id/track",
       "/api/part-sales",
-      "/api/vehicle-positions",
     ]);
   });
 

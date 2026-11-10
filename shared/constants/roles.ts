@@ -578,6 +578,15 @@ export const PART_SALE_READ_ROLES = [...PART_SALE_ROLES, "management"] as const 
 /** Positions GPS des véhicules (`/api/vehicle-positions`). Pas de vue client prévue à ce stade. */
 export const GPS_VIEW_ROLES = ["admin", "logistics", "management", "workshop_manager"] as const satisfies readonly AppRole[];
 
+/**
+ * Trace d'une mission (`GET /api/missions/:id/track`) : minimisation, le chef d'atelier lit la dernière
+ * position (GPS_VIEW_ROLES) mais pas le trajet. Le chauffeur de la mission s'y ajoute côté route.
+ */
+export const GPS_TRACK_ROLES = ["admin", "logistics", "management"] as const satisfies readonly AppRole[];
+
+/** Points A et B d'une mission (`PATCH /api/missions/:id/geo`). */
+export const MISSION_GEO_WRITE_ROLES = ["admin", "logistics"] as const satisfies readonly AppRole[];
+
 /** Import Excel, tous types sauf les interventions. */
 export const IMPORT_ROLES = ["admin"] as const satisfies readonly AppRole[];
 

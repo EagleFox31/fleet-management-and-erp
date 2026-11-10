@@ -31,3 +31,14 @@ export function fetchAllWorkOrders<T = any>(
 ): Promise<T[]> {
   return fetchAllPages<T>(fetchFn, { path: "/api/work-orders", listKey: "workOrders", pageSize, maxPages, unreadable, tooMany });
 }
+
+/** Message d'un écran (et non d'un rapport) quand la liste n'a pas pu être lue en entier. */
+export const ALL_WORK_ORDERS_UNREADABLE = "Les ordres de travail n'ont pas pu être lus en entier. Réessayez.";
+
+/** Tous les OT pour un écran ou un service : une lecture incomplète est une erreur, jamais une liste partielle. */
+export function fetchAllWorkOrdersForScreen<T = any>(): Promise<T[]> {
+  return fetchAllWorkOrders<T>(defaultFetch, {
+    unreadable: ALL_WORK_ORDERS_UNREADABLE,
+    tooMany: (total, limit) => `Trop d'ordres de travail à afficher (${total}, limite ${limit}).`,
+  });
+}

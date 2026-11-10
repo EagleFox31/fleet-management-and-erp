@@ -1,3 +1,4 @@
+import { IDEMPOTENCY_KEY_PATTERN, IDEMPOTENCY_RETENTION_DAYS, IDEMPOTENCY_STALE_SECONDS } from "@shared/idempotency-routes";
 import { clientLogger } from "@/lib/logger";
 import type { OfflineActionDefinition } from "@/lib/offline-action-registry";
 
@@ -36,6 +37,8 @@ export interface QueueEntry {
   lastError?: string;
   /** Pas de nouvelle tentative automatique avant cet instant (attente exponentielle). */
   nextAttemptAt?: number;
+  /** Nombre de réponses « clé en cours » (409) reçues : au-delà du plafond, l'envoi passe « À revoir ». */
+  inProgressHits?: number;
   createdAt: number;
   ownerUserId: number;
   label: string;
@@ -51,6 +54,8 @@ export type SendOutcome =
 export type ResponseClass = "done" | "in-progress" | "retry" | "auth" | "rejected";
 
 export const IN_PROGRESS_CODE = "IDEMPOTENCY_IN_PROGRESS";
+/** 409 : la session n'est plus celle du propriétaire de l'envoi (autre compte connecté dans un autre onglet). */
+export const OWNER_MISMATCH_CODE = "OFFLINE_OWNER_MISMATCH";
 
 /** Classement d'une réponse (plan V5b section 3). Le statut absent désigne une panne réseau. */
 export function classifyOutcome(outcome: SendOutcome): ResponseClass {
@@ -58,6 +63,8 @@ export function classifyOutcome(outcome: SendOutcome): ResponseClass {
   const { status, code } = outcome;
   if (status === undefined) return "retry";
   if (status === 401) return "auth";
+  // Compte changé dans un autre onglet : même traitement qu'une session refusée (arrêt, file gardée).
+  if (status === 409 && code === OWNER_MISMATCH_CODE) return "auth";
   if (status === 409 && code === IN_PROGRESS_CODE) return "in-progress";
   if (status === 408 || status === 429 || status >= 500) return "retry";
   if (status >= 400) return "rejected";
@@ -67,6 +74,19 @@ export function classifyOutcome(outcome: SendOutcome): ResponseClass {
 export const BACKOFF_BASE_MS = 2_000;
 export const BACKOFF_MAX_MS = 5 * 60_000;
 export const IN_PROGRESS_DELAY_MS = 5_000;
+/** Marge au-delà du délai de reprise serveur (`IDEMPOTENCY_STALE_SECONDS`) avant de déclarer À revoir. */
+export const IN_PROGRESS_MARGIN_MS = 60_000;
+/** Réponses « en cours » tolérées par envoi (délai de reprise serveur plus une marge) avant de le passer « À revoir ». */
+export const MAX_IN_PROGRESS_HITS = Math.ceil((IDEMPOTENCY_STALE_SECONDS * 1000 + IN_PROGRESS_MARGIN_MS) / IN_PROGRESS_DELAY_MS);
+/** Un jour de marge sous la conservation des clés côté serveur (`IDEMPOTENCY_RETENTION_DAYS`). */
+export const MAX_ENTRY_AGE_MS = (IDEMPOTENCY_RETENTION_DAYS - 1) * 24 * 60 * 60 * 1000;
+
+export const NOT_REPLAYABLE_MESSAGE =
+  "Cet envoi ne peut pas être renvoyé automatiquement sans risque de doublon. Vérifiez-le, puis refaites-le si besoin.";
+export const TOO_OLD_MESSAGE =
+  "Cet envoi date de trop longtemps pour être renvoyé sans risque de doublon. Vérifiez-le, puis refaites-le si besoin.";
+export const STILL_IN_PROGRESS_MESSAGE =
+  "Le serveur n'a pas pu confirmer cet envoi. Vérifiez-le avant de le refaire pour éviter un doublon.";
 
 /** Attente avant la tentative suivante : 2 s, 4 s, 8 s... plafonnée à 5 minutes. */
 export function backoffDelay(attempts: number): number {
@@ -117,7 +137,11 @@ export function normalizeEntry(
     attempts: typeof r.attempts === "number" ? r.attempts : take(undefined, 0),
     lastError: typeof r.lastError === "string" ? r.lastError : undefined,
     nextAttemptAt: typeof r.nextAttemptAt === "number" ? r.nextAttemptAt : undefined,
-    createdAt: typeof r.createdAt === "number" ? r.createdAt : take(undefined, deps.now()),
+    inProgressHits: typeof r.inProgressHits === "number" ? r.inProgressHits : undefined,
+    createdAt:
+      typeof r.createdAt === "number" && Number.isFinite(r.createdAt) && r.createdAt > 0
+        ? r.createdAt
+        : take(undefined, deps.now()),
     ownerUserId: typeof r.ownerUserId === "number" ? r.ownerUserId : take(undefined, ownerUserId),
     label: typeof r.label === "string" ? r.label : take(undefined, type),
   };
@@ -148,6 +172,11 @@ export interface OfflineQueueDeps {
     fn: (renew: () => void) => Promise<T>,
   ) => Promise<{ acquired: false } | { acquired: true; value: T }>;
   getDefinition: (type: string) => OfflineActionDefinition | undefined;
+  /**
+   * Vrai si la route de l'envoi est protégée contre le doublon (clé d'idempotence côté serveur).
+   * Sinon l'envoi n'est jamais rejoué automatiquement : il passe « À revoir ».
+   */
+  isAutoReplayable: (entry: QueueEntry) => boolean;
   /** Invalide les requêtes du type après un envoi confirmé. */
   invalidateFor: (entry: QueueEntry) => void;
   /** Appelé une fois, quand plus aucun envoi n'attend (après au moins un envoi réussi). */
@@ -162,7 +191,7 @@ export interface OfflineQueueDeps {
 
 export class OfflineQueueError extends Error {
   constructor(
-    readonly reason: "no-user" | "session-changed" | "unknown-type",
+    readonly reason: "no-user" | "session-changed" | "unknown-type" | "invalid",
     message: string,
   ) {
     super(message);
@@ -256,11 +285,15 @@ export function createOfflineQueue(deps: OfflineQueueDeps) {
     const missionId = input.missionId;
     const endpoint = input.endpoint ?? definition.endpoint?.({ missionId, payload: input.payload });
     if (!endpoint) throw new OfflineQueueError("unknown-type", "Route d'envoi manquante");
+    // Une écriture différée ne vise que l'API de l'application, jamais une autre origine.
+    if (!endpoint.startsWith("/api/")) throw new OfflineQueueError("invalid", "Route d'envoi invalide");
+    const idempotencyKey = input.idempotencyKey ?? deps.uuid();
+    if (!IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) throw new OfflineQueueError("invalid", "Clé d'envoi invalide");
 
     const entry: QueueEntry = {
       id: `offline-${deps.now()}-${deps.uuid().slice(0, 8)}`,
       type: input.type,
-      idempotencyKey: input.idempotencyKey ?? deps.uuid(),
+      idempotencyKey,
       kind: input.kind ?? "json",
       endpoint,
       method: input.method ?? definition.method,
@@ -300,7 +333,7 @@ export function createOfflineQueue(deps: OfflineQueueDeps) {
     return mutate(userId, (current) =>
       (current ?? []).map((e) =>
         e.id === id && e.state === "rejected"
-          ? { ...e, state: "pending" as const, lastError: undefined, nextAttemptAt: undefined }
+          ? { ...e, state: "pending" as const, lastError: undefined, nextAttemptAt: undefined, inProgressHits: undefined }
           : e,
       ),
     );
@@ -359,6 +392,22 @@ export function createOfflineQueue(deps: OfflineQueueDeps) {
         return summary("stopped", "retry", next.nextAttemptAt);
       }
 
+      // Garde-fous avant tout envoi : jamais rejouer une route non protégée ni une clé qui a pu expirer.
+      const refusal = !deps.isAutoReplayable(next)
+        ? NOT_REPLAYABLE_MESSAGE
+        : deps.now() - next.createdAt > MAX_ENTRY_AGE_MS
+          ? TOO_OLD_MESSAGE
+          : null;
+      if (refusal !== null) {
+        await mutate(userId, (current) =>
+          (current ?? []).map((e) =>
+            e.id === next.id ? { ...e, state: "rejected" as const, lastError: refusal, nextAttemptAt: undefined } : e,
+          ),
+        );
+        rejected++;
+        continue;
+      }
+
       const marked = await mutate(userId, (current) =>
         (current ?? []).map((e) => (e.id === next.id ? { ...e, state: "sending" as const, attempts: e.attempts + 1 } : e)),
       );
@@ -396,12 +445,25 @@ export function createOfflineQueue(deps: OfflineQueueDeps) {
         case "in-progress":
         case "retry": {
           const inProgress = classifyOutcome(outcome) === "in-progress";
+          const hits = (next.inProgressHits ?? 0) + (inProgress ? 1 : 0);
+          if (inProgress && hits >= MAX_IN_PROGRESS_HITS) {
+            // Une clé jamais libérée (stock, panne) ne se résout pas toute seule : un humain tranche.
+            await mutate(userId, (current) =>
+              (current ?? []).map((e) =>
+                e.id === next.id
+                  ? { ...e, state: "rejected" as const, lastError: STILL_IN_PROGRESS_MESSAGE, nextAttemptAt: undefined, inProgressHits: hits }
+                  : e,
+              ),
+            );
+            rejected++;
+            break;
+          }
           const delay = inProgress ? IN_PROGRESS_DELAY_MS : backoffDelay(next.attempts + 1);
           const at = deps.now() + delay;
           const message = outcome.ok ? "" : outcome.message;
           await mutate(userId, (current) =>
             (current ?? []).map((e) =>
-              e.id === next.id ? { ...e, state: "pending" as const, lastError: message, nextAttemptAt: at } : e,
+              e.id === next.id ? { ...e, state: "pending" as const, lastError: message, nextAttemptAt: at, inProgressHits: hits } : e,
             ),
           );
           return summary("stopped", "retry", at);

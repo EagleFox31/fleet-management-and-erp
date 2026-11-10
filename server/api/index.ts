@@ -70,6 +70,8 @@ import cappedStatisticsRoutes from "./capped-statistics.routes";
 import paymentInstrumentsRoutes from "./payment-instruments.routes";
 import incidentsRoutes from "./incidents.routes";
 import driverBreakdownsRoutes from "./driver-breakdowns.routes";
+import driverPositionsRoutes from "./driver-positions.routes";
+import missionTrackRoutes from "./mission-track.routes";
 import qhseInspectionsRoutes from "./qhse-inspections.routes";
 import qualityCheckRoutes from "./quality-check.routes";
 import missionAdvisoriesRoutes from "./mission-advisories.routes";
@@ -96,6 +98,7 @@ import { LOGIN_BODY_INVALID_MESSAGE, loginRequestSchema } from "@shared/contract
 import { auditWrites } from "../middleware/audit-writes";
 import { AUDIT_CONFIG, CDC_AUDIT_CONFIG } from "../lib/audit-config";
 import { idempotencyGuard } from "../middleware/idempotency-guard";
+import { offlineOwnerGuard } from "../middleware/offline-owner-guard";
 import { retiredVehicleWriteGuard } from "../middleware/retired-vehicle-write-guard";
 import { viewerReadOnlyGuard } from "../middleware/viewer-read-only-guard";
 import { requireFeature } from "../lib/feature-flags";
@@ -159,6 +162,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(auditWrites(CDC_AUDIT_CONFIG));
   // Idempotence des ecritures rejouables (CDC #10b) : routes de IDEMPOTENCY_ROUTES, drapeau
   // `offline-writes` (coupe par defaut), apres la session (req.session.userId).
+  // Proprietaire d'un envoi differe (V5b-2b) : verifie a CHAQUE envoi, avant la reservation de cle.
+  apiRouter.use(offlineOwnerGuard());
   apiRouter.use(idempotencyGuard());
   // Vehicule retire (L3) : ecritures rattachees refusees en 409 pour le personnel, table
   // RETIRED_VEHICLE_WRITE_ROUTES. Montee ici, avant registerRoutes : couvre aussi routes.ts.
@@ -210,6 +215,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // Garde au montage: aucune route du routeur missions ne se protégeait seule.
   // POD avant missions.routes : mêmes middlewares, sa propre garde chauffeur (router.param).
   apiRouter.use("/missions", authenticate, isStaff, missionPodRoutes);
+  apiRouter.use("/missions", authenticate, missionTrackRoutes);
   apiRouter.use("/missions", authenticate, isStaff, missionPriceRoutes);
   apiRouter.use("/missions", authenticate, isStaff, missionsRoutes);
   // Relevé client : avant /clients (isStaff), la cloison client et les rôles finance sont posés sur la route.
@@ -328,6 +334,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(paymentInstrumentsRoutes);
   apiRouter.use(incidentsRoutes);
   apiRouter.use(driverBreakdownsRoutes);
+  apiRouter.use(driverPositionsRoutes);
   apiRouter.use(qhseInspectionsRoutes);
   apiRouter.use(qualityCheckRoutes);
   apiRouter.use(technicianWorkOrdersRoutes);

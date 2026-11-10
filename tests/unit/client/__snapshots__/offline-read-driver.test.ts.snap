@@ -1,0 +1,33 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`lecture hors ligne du chauffeur : liste blanche de champs > l'instantané des clés vient des formes elles-mêmes, pas d'une fixture 1`] = `
+[
+  "/api/drivers/me .driver",
+  "/api/drivers/me .driver.id",
+  "/api/drivers/me .driver.firstName",
+  "/api/drivers/me .driver.lastName",
+  "/api/drivers/me .missions",
+  "/api/drivers/me .missions[].id",
+  "/api/drivers/me .missions[].orderNumber",
+  "/api/drivers/me .missions[].status",
+  "/api/drivers/me .missions[].pickupAddress",
+  "/api/drivers/me .missions[].pickupDate",
+  "/api/drivers/me .missions[].deliveryAddress",
+  "/api/drivers/me .missions[].deliveryDate",
+  "/api/drivers/me .missions[].actualDeliveryDate",
+  "/api/drivers/me .missions[].actualDepartureDate",
+  "/api/drivers/me .missions[].estimatedDistance",
+  "/api/drivers/me .missions[].actualDistance",
+  "/api/drivers/me .missions[].specialInstructions",
+  "/api/drivers/me .missions[].clientName",
+  "/api/drivers/me .missions[].vehicleRegistration",
+  "/api/drivers/me .missions[].vehicleBrand",
+  "/api/drivers/me .missions[].vehicleModel",
+  "/api/drivers/me .missions[].vehicleId",
+  "/api/fuel-card/balance .averagePricePerLiter",
+  "/api/fuel-card/balance .averagePricePerLiterUsed",
+  "/api/fuel-card/balance .averagePricePerLiterReal",
+  "/api/fuel-card/balance .averagePricePerLiterFallback",
+  "/api/fuel-card/balance .priceSource",
+]
+`;
