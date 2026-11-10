@@ -26,6 +26,13 @@ describe("contentDisposition", () => {
     expect(decodedName(header)).toBe(name);
   });
 
+  it("un nom avec CR/LF ne peut pas injecter un second en-tête", () => {
+    const header = contentDisposition("inline", "a\r\nX-Injected: 1.pdf");
+    expect(header).not.toMatch(/[\r\n]/);
+    expect(header).not.toMatch(/^X-Injected/m);
+    expect(header).toMatch(/^inline; filename="a__X-Injected: 1\.pdf"; filename\*=UTF-8''/);
+  });
+
   it("donne un nom par défaut quand le nom est vide ou absent", () => {
     expect(contentDisposition("attachment", "")).toBe('attachment; filename="document"');
     expect(contentDisposition("attachment", null)).toBe('attachment; filename="document"');

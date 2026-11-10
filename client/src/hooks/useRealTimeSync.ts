@@ -1134,6 +1134,7 @@ export function handleDomainUpdate(update: RealTimeUpdate): void {
     case "mission_status_changed":
     case "mission_created_from_fuel":
     case "mission_fuel_recorded":
+    case "mission_pod_uploaded":
       {
         const missionFromPayload = extractMissionFromPayload(payload);
         if (missionFromPayload) {

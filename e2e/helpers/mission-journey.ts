@@ -5,6 +5,7 @@ import { assignments, clientInvoices, drivers, missions, vehicleDocuments, vehic
 import type { CreatedIds } from "../../tests/support/cleanup";
 import { createTestFuelRecord, createTestVehicle } from "../../tests/support/factories";
 import { deleteClientInvoicesWhere } from "../../tests/support/money-override";
+import { cleanupPodFiles, tinyPdf } from "../../tests/support/pod";
 
 /**
  * Parcours d'une mission jusqu'à « livrée » sans écrire son statut en base : affectation,
@@ -74,6 +75,7 @@ export async function creditFuelCard(ids: CreatedIds, amount = "5000000") {
 /** Supprime affectations, missions et chauffeurs créés (les factures sont à la charge de l'appelant). */
 export async function deleteJourneyRows(missionIds: number[], driverIds: number[]) {
   if (missionIds.length > 0) {
+    await cleanupPodFiles(missionIds);
     await db.delete(assignments).where(inArray(assignments.missionId, missionIds));
     await db.delete(missions).where(inArray(missions.id, missionIds));
   }
@@ -94,6 +96,7 @@ export async function purgeJourneyRows(prefix: string) {
   const missionIds = rows.map((row) => row.id);
   if (missionIds.length > 0) {
     await deleteClientInvoicesWhere(inArray(clientInvoices.missionId, missionIds));
+    await cleanupPodFiles(missionIds);
     await db.delete(assignments).where(inArray(assignments.missionId, missionIds));
     await db.delete(missions).where(inArray(missions.id, missionIds));
   }
@@ -133,7 +136,7 @@ export async function driveToDeliveredInBrowser(page: Page, missionId: number, o
   await page.goto(`/missions/${missionId}`, { waitUntil: "domcontentloaded" });
   await expect(page.getByRole("heading", { name: orderNumber })).toBeVisible({ timeout: 60_000 });
 
-  await page.getByRole("button", { name: "Modifier", exact: true }).click();
+  await page.getByTestId("button-edit-mission").click();
   const vehicleSelect = page.getByTestId("select-edit-vehicle");
   await expect(vehicleSelect.locator(`option[value="${crew.vehicleId}"]`)).toHaveCount(1, { timeout: 30_000 });
   await vehicleSelect.selectOption(String(crew.vehicleId));
@@ -156,4 +159,25 @@ export async function driveToDeliveredInBrowser(page: Page, missionId: number, o
 
   await page.getByTestId("button-transition-mission-status-header").click();
   await expect.poll(() => missionStatus(missionId), { timeout: 30_000 }).toBe("delivered");
+}
+
+/**
+ * La facture exige un POD (409 sinon) : dépôt par l'API avec la session donnée (logistique, secrétariat,
+ * chauffeur). Les lignes et dossiers créés sont retirés par `deleteJourneyRows` / `purgeJourneyRows`.
+ */
+export async function depositPodByApi(api: APIRequestContext, missionId: number) {
+  const res = await api.post(`/api/missions/${missionId}/pod-files`, {
+    multipart: { files: { name: "bon-de-livraison.pdf", mimeType: "application/pdf", buffer: tinyPdf() } },
+  });
+  expect(res.status(), `dépôt du POD : ${await res.text()}`).toBe(201);
+}
+
+/** Même dépôt à l'écran de la mission (en-tête), puis attente de la ligne dans la liste des POD. */
+export async function depositPodInBrowser(page: Page) {
+  await page.getByTestId("button-pod-deposit-header-input").setInputFiles({
+    name: "bon-de-livraison.pdf",
+    mimeType: "application/pdf",
+    buffer: tinyPdf(),
+  });
+  await expect(page.getByTestId("pod-list")).toContainText("bon-de-livraison.pdf", { timeout: 30_000 });
 }

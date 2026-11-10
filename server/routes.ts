@@ -589,7 +589,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Mettre à jour un utilisateur - Réservé aux administrateurs
   app.patch("/api/users/:id", authenticate, isAdmin, async (req, res, next) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeIdOrNaN(req.params.id);
       
       if (isNaN(id)) {
         return next(new AppError(400, "ID d'utilisateur invalide"));
@@ -812,7 +812,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // PATCH /api/admin/users/:id/toggle - Activer/désactiver un utilisateur
   app.patch("/api/admin/users/:id/toggle", authenticate, isAdmin, validateBody(toggleUserRequestSchema), async (req, res, next) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = routeIdOrNaN(req.params.id);
       const { isActive } = req.body;
 
       if (isNaN(id)) {

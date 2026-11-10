@@ -4,10 +4,10 @@
  * Drapeau `vehicle-cost-summary`.
  */
 import { z } from "zod";
-import { dateRangeQuerySchema, idSchema, isoDateSchema } from "./common";
+import { dateRangeQuerySchema, isoDateSchema, routeIdSchema } from "./common";
 
 export const vehicleCostSummaryPath = (id: number) => `/api/vehicles/${id}/cost-summary`;
-export const vehicleCostSummaryParamsSchema = z.object({ id: idSchema });
+export const vehicleCostSummaryParamsSchema = z.object({ id: routeIdSchema });
 export const vehicleCostSummaryQuerySchema = dateRangeQuerySchema;
 
 const amount = z.number().min(0);
