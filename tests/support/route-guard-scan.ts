@@ -473,10 +473,37 @@ function markerUsed(code: string, at: number, word: string): boolean {
  * Verdict sur une lecture. `fileGuards` : gardes posées sur tout le routeur (`router.use(garde)`)
  * ou à son montage (expressions ou jetons de `parseMounts`).
  */
+/**
+ * Garde chaînée en relais pur : la poignée écrite en ligne ne fait que rendre la main, `(_req, _res, next) => next()`.
+ * Elle n'envoie aucune donnée ; celle-ci part de la déclaration suivante du même chemin (souvent dans
+ * `server/routes.ts`), jugée pour elle-même par ce scan. Forme stricte : un seul appel `next()` sans argument.
+ */
+const PASS_THROUGH_HANDLER = /^\(\s*_?\w*\s*,\s*_?\w*\s*,\s*(\w+)\s*\)\s*=>\s*(?:\1\s*\(\s*\)|\{\s*(?:return\s+)?\1\s*\(\s*\)\s*;?\s*\})$/;
+export function isPassThroughGet(body: string): boolean {
+  return PASS_THROUGH_HANDLER.test(body.trim());
+}
+
+/**
+ * Argument d'en-tête reconnu comme garde : identifiant classé par auth.ts, ou appel `authorize(…)` / `sessionGuard(…)`.
+ * Une fonction en ligne ou un identifiant inconnu peut envoyer la donnée avant le relais : il n'est pas une garde.
+ */
+function isRecognizedGuardArg(rawArg: string, kinds: GuardKinds): boolean {
+  const arg = rawArg.trim();
+  const name = arg.match(/^(\w+)$/);
+  if (name) return kinds.restrictive.has(name[1]) || kinds.permissive.has(name[1]) || kinds.neutral.has(name[1]);
+  return /^(?:authorize|sessionGuard)\s*\([\s\S]*\)$/.test(arg);
+}
+
+/** Relais pur exempté seulement si tout ce qui le précède dans la déclaration est une garde reconnue. */
+function isPureChainedGuard(route: GetRoute, kinds: GuardKinds): boolean {
+  return isPassThroughGet(route.body) && route.headerArgs.every((arg) => isRecognizedGuardArg(arg, kinds));
+}
+
 export function judgeGetRoute(route: GetRoute, kinds: GuardKinds, fileGuards: string[] = []): Verdict {
   const { restrictive, session } = classifyChain([...fileGuards, ...route.headerArgs], kinds);
   if (restrictive) return { ok: true };
   if (!session) return { ok: true }; // aucune garde de session : route publique, hors de ce contrôle
+  if (isPureChainedGuard(route, kinds)) return { ok: true };
   const markers = isWorkOrderRead(route) ? [WORK_ORDER_MARKER] : SCOPE_MARKERS;
   if (scopeCheckedBeforeSend(route.body, markers)) return { ok: true };
   return { ok: false, reason: "session seule : aucun contrôle de cloison avant l'envoi de la donnée" };
