@@ -3091,6 +3091,33 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
             rowErrors.push(`${blocker.reason.charAt(0).toUpperCase()}${blocker.reason.slice(1)}.`);
           }
 
+          // Remorque attelée : même éligibilité qu'à l'affectation, relue au départ (elle a pu passer
+          // en atelier, être supprimée ou voir un papier expirer depuis).
+          if (row.trailerId) {
+            const [trailer] = await db
+              .select({
+                registrationNumber: vehicles.registrationNumber,
+                status: vehicles.status,
+                insuranceExpiry: vehicles.insuranceExpiry,
+                technicalInspectionDate: vehicles.technicalInspectionDate,
+                licensePlateExpiry: vehicles.licensePlateExpiry,
+              })
+              .from(vehicles)
+              .where(and(eq(vehicles.id, row.trailerId), isNull(vehicles.deletedAt)))
+              .limit(1);
+            if (!trailer) {
+              rowErrors.push("Remorque introuvable.");
+            } else {
+              const trailerEligibility = getMissionEligibility({
+                ...trailer,
+                receipts: await loadOpenRenewalReceipts(row.trailerId),
+              });
+              if (!trailerEligibility.eligible) {
+                rowErrors.push(`Remorque ${formatEligibilityRefusal(trailer.registrationNumber, trailerEligibility.blockers)}`);
+              }
+            }
+          }
+
           if (mission.pickupDate && mission.deliveryDate) {
             const hasOverlap =
               (await findPlanningClash(db, {
