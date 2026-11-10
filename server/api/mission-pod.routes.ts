@@ -4,7 +4,7 @@ import path from "node:path";
 import { Router, type NextFunction, type Request, type Response } from "express";
 import multer from "multer";
 import { and, asc, count, desc, eq, sql } from "drizzle-orm";
-import { MISSION_POD_READ_ROLES, MISSION_STATUS_ROLES } from "@shared/constants/roles";
+import { MISSION_READ_ROLES, MISSION_STATUS_ROLES } from "@shared/constants/roles";
 import { MISSION_POD_MIME_TYPES, missionPodFiles, missions, users } from "@shared/schema";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
@@ -367,7 +367,7 @@ router.post("/:id/pod-files", authorize([...MISSION_STATUS_ROLES]), ensureMissio
 });
 
 // GET /api/missions/:id/pod-files : métadonnées seulement, jamais le chemin disque.
-router.get("/:id/pod-files", authorize([...MISSION_POD_READ_ROLES]), async (req, res, next) => {
+router.get("/:id/pod-files", authorize([...MISSION_READ_ROLES]), async (req, res, next) => {
   try {
     const missionId = parseMissionId(req.params.id);
     const rows = await db
@@ -390,7 +390,7 @@ router.get("/:id/pod-files", authorize([...MISSION_POD_READ_ROLES]), async (req,
 });
 
 // GET /api/missions/:id/pod-files/:fileId : le fichier, servi sans exécution possible dans l'origine de l'application.
-router.get("/:id/pod-files/:fileId", authorize([...MISSION_POD_READ_ROLES]), async (req, res, next) => {
+router.get("/:id/pod-files/:fileId", authorize([...MISSION_READ_ROLES]), async (req, res, next) => {
   try {
     const missionId = parseMissionId(req.params.id);
     const fileId = parseRouteId(req.params.fileId, "Identifiant de fichier invalide.");

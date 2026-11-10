@@ -10,6 +10,7 @@ import { MISSION_MANAGER_ROLES, OPERATIONS_COST_READ_ROLES, type AppRole } from 
 import { driverScopeOf } from "../lib/driver-scope";
 import { redactVehiclePriceDeep } from "../lib/vehicle-price-scope";
 import { redactMissionBudget, redactMissionPrice } from "../lib/mission-response-scope";
+import { redactMissionClientContact } from "../lib/mission-client-contact-scope";
 import { parseQueryId, parseRouteId, MISSION_ID_INVALID_MESSAGE } from "../lib/route-id";
 import { emitMissionEvent } from "../lib/mission-events";
 
@@ -150,7 +151,7 @@ router.get("/missions", authenticate, async (req: Request, res: Response, next: 
 
     const missions = await operationsService.getAllMissions(filters, await driverScopeOf(req.user));
 
-    res.json(redactMissionBudget(req.user, redactMissionPrice(req.user, redactVehiclePriceDeep(req.user, missions))));
+    res.json(redactMissionBudget(req.user, redactMissionPrice(req.user, redactVehiclePriceDeep(req.user, missions.map((mission) => redactMissionClientContact(req.user, mission))))));
   } catch (error: any) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching missions:" }));
   }

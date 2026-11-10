@@ -438,6 +438,14 @@ export function canReadTechnicianReport(role: string | null | undefined): boolea
  */
 export const STAFF_ROLES: readonly AppRole[] = ALL_APP_ROLES.filter((role) => role !== "client");
 /**
+ * Lecteurs des fiches client (coordonnées, créateur), de leurs trames temps réel et du contact client
+ * d'une mission : le personnel sans le chauffeur ni le technicien (moindre donnée). Le chauffeur lit le
+ * nom du client sur sa mission, jamais la fiche ; le technicien n'a aucun écran client.
+ */
+export const CLIENT_DIRECTORY_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter(
+  (role) => role !== "driver" && role !== "technician",
+);
+/**
  * Saisie d'exploitation sur un véhicule (kilométrage, position de maintenance, incident) : le
  * personnel moins le comptable, qui consulte sans saisir. `isStaff` ne suffit pas : il s'ouvre
  * à tout nouveau rôle du personnel sans que le diff le montre. Le lecteur est exclu ici aussi, en plus
@@ -479,10 +487,11 @@ export const DRIVER_DIRECTORY_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filte
 );
 
 /**
- * Lecteurs des preuves de livraison (POD) d'une mission : le personnel sans le technicien. Le
- * chauffeur y reste, cloisonné à ses missions par la garde du routeur POD.
+ * Lecteurs des missions (liste, fiche, preuves de livraison) : le personnel sans le technicien, qui n'a
+ * aucun écran mission (adresses, client, chauffeurs). Le chauffeur y reste, cloisonné à ses missions par
+ * la garde des routeurs (`router.param("id")`, portée chauffeur de la liste).
  */
-export const MISSION_POD_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "technician");
+export const MISSION_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "technician");
 
 /**
  * Destinataires des événements du catalogue pièces (création, modification, suppression, ajustement

@@ -181,7 +181,7 @@ describe("fiche chauffeur : données personnelles", () => {
     missionIds.push(mission.id);
     await db.insert(assignments).values({ missionId: mission.id, driverId: otherId, status: "accepted" } as any);
 
-    for (const actor of ["technician", "admin"] as const) {
+    for (const actor of ["warehouse", "admin"] as const) {
       const res = await session.call("GET", `/api/missions/${mission.id}`, { actor });
       expect(res.status, actor).toBe(200);
       expect(res.body.assignment.driver.id).toBe(otherId);

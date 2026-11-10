@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { moduleLogger } from "../lib/logger";
 import { findActiveSessionUser } from "../services/session-user";
-import { VEHICLE_OPERATION_WRITE_ROLES, ALL_APP_ROLES, STOCK_ISSUER_ROLES, STOCK_VALUATION_READ_ROLES, STAFF_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES, INVENTORY_REPORT_ROLES, INVENTORY_MANAGER_ROLES, VEHICLE_PATCH_ROLES, DRIVER_MANAGER_ROLES, FUEL_CARD_MANAGER_ROLES, FUEL_RECORD_WRITER_ROLES, TECHNICIAN_REPORT_ROLES, DRIVER_DIRECTORY_READ_ROLES, type AppRole } from "@shared/constants/roles";
+import { VEHICLE_OPERATION_WRITE_ROLES, ALL_APP_ROLES, STOCK_ISSUER_ROLES, STOCK_VALUATION_READ_ROLES, STAFF_ROLES, CLIENT_DIRECTORY_READ_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES, INVENTORY_REPORT_ROLES, INVENTORY_MANAGER_ROLES, VEHICLE_PATCH_ROLES, DRIVER_MANAGER_ROLES, FUEL_CARD_MANAGER_ROLES, FUEL_RECORD_WRITER_ROLES, TECHNICIAN_REPORT_ROLES, DRIVER_DIRECTORY_READ_ROLES, type AppRole } from "@shared/constants/roles";
 
 const ALL_ROLES = ALL_APP_ROLES;
 
@@ -187,6 +187,9 @@ export const isStaff = authorize([...STAFF_ROLES]);
 // Annuaire des chauffeurs (liste, fiche d’un autre, CPC, missions d’un chauffeur) : personnel sans
 // chauffeur ni technicien (DRIVER_DIRECTORY_READ_ROLES, moindre donnée).
 export const isDriverDirectoryReader = authorize([...DRIVER_DIRECTORY_READ_ROLES]);
+// Fiches client et contact client d'une mission : personnel sans chauffeur ni technicien
+// (CLIENT_DIRECTORY_READ_ROLES, moindre donnée).
+export const isClientDirectoryReader = authorize([...CLIENT_DIRECTORY_READ_ROLES]);
 // Saisie d'exploitation véhicule : personnel sans le comptable (VEHICLE_OPERATION_WRITE_ROLES).
 export const isVehicleOperationWriter = authorize([...VEHICLE_OPERATION_WRITE_ROLES]);
 // Valuation du stock (pièces et pneus : valeur d'inventaire, valeur par fournisseur, historique,
