@@ -14,6 +14,13 @@ export const GPS_FLUSH_INTERVAL_MS = 120_000;
 export const GPS_BATCH_MAX = 50;
 /** Garde-fou du tampon : au-delà, les points les plus anciens sont jetés (environ 17 h à 1 point/min). */
 export const GPS_BUFFER_MAX = 1000;
+/** Borne du schéma serveur (`server/lib/gps-points.ts`) : au-delà, le paquet entier serait refusé. */
+export const GPS_ACCURACY_MAX_M = 100_000;
+/** Un tampon dont le point le plus récent a plus de 7 jours n'est plus rejoué : il est supprimé. */
+export const GPS_BUFFER_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/** Position affichée à l'écran : rafraîchie au plus toutes les 10 s, ou dès 20 m parcourus. */
+export const GPS_DISPLAY_INTERVAL_MS = 10_000;
+export const GPS_DISPLAY_DISTANCE_M = 20;
 
 export interface GpsPoint {
   clientPointId: string;
@@ -72,7 +79,9 @@ export function toGpsPoint(fix: RawFix, makeId: () => string = newUuid): GpsPoin
     lat: fix.lat,
     lng: fix.lng,
   };
-  if (typeof fix.accuracy === "number" && Number.isFinite(fix.accuracy) && fix.accuracy >= 0) point.accuracyM = fix.accuracy;
+  if (typeof fix.accuracy === "number" && Number.isFinite(fix.accuracy) && fix.accuracy >= 0) {
+    point.accuracyM = Math.min(fix.accuracy, GPS_ACCURACY_MAX_M);
+  }
   if (typeof fix.speed === "number" && Number.isFinite(fix.speed) && fix.speed >= 0) {
     point.speedKmh = Math.round(fix.speed * 3.6 * 10) / 10;
   }
@@ -117,8 +126,87 @@ export function isBatchSettled(result: unknown, sentCount: number): boolean {
   return Number.isFinite(total) && total >= sentCount;
 }
 
+/** Préfixe commun des tampons : la purge de déconnexion le cible explicitement (hors motif des brouillons). */
+export const GPS_BUFFER_KEY_PREFIX = "fleetos-gps-buffer-";
+
 export function gpsBufferKey(userId: number, missionId: number): string {
-  return `fleetos-gps-buffer-u${userId}-m${missionId}`;
+  return `${GPS_BUFFER_KEY_PREFIX}u${userId}-m${missionId}`;
+}
+
+/** Mission d'une clé de tampon appartenant à `userId`, sinon null (autre utilisateur ou autre clé). */
+export function missionIdOfBufferKey(key: string, userId: number): number | null {
+  const match = new RegExp(`^${GPS_BUFFER_KEY_PREFIX}u${userId}-m(\\d+)$`).exec(key);
+  if (!match) return null;
+  const id = Number(match[1]);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+type KeyStorage = Pick<Storage, "length" | "key" | "removeItem">;
+
+function bufferKeys(storage: KeyStorage): string[] {
+  const keys: string[] = [];
+  for (let i = 0; i < storage.length; i++) {
+    const key = storage.key(i);
+    if (key && key.startsWith(GPS_BUFFER_KEY_PREFIX)) keys.push(key);
+  }
+  return keys;
+}
+
+/** Clés de tampon d'un utilisateur, toutes missions confondues. */
+export function userBufferKeys(storage: KeyStorage, userId: number): Array<{ key: string; missionId: number }> {
+  const found: Array<{ key: string; missionId: number }> = [];
+  for (const key of bufferKeys(storage)) {
+    const missionId = missionIdOfBufferKey(key, userId);
+    if (missionId) found.push({ key, missionId });
+  }
+  return found;
+}
+
+let purgeEpoch = 0;
+
+/** Compteur incrémenté à chaque purge : une écriture lancée avant une purge doit s'abstenir. */
+export function gpsPurgeEpoch(): number {
+  return purgeEpoch;
+}
+
+/**
+ * Déconnexion : supprime les tampons de tous les comptes de ce navigateur (cloison #56) et invalide
+ * toute écriture en cours. Ne lève jamais.
+ */
+export function purgeGpsBuffers(storage?: KeyStorage | null): number {
+  purgeEpoch += 1;
+  try {
+    const target = storage === undefined ? (typeof window === "undefined" ? null : window.localStorage) : storage;
+    if (!target) return 0;
+    const keys = bufferKeys(target);
+    for (const key of keys) target.removeItem(key);
+    return keys.length;
+  } catch {
+    return 0;
+  }
+}
+
+/** Tampon périmé : vide, ou dont le point le plus récent a plus de 7 jours. */
+export function isBufferExpired(buffer: readonly GpsPoint[], now: number): boolean {
+  const times = buffer.map((p) => Date.parse(p.recordedAt)).filter(Number.isFinite);
+  if (times.length === 0) return true;
+  return now - Math.max(...times) > GPS_BUFFER_MAX_AGE_MS;
+}
+
+/**
+ * Sort d'un paquet refusé. Le serveur répond 4xx quand il ne veut définitivement plus ces points
+ * (mission close, affectation levée, drapeau coupé) : on les retire. 401 (session expirée), 408 et 429
+ * sont passagers : le paquet reste au tampon, rejoué après reconnexion du même utilisateur.
+ */
+export function shouldDropBatch(status: number): boolean {
+  return status >= 400 && status < 500 && status !== 401 && status !== 408 && status !== 429;
+}
+
+/** Position affichée à rafraîchir ? Première, ou 10 s écoulées, ou 20 m parcourus. */
+export function shouldRefreshDisplay(last: RawFix | null, next: RawFix): boolean {
+  if (!last) return true;
+  if (next.timestamp - last.timestamp >= GPS_DISPLAY_INTERVAL_MS) return true;
+  return distanceMeters(last, next) >= GPS_DISPLAY_DISTANCE_M;
 }
 
 export function parseBuffer(raw: string | null): GpsPoint[] {
@@ -160,7 +248,7 @@ export function buildGoogleDirectionsUrl(origin: RoutePoint | null, destination:
   return `https://www.google.com/maps/dir/?${params.toString()}`;
 }
 
-export type GpsTrackingState = "idle" | "sharing" | "denied" | "unavailable";
+export type GpsTrackingState = "idle" | "waiting" | "sharing" | "denied" | "unavailable";
 
 /** Le suivi tourne seulement pendant la route : de `in_progress` jusqu'à `delivered`. */
 export function shouldTrack(status: string | undefined, gpsEnabled: boolean): boolean {

@@ -9,7 +9,7 @@ import { useFuelPrice } from "@/hooks/use-fuel-price";
 import { localDateKey } from "@/lib/fuel-price-policy";
 import { useRealTimeSync } from "@/hooks/useRealTimeSync";
 import { PodDepositButton } from "@/components/missions/mission-pod-panel";
-import { DriverGpsPanel } from "@/components/driver/driver-gps-panel";
+import { DriverGpsBufferReplay, DriverGpsPanel } from "@/components/driver/driver-gps-panel";
 import { splitDriverMissions } from "@/lib/driver-missions";
 import { useMemo, useState } from "react";
 import { format, isThisMonth } from "date-fns";
@@ -767,6 +767,7 @@ export default function DriverDashboard() {
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: "#f4f6f8" }}>
+      <DriverGpsBufferReplay userId={user?.id} trackingMissionId={activeMission?.status === "in_progress" ? activeMission.id : undefined} />
       {/* ── Sticky header ───────────────────────────────────────── */}
       <header className="sticky top-0 z-40 flex items-center justify-between px-4 py-3 shadow-md" style={{ background: "#0b2116" }}>
         <div className="flex items-center gap-2">

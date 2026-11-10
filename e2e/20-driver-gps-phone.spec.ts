@@ -206,7 +206,26 @@ test.describe("GPS V1 téléphone : espace chauffeur", () => {
     expect(await positionCount(crewFlag.missionId)).toBe(0);
   });
 
-  test("un compte non chauffeur ne dépose pas de position (403)", async ({ browser }) => {
+  test("tampon orphelin d'une mission livrée : rejoué au retour sur l'écran, puis clé retirée", async ({ browser }) => {
+    const before = await positionCount(crewMain.missionId);
+    const key = `fleetos-gps-buffer-u${crewMain.user.id}-m${crewMain.missionId}`;
+    const point = {
+      clientPointId: crypto.randomUUID(),
+      recordedAt: new Date(Date.now() - 60_000).toISOString(),
+      lat: 3.9,
+      lng: 10.2,
+    };
+    const context = await newE2EContext(browser, "chauffeur", { viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    await loginWithSession(page, crewMain.user);
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.evaluate(([k, v]) => window.localStorage.setItem(k, v), [key, JSON.stringify([point])] as const);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect.poll(() => positionCount(crewMain.missionId), { timeout: 30_000 }).toBe(before + 1);
+    await expect.poll(() => page.evaluate((k) => window.localStorage.getItem(k), key), { timeout: 10_000 }).toBeNull();
+  });
+
+  test("un compte non chauffeur nedépose pas de position (403)", async ({ browser }) => {
     const context = await newE2EContext(browser, "logistique");
     const page = await context.newPage();
     await loginWithSession(page, logistics);

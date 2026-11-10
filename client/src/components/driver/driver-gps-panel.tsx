@@ -3,7 +3,7 @@ import { formatDistanceToNowStrict } from "date-fns";
 import { fr } from "date-fns/locale";
 import { LocateFixed, LocateOff, Navigation } from "lucide-react";
 import { useFeature } from "@/hooks/use-feature";
-import { useGpsTracking, useMissionTrack } from "@/hooks/use-gps-tracking";
+import { useGpsBufferReplay, useGpsTracking, useMissionTrack } from "@/hooks/use-gps-tracking";
 import { buildGoogleDirectionsUrl, shouldTrack, type RoutePoint } from "@/lib/gps-tracking";
 
 // Leaflet et ses styles ne chargent qu'à l'ouverture de la carte : la PWA reste légère ailleurs.
@@ -37,6 +37,21 @@ export function DriverGpsPanel(props: { mission: DriverGpsPanelMission; userId: 
   return <DriverGpsPanelInner {...props} />;
 }
 
+/**
+ * Rejoue les positions restées au téléphone pour des missions déjà closes (envoi coupé à la livraison).
+ * Ne rend rien ; derrière le drapeau `gps`, comme le reste.
+ */
+export function DriverGpsBufferReplay(props: { userId: number | undefined; trackingMissionId: number | undefined }) {
+  const gpsEnabled = useFeature("gps");
+  if (!gpsEnabled) return null;
+  return <DriverGpsBufferReplayInner {...props} />;
+}
+
+function DriverGpsBufferReplayInner({ userId, trackingMissionId }: { userId: number | undefined; trackingMissionId: number | undefined }) {
+  useGpsBufferReplay({ userId, trackingMissionId });
+  return null;
+}
+
 function DriverGpsPanelInner({ mission, userId }: { mission: DriverGpsPanelMission; userId: number | undefined }) {
   const tracking = shouldTrack(mission.status, true);
   const gps = useGpsTracking({ userId, missionId: mission.id, active: tracking });
@@ -48,8 +63,19 @@ function DriverGpsPanelInner({ mission, userId }: { mission: DriverGpsPanelMissi
     return () => window.clearInterval(id);
   }, []);
 
-  const origin = hasCoords(track?.pickup) ? { lat: track!.pickup.lat!, lng: track!.pickup.lng! } : null;
-  const destination = hasCoords(track?.delivery) ? { lat: track!.delivery.lat!, lng: track!.delivery.lng! } : null;
+  // Références stables : la carte ne recrée pas ses repères A/B à chaque rendu.
+  const pickupLat = track?.pickup.lat;
+  const pickupLng = track?.pickup.lng;
+  const deliveryLat = track?.delivery.lat;
+  const deliveryLng = track?.delivery.lng;
+  const origin = useMemo(
+    () => (hasCoords({ lat: pickupLat, lng: pickupLng }) ? { lat: pickupLat as number, lng: pickupLng as number } : null),
+    [pickupLat, pickupLng],
+  );
+  const destination = useMemo(
+    () => (hasCoords({ lat: deliveryLat, lng: deliveryLng }) ? { lat: deliveryLat as number, lng: deliveryLng as number } : null),
+    [deliveryLat, deliveryLng],
+  );
 
   const trace = useMemo(
     () => [
@@ -112,6 +138,11 @@ function DriverGpsPanelInner({ mission, userId }: { mission: DriverGpsPanelMissi
         )}
         {gps.state === "sharing" && sentAgo && (
           <p className="text-xs text-muted-foreground" data-testid="driver-gps-last-sent">Dernière position envoyée il y a {sentAgo}.</p>
+        )}
+        {gps.state === "waiting" && (
+          <p className="text-xs text-muted-foreground" role="status" data-testid="driver-gps-waiting">
+            Recherche de votre position en cours.
+          </p>
         )}
         {gps.state === "denied" && (
           <div
