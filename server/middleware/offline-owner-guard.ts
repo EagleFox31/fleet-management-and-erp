@@ -1,7 +1,7 @@
 import type { RequestHandler } from "express";
-import { AppError } from "../lib/app-error";
 import { IDEMPOTENCY_HEADER, OFFLINE_OWNER_HEADER } from "../lib/idempotency-config";
 import { moduleLogger } from "../lib/logger";
+import { offlineOwnerMismatch, ownerHeaderMatches } from "../lib/offline-owner";
 
 const log = moduleLogger("offline-owner-guard");
 
@@ -28,13 +28,9 @@ export function offlineOwnerGuard(): RequestHandler {
     if (owner === undefined || req.get(IDEMPOTENCY_HEADER) === undefined) return next();
     const userId = req.session?.userId;
     if (!userId) return next();
-    if (/^\d{1,9}$/.test(owner.trim()) && Number(owner.trim()) === userId) return next();
+    if (ownerHeaderMatches(req, userId)) return next();
     // Pas d'identifiant dans le journal : seulement le fait.
     log.warn({ requestId: req.requestId }, "envoi différé refusé : la session n'est pas celle de son propriétaire");
-    return next(
-      new AppError(409, "Ces envois appartiennent à un autre compte. Reconnectez-vous avec le compte qui les a enregistrés.", {
-        code: "OFFLINE_OWNER_MISMATCH",
-      }),
-    );
+    return next(offlineOwnerMismatch());
   };
 }

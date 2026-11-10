@@ -1,6 +1,6 @@
 import { inArray, type SQL } from "drizzle-orm";
 import { db } from "../../server/db";
-import { clientInvoices, fuelRecords } from "../../shared/schema";
+import { clientCreditNotes, clientInvoices, fuelRecords } from "../../shared/schema";
 import { withMoneyOverride } from "../../server/lib/money-override";
 import { moduleLogger } from "../../server/lib/logger";
 
@@ -11,7 +11,7 @@ const log = moduleLogger("tests-money-override");
  * refusent UPDATE et DELETE sur un plein validé ou une facture émise : le nettoyage passe
  * par une transaction qui lève le verrou, et c'est le SEUL endroit de tests/, e2e/ et
  * scripts/ autorisé à le faire (garde : tests/unit/server/money-override-hygiene.test.ts).
- * Les avoirs (`client_credit_notes`) auront leur helper avec leur table.
+ * Les avoirs (`client_credit_notes`, immuables) se suppriment avec leur facture : la clé étrangère est RESTRICT.
  */
 const REASON = "nettoyage de données de test";
 
@@ -25,7 +25,18 @@ export async function deleteFuelRecordsWhere(where: SQL): Promise<void> {
 export async function deleteClientInvoicesWhere(where: SQL): Promise<void> {
   await db.transaction(async (tx) => {
     await withMoneyOverride(tx, REASON);
+    await tx
+      .delete(clientCreditNotes)
+      .where(inArray(clientCreditNotes.invoiceId, tx.select({ id: clientInvoices.id }).from(clientInvoices).where(where)));
     await tx.delete(clientInvoices).where(where);
+  });
+}
+
+/** Avoirs seuls (immuables) : le ménage des comptes de test retire ceux qu'ils ont émis. */
+export async function deleteClientCreditNotesWhere(where: SQL): Promise<void> {
+  await db.transaction(async (tx) => {
+    await withMoneyOverride(tx, REASON);
+    await tx.delete(clientCreditNotes).where(where);
   });
 }
 

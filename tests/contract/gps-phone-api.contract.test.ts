@@ -97,6 +97,20 @@ describe("ingestion par paquets", { timeout: 120000 }, () => {
     expect(rows.every((r) => r.source === "phone" && r.driverId === driverAId)).toBe(true);
   });
 
+  it("paquet d'un autre propriétaire (X-Offline-Owner) : 409 OFFLINE_OWNER_MISMATCH, rien d'écrit ; propriétaire correct : accepté", async () => {
+    const own = String(session.userIdOf("driverA"));
+    const batch = { points: [point({ recordedAt: minutesAgo(5), lat: 4.07 })] };
+    const url = `/api/driver/missions/${missionId}/positions`;
+    const before = (await db.select().from(vehiclePositions).where(eq(vehiclePositions.missionId, missionId))).length;
+    const foreign = await session.call("POST", url, { actor: "driverA", body: batch, headers: { "X-Offline-Owner": String(Number(own) + 1) } });
+    expect(foreign.status, JSON.stringify(foreign.body)).toBe(409);
+    expect(foreign.body).toMatchObject({ code: "OFFLINE_OWNER_MISMATCH" });
+    const after = await db.select().from(vehiclePositions).where(eq(vehiclePositions.missionId, missionId));
+    expect(after).toHaveLength(before);
+    const mine = await session.call("POST", url, { actor: "driverA", body: batch, headers: { "X-Offline-Owner": own } });
+    expect(mine.status, JSON.stringify(mine.body)).toBe(201);
+  });
+
   it("refuse futur, trop ancien et hors fenêtre de mission", async () => {
     const res = await session.call("POST", `/api/driver/missions/${missionId}/positions`, {
       actor: "driverA",

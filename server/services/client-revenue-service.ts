@@ -14,8 +14,9 @@ import { isIsoCalendarDate } from "@shared/constants/calendar-date";
  * - Montant HT (`amount_ht`), sommé en SQL `numeric` et rendu en chaîne décimale : jamais de float.
  * - Devise : `client_invoices` ne porte aucune devise, tous les montants sont supposés en FCFA.
  *   Une colonne devise imposerait de refuser le mélange avant de sommer.
- * - Avoirs : aucune table d'avoirs. Un montant HT négatif est sommé avec son signe (il réduit le CA,
- *   comme un avoir) et compté dans `negativeInvoiceCount` pour qu'un écran puisse le signaler.
+ * - Avoirs : le HT de chaque avoir (`client_credit_notes`, factures non annulées) est retiré à la date de
+ *   l'avoir, pas à celle de la facture (lot V1). Un montant HT négatif sur une facture est aussi sommé avec
+ *   son signe et compté dans `negativeInvoiceCount` pour qu'un écran puisse le signaler.
  * - Client = `COALESCE(facture.client_id, mission.client_id)`. Une facture sans client ni mission
  *   forme la ligne « Sans client » (`clientId` et `clientName` null) : comptée dans le total.
  * - Période : `invoice_date` entre `from` et `to` inclus (dates calendaires).
@@ -121,14 +122,35 @@ export async function getRevenueByClient(period: RevenuePeriod): Promise<ClientR
         AND i.invoice_date >= ${period.from}::date
         AND i.invoice_date <= ${period.to}::date
     ),
-    per_client AS (
+    per_invoice_client AS (
       SELECT client_id,
              COUNT(*) AS invoice_count,
              COUNT(*) FILTER (WHERE amount_ht < 0) AS negative_count,
-             SUM(amount_ht) AS revenue_ht,
+             SUM(amount_ht) AS invoiced_ht,
              BOOL_OR(mission_id IS NULL) AS has_invoice_without_mission
       FROM inv
       GROUP BY client_id
+    ),
+    -- Avoirs (lot V1) : le chiffre d'affaires net retire leur HT à la date de l'avoir, pas à celle de la facture.
+    credits AS (
+      SELECT COALESCE(i.client_id, m.client_id) AS client_id, SUM(cn.amount_ht) AS credit_ht
+      FROM client_credit_notes cn
+      JOIN client_invoices i ON i.id = cn.invoice_id
+      LEFT JOIN missions m ON m.id = i.mission_id
+      WHERE i.status <> 'cancelled'
+        AND cn.created_at::date >= ${period.from}::date
+        AND cn.created_at::date <= ${period.to}::date
+      GROUP BY COALESCE(i.client_id, m.client_id)
+    ),
+    per_client AS (
+      SELECT COALESCE(p.client_id, cr.client_id) AS client_id,
+             COALESCE(p.invoice_count, 0) AS invoice_count,
+             COALESCE(p.negative_count, 0) AS negative_count,
+             COALESCE(p.invoiced_ht, 0) - COALESCE(cr.credit_ht, 0) AS revenue_ht,
+             COALESCE(p.has_invoice_without_mission, false) AS has_invoice_without_mission
+      FROM per_invoice_client p
+      -- FULL JOIN exige une égalité hachable : IS NOT DISTINCT FROM est refusé, le NULL sans client passe par -1.
+      FULL JOIN credits cr ON COALESCE(cr.client_id, -1) = COALESCE(p.client_id, -1)
     ),
     -- Une mission portée par plusieurs factures (acompte + solde) ne compte son carburant qu'une fois.
     billed_missions AS (

@@ -253,6 +253,17 @@ describe("marqueur offline-resume : horloge reculée (maxSeenAt)", () => {
     expect(h.raw()!.maxSeenAt).toBe(T0 + 10 * H);
   });
 
+  it("risque assumé : une horloge ramenée à chaque démarrage près de maxSeenAt prolonge la lecture au-delà de 72 h réelles", async () => {
+    await resume.record({ id: 7, role: "driver" }, ON, T0);
+    await resume.read(T0 + 71 * H);
+    // Trois jours réels passent, mais l'appareil affiche toujours la même heure (à 4 min près) : lisible.
+    expect((await resume.read(T0 + 71 * H - 4 * 60_000))?.userId).toBe(7);
+    expect((await resume.read(T0 + 71 * H - 3 * 60_000))?.userId).toBe(7);
+    // L'échéance, elle, n'a pas bougé : l'heure de l'appareil qui avance la fait jouer.
+    expect(h.raw()!.expiresAt).toBe(T0 + RESUME_TTL_MS);
+    expect(await resume.read(T0 + RESUME_TTL_MS + 1)).toBeNull();
+  });
+
   it("marqueur écrit sans maxSeenAt (avant ce correctif) : lisible, borné par lastOnlineAt", async () => {
     await resume.record({ id: 7, role: "driver" }, ON, T0);
     const legacy = { ...h.raw()! };

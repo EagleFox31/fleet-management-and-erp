@@ -3,6 +3,9 @@ import { routeIdSchema } from "@shared/contracts/common";
 import { requireFeature } from "../lib/feature-flags";
 import { gpsBatchSchema, parseOsmandReport, toGpsPoint } from "../lib/gps-points";
 import { AppError } from "../lib/app-error";
+import { OFFLINE_OWNER_HEADER } from "../lib/idempotency-config";
+import { moduleLogger } from "../lib/logger";
+import { offlineOwnerMismatch, ownerHeaderMatches } from "../lib/offline-owner";
 import { authorize } from "../middleware/auth";
 import { createKeyedRateLimiter } from "../middleware/keyed-rate-limit";
 import { activeMissionIdOf, ingestDriverPositions } from "../services/vehicle-positions-service";
@@ -36,6 +39,7 @@ import { activeMissionIdOf, ingestDriverPositions } from "../services/vehicle-po
  * Réglages : GPS_BATCH_BURST, GPS_BATCH_REFILL_SECONDS, GPS_OSMAND_BURST, GPS_OSMAND_REFILL_SECONDS.
  */
 const router = Router();
+const log = moduleLogger("driver-positions");
 
 export const GPS_RATE_DEFAULTS = { batchBurst: 20, batchRefillSeconds: 10, osmandBurst: 30, osmandRefillSeconds: 5 };
 
@@ -70,6 +74,18 @@ const jsonOnly: RequestHandler = (req, _res, next) => {
   next();
 };
 
+/**
+ * Propriétaire déclaré du paquet (`X-Offline-Owner`, posé par le tampon du navigateur) : le cookie est
+ * partagé entre onglets, un autre compte connecté entre-temps ne doit pas recevoir les points de l'ancien.
+ * Sans l'en-tête, la requête passe comme avant.
+ */
+const ownerMatchesSession: RequestHandler = (req, _res, next) => {
+  if (req.get(OFFLINE_OWNER_HEADER) === undefined || ownerHeaderMatches(req, req.user?.id)) return next();
+  // Pas d'identifiant dans le journal : seulement le fait.
+  log.warn({ requestId: req.requestId }, "positions différées refusées : la session n'est pas celle de leur propriétaire");
+  next(offlineOwnerMismatch());
+};
+
 const postBatch: RequestHandler = async (req, res, next) => {
   try {
     const missionId = routeIdSchema.parse(req.params.id);
@@ -95,7 +111,7 @@ const postOsmand: RequestHandler = async (req, res, next) => {
   }
 };
 
-router.post("/driver/missions/:id/positions", requireFeature("gps"), authorize(["driver"]), jsonOnly, batchRateLimit, postBatch);
+router.post("/driver/missions/:id/positions", requireFeature("gps"), authorize(["driver"]), jsonOnly, ownerMatchesSession, batchRateLimit, postBatch);
 router.post("/driver/positions", requireFeature("gps"), authorize(["driver"]), jsonOnly, osmandRateLimit, postOsmand);
 
 export default router;

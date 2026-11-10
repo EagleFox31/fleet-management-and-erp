@@ -13,8 +13,8 @@ describe("upgradeRoute", () => {
     expect(upgradeRoute(url, false)).toBe("reject");
   });
 
-  it("server/index.ts detruit la socket d'un upgrade refuse", () => {
-    const index = readFileSync("server/index.ts", "utf8");
+  it("l'upgrade de server/index.ts (ws-upgrade.ts) detruit la socket d'un upgrade refuse", () => {
+    const index = readFileSync("server/lib/ws-upgrade.ts", "utf8");
     expect(index).toMatch(/const route = upgradeRoute\(request\.url, [^)]+\);/);
     expect(index).toMatch(/if \(route === "reject"\) socket\.destroy\(\);/);
   });

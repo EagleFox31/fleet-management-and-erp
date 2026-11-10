@@ -16,6 +16,15 @@ export const PENDING_LOGOUT_KEY = "fleetos-pending-server-logout";
 
 export type PendingLogoutOutcome = "none" | "sent" | "pending";
 
+export interface PendingLogoutFlushOptions {
+  /**
+   * Purge locale à refaire APRÈS l'envoi serveur et AVANT d'effacer le repère. `false` (purge toujours
+   * incomplète) : le repère reste et l'issue est `pending`, pour que le prochain démarrage ou retour du
+   * réseau retente. Le repère n'est effacé qu'une fois l'appareil réellement vidé.
+   */
+  beforeClear?: () => Promise<boolean | void>;
+}
+
 export interface PendingLogoutDeps {
   /** Stockage local du navigateur, null s'il est indisponible. */
   storage: () => Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
@@ -59,15 +68,28 @@ export function createPendingLogout(deps: PendingLogoutDeps) {
     }
   }
 
-  async function run(): Promise<PendingLogoutOutcome> {
+  /** Purge locale demandée par l'appelant ; faux = le repère doit rester. Une levée vaut échec. */
+  async function purgedBeforeClear(options?: PendingLogoutFlushOptions): Promise<boolean> {
+    if (!options?.beforeClear) return true;
+    try {
+      return (await options.beforeClear()) !== false;
+    } catch (err) {
+      clientLogger.warn("Purge locale de la déconnexion en échec", { err });
+      return false;
+    }
+  }
+
+  async function run(options?: PendingLogoutFlushOptions): Promise<PendingLogoutOutcome> {
     if (!isPending()) return "none";
     try {
       await deps.sendLogout();
+      if (!(await purgedBeforeClear(options))) return "pending";
       clear();
       return "sent";
     } catch (err) {
       // 401 : le serveur ne connaît déjà plus la session, rien à fermer.
       if (isApiError(err, 401)) {
+        if (!(await purgedBeforeClear(options))) return "pending";
         clear();
         return "sent";
       }
@@ -84,9 +106,9 @@ export function createPendingLogout(deps: PendingLogoutDeps) {
     /** À appeler quand une nouvelle session s'ouvre : l'ancienne n'a plus à être fermée. */
     clear,
     /** Envoie la déconnexion en attente (un seul envoi à la fois). */
-    flush(): Promise<PendingLogoutOutcome> {
+    flush(options?: PendingLogoutFlushOptions): Promise<PendingLogoutOutcome> {
       if (!inFlight) {
-        inFlight = run().finally(() => {
+        inFlight = run(options).finally(() => {
           inFlight = null;
         });
       }

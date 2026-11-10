@@ -82,8 +82,9 @@ Plan établi le 2026-11-10 sur main e7b0f5ba. Les numéros de ligne ci-dessous v
 
 ## Décisions de 0a (2026-11-10)
 - **a. D4 accepté.** La garde va dans `FuelService.updateFuelRecord`. Un contrat prouve le 409 en passant par la route réelle de `routes.ts`. Backlog : déplacer le PATCH des pleins dans `server/api`, dans un lot séparé.
-- **b. Avoir sur une facture déposée : autorisé.**
-  - `net_payable` reste figé et l'avoir réduit le solde.
+- **b. Avoir sur une facture déposée : refusé (révisé le 2026-11-10, option a « base nette »).** Remplace « autorisé ».
+  - Avoir émis avant le dépôt : les retenues et le net à payer se calculent sur HT et TTC diminués des avoirs (retenue TVA sur le HT net, retenue IS sur sa base nette), donc net à payer ≤ solde.
+  - Avoir émis après un dépôt non soldé : 409 « Facture déposée : l'avoir n'est pas encore possible, net à payer figé. » (fail-closed). Facture déposée et soldée : refusée par le plafond au solde.
   - Le PDF de l'avoir cite la facture d'origine et son numéro de dépôt.
 - **c. Annulation d'un plein sur un budget de mission soldé : 409.** Message : « Le budget de la mission est soldé : l'annulation n'est plus possible, contactez la comptabilité. »
 - **d. Remboursement : hors v1.**
@@ -111,3 +112,16 @@ Plan établi le 2026-11-10 sur main e7b0f5ba. Les numéros de ligne ci-dessous v
 - `cancelled` terminal (décision e) : ni sortie, ni solde, ni dépôt. Suppression et `TRUNCATE` refusés (`trg_client_invoices_truncate_lock`), levée par `withMoneyOverride` seulement.
 - Clés étrangères : `mission_id`, `client_id`, `created_by` en NO ACTION (la clé refuse déjà la suppression du parent) ; seul `deposited_by` (ON DELETE SET NULL) écrit la table depuis une action référentielle, admis par `pg_trigger_depth() > 1` quand rien d'autre ne change.
 - Factures sans client ni mission : admises à la création, gelées ensuite. Les tests qui posaient client, mission ou dépôt par un UPDATE les posent désormais à l'insertion (`createTestClientInvoice`).
+
+## Avancement PR5 (avoirs clients)
+- **Posée le 2026-11-10, branche `c7-v1-credit-notes`** (empilée sur `c7-v1-invoice-trigger`, #641). Table `client_credit_notes` immuable (trigger `client_credit_notes_immutable`, migration `20261110_client_credit_notes.sql`, jumelle `CLIENT_CREDIT_NOTES_SQL`), colonne `client_invoices.credited_amount_ttc` (monte seulement, au plus `amount_ttc`), fonction de verrou des factures remplacée par `20261110_money_lock_invoices_credits.sql` (nommée pour se trier après les deux autres migrations).
+- Cohérence statut / solde ajoutée au trigger des factures (demande 0a) : une facture payée ne repasse pas en attente, partielle ou en retard ; payée exige un solde nul ; un solde nul impose payée (sauf annulée). Cycle légitime relu : `recordPayment` (payée seulement à solde 0), passe des retards (solde > 0), `createCreditNote` (`statusAfterBalanceChange`).
+- Service `createCreditNote` (une transaction, `FOR UPDATE`, rejeu par `request_key`, plafonné au solde, 409 sur annulée ou soldée), numérotation `nextDailyNumber` partagée avec les factures, PDF `generateCreditNotePDF`, routes sous `/api/billing`, événement `client_credit_note_created` (rôles de facturation, jamais client).
+- Lecteurs « payé » corrigés (`paidTtcOf`) ; CA net = facturé HT moins HT des avoirs à la date de l'avoir (tableau de bord direction, CA par client).
+- Remarque PR6 : écran d'émission et de consultation des avoirs, affichage de `creditedAmountTtc` ; `.gitattributes` `*.sql text eol=lf` en PR séparée (les migrations sont en CRLF sous Windows).
+
+## Backlog (PR5)
+- **Remboursements hors v1** : un avoir est plafonné au solde de la facture ; rembourser un client qui a déjà payé n'est pas géré. À soumettre au client (journal QA).
+- Le PDF cite la date de dépôt de la facture : aucun numéro de dépôt n'existe en base.
+- **Recalcul du net à payer figé par un avoir postérieur au dépôt** : aujourd'hui refusé (409). À reprendre si le client veut émettre des avoirs sur des factures déposées.
+- Le trigger des factures n'a pas été modifié par cette révision.

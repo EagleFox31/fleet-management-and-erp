@@ -3,7 +3,7 @@
  * Les contrats tournent en `isolate: false` : sans restauration, une valeur fixée au chargement d'un
  * fichier (`process.env.FEATURE_FLAGS = "incidents=on"`) reste en place pour les fichiers suivants.
  */
-export const FILE_SCOPED_ENV = ["FEATURE_FLAGS", "TZ", "TRUST_PROXY", "AUTH_IP_FAILURE_MAX", "GPS_BATCH_BURST", "GPS_BATCH_REFILL_SECONDS"] as const;
+export const FILE_SCOPED_ENV = ["FEATURE_FLAGS", "TZ", "TRUST_PROXY", "AUTH_IP_FAILURE_MAX", "NODE_ENV", "GPS_BATCH_BURST", "GPS_BATCH_REFILL_SECONDS"] as const;
 
 export type EnvSnapshot = Record<string, string | undefined>;
 

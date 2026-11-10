@@ -195,3 +195,16 @@ Cette entrée remplace l'approche de l'entrée précédente, refusée en relectu
 - **Quoi** : `mission_id` d'un plein validé ne passe à NULL que par l'action de clé étrangère (`pg_trigger_depth() > 1`) ; trigger `BEFORE TRUNCATE ... FOR EACH STATEMENT` `trg_fuel_records_truncate_lock` (même levée `withMoneyOverride`) ; `SET LOCAL lock_timeout = '5s'`, pose des deux triggers dans un `DO` qui tolère `lock_not_available` (WARNING), relu dans `pg_trigger` et journalisé par `init-database`.
 - **Pourquoi** : un UPDATE direct de `mission_id` vers NULL sortait un plein validé du budget de sa mission sans annulation tracée ; un TRUNCATE ... CASCADE vidait les pleins sans passer par le trigger par ligne ; un verrou de table retenu par une écriture longue bloquait le démarrage.
 - **Comment prouvé** : intégration rouge 4/13 (UPDATE direct accepté, TRUNCATE CASCADE accepté, migration bloquée 15 s, trigger TRUNCATE absent), vert 13/13. Les essais de TRUNCATE tournent dans une transaction toujours annulée : la base partagée n'est jamais vidée. Aucun TRUNCATE dans les helpers de nettoyage ni dans la restauration.
+
+## 2026-11-10 - V1 PR5 : avoirs clients et cohérence statut / solde
+- **Quoi** : table `client_credit_notes` (immuable), `client_invoices.credited_amount_ttc`, service et routes d'avoir, PDF, événement temps réel, lecteurs « payé » et CA net corrigés ; le trigger des factures impose la cohérence statut / solde (demande 0a) ; `nextDailyNumber` partage la numérotation journalière.
+- **Comment** : migrations `20261110_client_credit_notes.sql` et `20261110_money_lock_invoices_credits.sql` (jumelles dans `init-database.ts`, parité testée) ; `createCreditNote` en une transaction `FOR UPDATE` avec compare-and-set sur le statut ; montants en centimes entiers.
+- **Pourquoi** : une facture émise est gelée, la seule correction est un avoir ; sans ces lecteurs, un avoir apparaîtrait comme un encaissement.
+- **Piège** : le test d'idempotence de PR4 comparait la définition de la fonction à celle du fichier SQL lu tel quel ; sous Windows le fichier est en CRLF, donc la fonction rejouée différait. Les lectures de migration du test normalisent désormais les fins de ligne.
+- **Preuve** : voir le rapport de PR (tsc, unitaires, contrat, intégration).
+
+## 2026-11-10 - V1 PR5 : rejeu strict, collision de numéro, avoir et dépôt
+- **Quoi** : rejeu d'une `request_key` avec un autre montant ou motif refusé en 409 (identique : 200) ; une erreur 23505 n'est « en cours d'enregistrement » que pour `request_key`, une collision sur `credit_note_number` relit le numéro (un nouvel essai) puis 409 distinct ; retenues du dépôt calculées sur HT et TTC nets des avoirs ; avoir refusé (409) sur une facture déposée non soldée (décision 0a, option a).
+- **Comment** : `createCreditNote` boucle sur `createCreditNoteOnce` ; `finance-receivables-service` lit la somme des avoirs par sous-requête et la retranche avant `computeWithholdings`.
+- **Pourquoi** : le net à payer figé au dépôt sur le TTC brut dépassait le solde après un avoir ; le rejeu muet rendait un ancien avoir pour une demande différente.
+- **Preuve** : contrats et intégration dans `client-credit-notes*.test.ts`.
