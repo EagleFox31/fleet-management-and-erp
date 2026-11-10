@@ -55,6 +55,7 @@ describe("emitAlerts : coupe-circuit sur la reprise", () => {
   const candidates = Array.from({ length: 10 }, (_, i) => ({
     type: "fuel" as const,
     title: `T${i}`,
+    dedupeKey: `k${i}`,
     message: "m",
     priority: "medium" as const,
     link: `/x/${i}`,
@@ -97,9 +98,15 @@ describe("emitAlerts : coupe-circuit sur la reprise", () => {
     }
   });
 
+  it("le journal ne porte jamais le titre (nom du chauffeur, échéance) : clé de dédoublonnage seule", () => {
+    const [sample] = emitLossContext(new Error("x"), candidates, candidates.slice(0, 1), 1).sample;
+    expect(sample).toEqual({ dedupeKey: "k0", type: "fuel" });
+    expect(JSON.stringify(sample)).not.toContain("T0");
+  });
+
   it("récapitulatif : échantillons de 5 au plus, échouées et abandonnées", () => {
     const err = new Error("x");
-    const brief = (list: typeof candidates) => list.map((c) => ({ title: c.title, type: c.type }));
+    const brief = (list: typeof candidates) => list.map((c) => ({ dedupeKey: c.dedupeKey, type: c.type }));
     expect(emitLossContext(err, candidates, [], 0)).toMatchObject({
       failed: 0, abandoned: 10, lost: 10, candidates: 10, sample: [], abandonedSample: brief(candidates.slice(0, 5)),
     });

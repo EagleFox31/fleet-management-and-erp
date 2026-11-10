@@ -55,3 +55,10 @@ export function describeStatusChange(
   const transition = depuis ? `${depuis} → ${vers}` : vers;
   return `${ORIGIN_LABELS[origin]} : ${transition}`;
 }
+
+/**
+ * Statuts d'un vehicule retire de l'exploitation (vendu, reforme : le schema n'a qu'un statut,
+ * `out_of_service`). Les controles automatiques d'echeance (preventif par date) l'ecartent : un
+ * vehicule qui ne roule plus n'a pas d'atelier a planifier.
+ */
+export const VEHICLE_OUT_OF_SERVICE_STATUSES: readonly VehicleStatusKey[] = ["out_of_service"];
