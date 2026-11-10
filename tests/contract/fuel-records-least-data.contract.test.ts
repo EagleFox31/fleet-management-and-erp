@@ -4,7 +4,7 @@ import { db } from "../../server/db";
 import { fuelRecords, vehicles } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
-import { createTestFuelRecord, createTestVehicle } from "../support/factories";
+import { createTestFuelRecord, createTestUser, createTestVehicle } from "../support/factories";
 import { deleteFuelRecordsWhere } from "../support/money-override";
 
 /**
@@ -35,8 +35,8 @@ const ids = createIdBag();
 let session: Awaited<ReturnType<typeof startContractActors<Actor>>>;
 const BALANCE_KEYS = ["balance", "fuelBalance"] as const;
 
-async function vehicle() {
-  const v = await createTestVehicle();
+async function vehicle(overrides: Parameters<typeof createTestVehicle>[0] = {}) {
+  const v = await createTestVehicle(overrides);
   ids.vehicleIds.push(v.id);
   return v;
 }
@@ -112,12 +112,14 @@ describe("PATCH /api/fuel-records/:id : solde carte masqué hors trésorerie", {
     const r = created.body as { id: number };
     const res = await session.call("PATCH", `/api/fuel-records/${r.id}`, {
       actor: "workshop_manager",
-      body: { notes: "Plein corrigé" },
+      body: { notes: "Plein corrigé", mileage: 100350 },
     });
     expect(res.status).toBe(200);
     expectNoBalance(res.body);
+    expect(res.body).toMatchObject({ id: r.id, mileage: 100350 });
     const [row] = await db.select().from(fuelRecords).where(eq(fuelRecords.id, r.id));
     expect(row.notes).toBe("Plein corrigé");
+    expect(row.mileage).toBe(100350);
   });
 
   it("admin : les clés de solde restent servies", async () => {
@@ -168,11 +170,21 @@ describe("GET /api/fuel-records/statistics : pilotage et client seulement", { ti
     });
   }
 
-  it("client : 200, véhicules d'autrui absents", async () => {
-    const r = await physicalRecord(false);
+  it("client : 200, son véhicule présent, celui d'un autre client absent", async () => {
+    // Plein daté du jour : la période par défaut (un mois) l'inclut dans vehicleStats.
+    const today = new Date().toISOString().slice(0, 10);
+    const otherClient = await createTestUser({ role: "client" });
+    ids.userIds.push(otherClient.id);
+    const own = await vehicle({ ownerId: session.userIdOf("client") });
+    const foreign = await vehicle({ ownerId: otherClient.id });
+    for (const v of [own, foreign]) {
+      const row = await createTestFuelRecord({ vehicleId: v.id, date: today, debitAmount: "0", creditAmount: "0" });
+      ids.fuelRecordIds.push(row.id);
+    }
     const res = await session.call("GET", "/api/fuel-records/statistics", { actor: "client" });
     expect(res.status).toBe(200);
     const seen = (res.body.vehicleStats as Array<{ vehicleId: number }>).map((s) => s.vehicleId);
-    expect(seen).not.toContain(r.vehicleId);
+    expect(seen).toContain(own.id);
+    expect(seen).not.toContain(foreign.id);
   });
 });

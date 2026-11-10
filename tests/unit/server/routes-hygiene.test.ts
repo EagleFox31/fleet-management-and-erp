@@ -218,6 +218,14 @@ describe("garde de cloison des lectures : le scan ne se laisse pas tromper", () 
     expect(verdictOf('router.get("/x", isAnyUser, async (req, res, next) => { await read(); next(); });')).toBe(false);
   });
 
+  it("un relais pur placé après une poignée nommée inconnue n'exempte pas la route", () => {
+    expect(verdictOf('router.get("/x", isAnyUser, listAll, (_q, _s, n) => n());')).toBe(false);
+  });
+
+  it("un relais pur placé après une poignée en ligne qui envoie n'exempte pas la route", () => {
+    expect(verdictOf('router.get("/x", isAnyUser, async (req, res, next) => { res.json(await readAll()); }, (_q, _s, n) => n());')).toBe(false);
+  });
+
   it("une garde nommée isAnyUserX n'est pas exemptée par son préfixe", () => {
     expect(verdictOf('router.get("/x", isAnyUserOrGuest, async (req, res) => { res.json(1); });')).toBe(false);
   });
