@@ -32,6 +32,14 @@ export async function deleteClientInvoicesWhere(where: SQL): Promise<void> {
   });
 }
 
+/** Avoirs seuls (immuables) : le ménage des comptes de test retire ceux qu'ils ont émis. */
+export async function deleteClientCreditNotesWhere(where: SQL): Promise<void> {
+  await db.transaction(async (tx) => {
+    await withMoneyOverride(tx, REASON);
+    await tx.delete(clientCreditNotes).where(where);
+  });
+}
+
 export async function deleteFuelRecordsForTest(ids: number[]): Promise<void> {
   if (ids.length === 0) return;
   await deleteFuelRecordsWhere(inArray(fuelRecords.id, ids));
