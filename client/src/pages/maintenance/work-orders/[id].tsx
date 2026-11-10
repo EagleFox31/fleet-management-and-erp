@@ -315,7 +315,7 @@ export default function WorkOrderDetails({
   // le coût saisi de l'OT s'affiche seul.
   const canReadLaborRate = canReadWorkOrderCost(user?.role);
   // Historique : drapeau et rôles de lecture, comme la route (le serveur garde les deux).
-  const showHistoryLink = useFeature("work-order-audit-trail") && canReadLaborRate;
+  const showHistoryLink = useFeature("work-order-audit-trail") && canReadWorkOrderCost(user?.role);
   const {
     data: laborRate = null,
     isLoading: laborRateLoading,

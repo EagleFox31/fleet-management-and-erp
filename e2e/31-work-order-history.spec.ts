@@ -86,6 +86,8 @@ test("chef d'atelier : lien Historique depuis la fiche, chronologie du plus anci
 test("chauffeur : ni écran d'historique ni données", async ({ page }) => {
   await loginWithSession(page, driver);
   await page.goto(`/maintenance/work-orders/${woId}/history`, { waitUntil: "domcontentloaded" });
+  // Marqueur positif : la page est chargee et le routeur la refuse (404), il ne s'agit pas d'un ecran encore vide.
+  await expect(page.getByRole("heading", { name: "Page non trouvée" })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId("work-order-history")).toHaveCount(0);
   await expect(page.locator('[data-testid^="work-order-history-entry-"]')).toHaveCount(0);
 });

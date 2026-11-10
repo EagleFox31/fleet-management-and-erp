@@ -20,11 +20,11 @@ export interface AuditConfig {
 
 const ACTION_BY_METHOD: Record<string, AuditAction> = { POST: "create", PUT: "update", PATCH: "update", DELETE: "delete" };
 
-export function matchAuditRule(config: AuditConfig, method: string, path: string) {
-  const action = ACTION_BY_METHOD[method.toUpperCase()];
-  if (!action) return null;
-  // Express route sans casse et decode le chemin : comparer de meme, sinon `/PART-SALES` ou
-  // `/work-orders/%35` s'executent sans journal.
+/**
+ * Chemin tel qu'Express le route : decode, sans casse, sans prefixe `/api` (lui aussi insensible a la casse :
+ * `/API/work-orders` s'execute et doit etre journalise), sans barre finale.
+ */
+function normalizeAuditPath(path: string): string {
   const rawPath = path.split("?")[0];
   let decoded = rawPath;
   try {
@@ -32,24 +32,35 @@ export function matchAuditRule(config: AuditConfig, method: string, path: string
   } catch {
     // Encodage invalide : Express repond 400, on garde le chemin brut.
   }
-  const clean = decoded.toLowerCase().replace(/\/+$/, "");
+  return decoded.toLowerCase().replace(/^\/api(?=\/|$)/, "").replace(/\/+$/, "");
+}
+
+function findAuditRule(config: AuditConfig, method: string, path: string) {
+  const action = ACTION_BY_METHOD[method.toUpperCase()];
+  if (!action) return null;
+  const clean = normalizeAuditPath(path);
   for (const rule of config.rules) {
     const m = rule.pattern.exec(clean);
-    if (m) return { action, entityType: rule.entityType, entityId: m[rule.idGroup ?? 1] ?? null };
+    if (m) return { action, rule, match: m };
   }
   return null;
 }
 
-function wantsResponseId(config: AuditConfig, method: string, originalUrl: string): boolean {
-  if (method.toUpperCase() !== "POST") return false;
-  const clean = originalUrl.replace(/^\/api/, "").split("?")[0].toLowerCase().replace(/\/+$/, "");
-  return config.rules.find((r) => r.pattern.test(clean))?.idFromResponse === true;
+export function matchAuditRule(config: AuditConfig, method: string, path: string) {
+  const found = findAuditRule(config, method, path);
+  if (!found) return null;
+  return { action: found.action, entityType: found.rule.entityType, entityId: found.match[found.rule.idGroup ?? 1] ?? null };
+}
+
+/** Creation dont l'id n'est connu que dans la reponse (`idFromResponse`). */
+export function wantsResponseId(config: AuditConfig, method: string, path: string): boolean {
+  return method.toUpperCase() === "POST" && findAuditRule(config, method, path)?.rule.idFromResponse === true;
 }
 
 /** Journalise, apres la reponse (< 400), les ecritures dont le chemin correspond a une regle. */
 export function auditWrites(config: AuditConfig): RequestHandler {
   return (req, res, next) => {
-    const hit = matchAuditRule(config, req.method, req.originalUrl.replace(/^\/api/, ""));
+    const hit = matchAuditRule(config, req.method, req.originalUrl);
     if (!hit) return next();
     let responseId: string | null = null;
     if (hit.entityId === null && wantsResponseId(config, req.method, req.originalUrl)) {

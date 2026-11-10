@@ -3530,3 +3530,14 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - même fichier, cas « véhicule réformé (out_of_service) échu : aucun OT » ;
   - `tests/unit/server/preventive-date-check.test.ts` : table des états d'OT de `isDateBasedDueAlreadyHandled`.
 - **Leçon généralisée** : tout contrôle d'idempotence est revu état par état quand son appelant devient périodique ; une garde se teste sur chaque état possible de l'objet qu'elle protège, pas sur le cas qui l'a motivée.
+
+## 2026-11-10 — Journal d'audit contourné par un préfixe /API en majuscules (near miss, #631)
+
+- **Contexte** : le journal d'audit des écritures (`auditWrites`) retirait le préfixe `/api` par un remplacement sensible à la casse. Express route `/API/...` comme `/api/...`. Near miss : trouvé en relecture de #631 avant fusion, aucune écriture non journalisée constatée en production.
+- **Cause racine** : le chemin était normalisé en deux endroits (décodage et minuscules dans `matchAuditRule`, retrait du préfixe ailleurs), avec des règles de casse différentes ; une écriture authentifiée pouvait échapper au journal et donc à l'historique des ordres de travail.
+- **Classification** : contournement d'un contrôle transversal par normalisation incohérente du chemin ; quasi-incident évité en revue.
+- **Résolution** : une seule fonction `normalizeAuditPath` (décodage, minuscules, préfixe `api` retiré sans casse, barre finale retirée) sert `matchAuditRule` et `wantsResponseId` ; `auditWrites` lui passe l'URL brute.
+- **Prévention vérifiée** :
+  - `tests/contract/work-order-audit-lifecycle.contract.test.ts`, cas « prefixe /API en majuscules » : échoue avec l'ancien middleware (1 test sur 2 en échec) ;
+  - `tests/unit/server/audit-config.test.ts` : `/API`, `/Api`, `/%61pi` et `wantsResponseId`.
+- **Leçon généralisée** : un contrôle transversal qui lit le chemin le normalise comme le routeur le fait (décodage, casse, préfixe) en un seul point ; on teste le contournement par la casse et l'encodage, pas seulement le chemin nominal.

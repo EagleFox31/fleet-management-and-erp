@@ -27,10 +27,9 @@ const PATH_ACTIONS: Array<[RegExp, string]> = [
   [/\/awaiting-parts$/, "Statut : Attente pièces"],
   [/\/quality-check$/, "Contrôle qualité"],
   [/\/part-requirements\/\d+\/issue$/, "Sortie de pièce du stock"],
-  [/\/part-requirements/, "Demande de pièce"],
   [/\/parts$/, "Ajout de pièce"],
   [/\/items$/, "Ajout de ligne"],
-  [/^\/api\/technician\/work-orders\/\d+\/status$/, "Changement de statut (technicien)"],
+  [/\/technician\/work-orders\/\d+\/status$/i,"Changement de statut (technicien)"],
 ];
 
 function actionLabel(row: AuditLogRow): string {
