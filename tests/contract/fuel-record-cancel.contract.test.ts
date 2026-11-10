@@ -22,6 +22,10 @@ import { deleteFuelRecordsWhere } from "../support/money-override";
  *    trésorerie, rejeu du même motif = 200 sans nouvelle écriture ;
  *  - plein en attente : PATCH et DELETE restent possibles (non-régression).
  */
+
+// Trésorerie coupée par défaut : sans ce drapeau, aucune ligne de contre-passation n'existe.
+process.env.FEATURE_FLAGS = "finance=on";
+
 const ACTORS = {
   admin: "admin",
   logistics: "logistics",
