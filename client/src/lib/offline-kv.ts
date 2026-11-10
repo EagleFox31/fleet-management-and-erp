@@ -36,8 +36,25 @@ const idbKv: OfflineKv = {
   },
   del: (db, key) => del(key, storeOf(db)),
   clearDb: (db) => clear(storeOf(db)),
-  // Un magasin n'est jamais supprimé (deleteDatabase reste bloqué tant que la
-  // connexion idb-keyval est ouverte) : il est vidé, ce qui suffit à la cloison.
+  // La base vidée est supprimée : la connexion de cet onglet est fermée d'abord (sinon
+  // deleteDatabase reste bloquée), puis le magasin est oublié pour qu'un usage ultérieur rouvre une
+  // base neuve. Une connexion d'un autre onglet retarde la suppression sans la perdre.
+  async dropDb(db) {
+    const store = stores.get(db);
+    if (store) {
+      await store("readonly", (s) => {
+        s.transaction.db.close();
+      });
+      stores.delete(db);
+    }
+    await new Promise<void>((resolve) => {
+      const request = indexedDB.deleteDatabase(db);
+      request.onsuccess = () => resolve();
+      request.onerror = () => resolve();
+      request.onblocked = () => resolve();
+    });
+    dbRegistry.remove(db);
+  },
   // Énumération : registre local (tous navigateurs) + bases connues du navigateur.
   async listDbs() {
     const names = new Set(dbRegistry.list());

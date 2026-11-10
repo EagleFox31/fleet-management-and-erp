@@ -14,3 +14,19 @@
 - Comment : summarizeQueued dans offline-user-scope.ts, utilisé par purgeAll et purgeOthers.
 - Pourquoi : la cloison prime, mais une perte d envois ne doit être ni silencieuse ni exposer de contenu.
 - Tester : offline-storage-scope.test.ts, test changement de compte (règle S1) : file détruite, trace avec nombre et types, ni charge utile, ni e-mail, ni identifiant.
+
+## 2026-11-10 17:30 - V5b-2b : propriétaire par envoi et routes protégées
+
+**Quoi.** En-tête `X-Offline-Owner` à chaque envoi, garde serveur 409 `OFFLINE_OWNER_MISMATCH`, `session-changed` entre onglets, routes protégées en source partagée, refus de rejeu hors motif, mineurs de la revue (plafond 409, rétention, clé, délai, `/api/`, compteur, purge des bases).
+
+**Comment.** Voir `docs/qa/journal/2026-11-10T1730-v5b-2b-proprietaire-et-routes.md`.
+
+**Pourquoi.** Réserves de la revue sécurité de #645 : cookie partagé entre onglets, registre qui rejouait des routes non protégées.
+
+**Tester.** Tests unitaires `tests/unit/client/offline-*.test.ts` ; contrat `tests/contract/offline-owner-guard.contract.test.ts` sous verrou.
+
+## 2026-11-10 18:00 - V5b-2b : audit sécurité et relecture (0aaaa7c2, fa78e0e5 et suite)
+
+- Quoi : 0aaaa7c2 (livraison V5b-2b et garde de préfixe), fa78e0e5 (`routeExample` dans le test de barrière), puis CORS des en-têtes d'idempotence, route de l'envoi liée à son type, date de création par défaut, plafond 409 dérivé du délai de reprise serveur, abonnement `session-changed` testé, repli `AbortSignal.timeout`, test de rétention exact, prérequis d'allumage dans le plan.
+- Comment et pourquoi : voir `docs/qa/journal/2026-11-10T1800-v5b-2b-audit-securite-suite.md`.
+- Tester : tests unitaires `tests/unit/client/offline-*.test.ts` ; contrat `tests/contract/offline-owner-guard.contract.test.ts` sous verrou.

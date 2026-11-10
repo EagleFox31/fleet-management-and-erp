@@ -57,7 +57,7 @@ describe("registre des types d'écriture", () => {
   it("exige toujours offline-writes en plus des drapeaux du type", () => {
     const fuel = getOfflineAction("fuel_entry")!;
     expect(requiredFlagsOf(fuel)).toEqual(["offline-writes", "driver-offline"]);
-    registerOfflineAction({ type: "t_test", label: "T", method: "POST" });
+    registerOfflineAction({ type: "t_test", label: "T", method: "PUT", routeExample: "/api/vehicles/1/mileage" });
     expect(requiredFlagsOf(getOfflineAction("t_test")!)).toEqual(["offline-writes"]);
   });
 });
