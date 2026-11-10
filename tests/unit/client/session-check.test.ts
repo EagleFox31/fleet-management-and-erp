@@ -14,8 +14,8 @@ describe("checkSession : seul un 401 vaut déconnexion", () => {
     expect(await checkSession(respond(401))).toEqual({ status: "anonymous" });
   });
 
-  it.each([500, 502, 503])("%i → serveur injoignable, pas une déconnexion", async (status) => {
-    expect(await checkSession(respond(status))).toEqual({ status: "unreachable" });
+  it.each([403, 500, 502, 503])("%i → serveur injoignable, pas une déconnexion, avec le code HTTP", async (status) => {
+    expect(await checkSession(respond(status))).toEqual({ status: "unreachable", httpStatus: status });
   });
 
   it("réseau coupé → injoignable", async () => {

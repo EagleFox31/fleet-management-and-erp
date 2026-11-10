@@ -217,6 +217,13 @@ export interface OfflineReadProfile {
   id: string;
   /** Drapeaux qui doivent tous être allumés ; aucun = toujours actif. */
   flags: readonly string[];
+  /** Rôles servis par ce profil. */
+  roles: readonly string[];
+  /**
+   * Vrai : l'appareil peut rouvrir la lecture de ce profil au démarrage sans réseau, sur le
+   * marqueur `offline-resume` (voir `offline-resume.ts`). Faux par défaut : opt-in explicite.
+   */
+  resumeOffline: boolean;
   select<T extends CachedQueryLike>(queries: readonly T[]): T[];
 }
 
@@ -256,6 +263,8 @@ function withData<T extends CachedQueryLike>(q: T, data: unknown): T {
 export const DRIVER_READ_PROFILE: OfflineReadProfile = {
   id: "driver",
   flags: ["driver-offline", "offline-writes"],
+  roles: ["driver"],
+  resumeOffline: true,
   select<T extends CachedQueryLike>(queries: readonly T[]): T[] {
     const anchor = queries.find(
       (q) => q.queryKey.length === 1 && q.queryKey[0] === DRIVER_ME_PATH && q.state.status === "success",
@@ -277,6 +286,8 @@ export const DRIVER_READ_PROFILE: OfflineReadProfile = {
 export const TECHNICIAN_READ_PROFILE: OfflineReadProfile = {
   id: "technician",
   flags: [],
+  roles: ["technician"],
+  resumeOffline: false,
   select: selectTechnicianQueries,
 };
 

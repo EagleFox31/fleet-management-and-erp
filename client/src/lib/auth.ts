@@ -1,5 +1,12 @@
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { activateOfflineUser, expireOfflineSession, purgeOfflineSession } from "@/lib/offline-storage";
+import {
+  activateOfflineUser,
+  expireOfflineSession,
+  purgeOfflineSession,
+  recordOfflineResume,
+  resumeOfflineRead,
+} from "@/lib/offline-storage";
+import { offlineResume } from "@/lib/offline-kv";
 import { getActiveOfflineUserId } from "@/lib/offline-user-scope";
 import { pendingServerLogout } from "@/lib/pending-logout";
 import { checkSession } from "@/lib/session-check";
@@ -60,6 +67,7 @@ export async function login(credentials: LoginCredentials): Promise<User> {
     // Nouvelle session : l'ancienne, restée à fermer côté serveur, est remplacée.
     pendingServerLogout.clear();
     rememberOfflineUser(user);
+    await recordOfflineResume(queryClient, user);
     return user;
   } finally {
     clear();
@@ -103,6 +111,9 @@ export const resumeSession = createSessionResume({
   getActiveUserId: getActiveOfflineUserId,
   activateUser: (userId) => activateOfflineUser(queryClient, userId),
   expireUser: (userId) => expireOfflineSession(queryClient, userId),
+  recordOnline: (user) => recordOfflineResume(queryClient, user),
+  restoreOffline: () => resumeOfflineRead(queryClient),
+  clearResume: () => offlineResume.clear(),
   purgeLocal: purgeLocalSession,
 });
 

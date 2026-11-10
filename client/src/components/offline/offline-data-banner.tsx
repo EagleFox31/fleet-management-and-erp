@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { WifiOff } from "lucide-react";
 import { useFeature } from "@/hooks/use-feature";
 import { offlineBannerText } from "@/lib/offline-data-banner";
+import { offlineResume } from "@/lib/offline-kv";
+import { clientLogger } from "@/lib/logger";
 
 function useOnline(): boolean {
   const [online, setOnline] = useState(() => typeof navigator === "undefined" || navigator.onLine !== false);
@@ -18,12 +20,39 @@ function useOnline(): boolean {
   return online;
 }
 
-/** Vrai quand la lecture hors ligne est activée (les deux drapeaux) et que l'appareil est sans réseau. */
+/**
+ * Échéance de la session hors ligne (marqueur `offline-resume`), lue seulement sans réseau. Non nulle :
+ * les drapeaux étaient allumés au dernier contact, ce qui vaut quand l'appli a démarré hors ligne et que
+ * la requête des drapeaux n'a pas pu répondre. Lecture seule : rien n'est écrit, l'échéance ne bouge pas.
+ */
+function useOfflineResumeUntil(online: boolean): number | null {
+  const [until, setUntil] = useState<number | null>(null);
+  useEffect(() => {
+    if (online) {
+      setUntil(null);
+      return;
+    }
+    let cancelled = false;
+    offlineResume
+      .peek()
+      .then((found) => {
+        if (!cancelled) setUntil(found?.expiresAt ?? null);
+      })
+      .catch((err) => clientLogger.warn("Échéance de la session hors ligne illisible", { err }));
+    return () => {
+      cancelled = true;
+    };
+  }, [online]);
+  return until;
+}
+
+/** Vrai quand la lecture hors ligne est activée (les deux drapeaux, ou le marqueur de reprise) et que l'appareil est sans réseau. */
 export function useOfflineReadActive(): boolean {
   const driverOffline = useFeature("driver-offline");
   const offlineWrites = useFeature("offline-writes");
   const online = useOnline();
-  return driverOffline && offlineWrites && !online;
+  const resumeUntil = useOfflineResumeUntil(online);
+  return ((driverOffline && offlineWrites) || resumeUntil !== null) && !online;
 }
 
 /** Remplace un écran dont les chiffres ne peuvent pas être juste sur la copie réduite gardée hors ligne. */
@@ -59,6 +88,12 @@ export function OfflineDataBanner({ updatedAt, className }: { updatedAt: number 
   const driverOffline = useFeature("driver-offline");
   const offlineWrites = useFeature("offline-writes");
   const online = useOnline();
-  const enabled = driverOffline && offlineWrites;
-  return <OfflineDataBannerView text={enabled ? offlineBannerText({ online, updatedAt }) : null} className={className} />;
+  const resumeUntil = useOfflineResumeUntil(online);
+  const enabled = (driverOffline && offlineWrites) || resumeUntil !== null;
+  return (
+    <OfflineDataBannerView
+      text={enabled ? offlineBannerText({ online, updatedAt, expiresAt: resumeUntil }) : null}
+      className={className}
+    />
+  );
 }

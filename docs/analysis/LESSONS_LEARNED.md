@@ -3698,3 +3698,10 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/unit/client/offline-queue-core.test.ts` : « bascule de compte pendant la boucle : aucun envoi après le changement », 409 propriétaire classé auth, route non protégée jamais envoyée, envoi trop ancien non rejoué, plafond des 409 « en cours ».
   - `tests/unit/client/offline-registry-routes.test.ts` : chaque type du registre doit correspondre à une route protégée. Rouge sur les anciennes déclarations (3 échecs).
 - **Leçon généralisée** : un contrôle d'identité avant une boucle ne couvre pas la boucle, et le cookie est partagé entre onglets. L'identité se porte par requête et se vérifie côté serveur à chaque écriture, pas une fois côté client. Ne rejouer automatiquement qu'une écriture dont la protection contre le doublon est prouvée par un test, pas par une déclaration.
+
+## 2026-11-10 — Une identité persistée hors ligne est une brèche de cloison en puissance (V5b-3b)
+
+- **Contexte** : restaurer la lecture au démarrage sans réseau exige de savoir qui était connecté, donc de persister une identité (#56 l'interdisait en mémoire seule).
+- **Risque** : un marqueur mêlé au cache de lecture survit à une purge de cache ou est prolongé par chaque relance ; un compte B pourrait relire la copie de A.
+- **Prévention vérifiable** : `tests/unit/client/offline-resume*.test.ts` (clés persistées figées, TTL 72 h / +1 ms refusé, échéance jamais prolongée hors ligne, purge sur chaque événement de session, 401 distinct de réseau coupé, profil non chauffeur refusé, compte B sans accès à la copie de A).
+- **Leçon généralisée** : toute identité persistée vit dans un stockage séparé, ne contient que l'indispensable, s'éteint par échéance fixe jamais repoussée hors ligne, et ne remplace jamais la preuve serveur.

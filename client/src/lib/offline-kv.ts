@@ -1,5 +1,6 @@
 import { get, set, del, clear, createStore, type UseStore } from "idb-keyval";
 import { clientLogger } from "@/lib/logger";
+import { createOfflineResume } from "@/lib/offline-resume";
 import {
   createDbRegistry,
   createOfflineScope,
@@ -74,3 +75,8 @@ const idbKv: OfflineKv = {
 };
 
 export const offlineScope = createOfflineScope(idbKv);
+
+/**
+ * Marqueur de reprise hors ligne (voir `offline-resume.ts`) : sa propre base, jamais celle d'un cache de lecture.
+ */
+export const offlineResume = createOfflineResume(idbKv);

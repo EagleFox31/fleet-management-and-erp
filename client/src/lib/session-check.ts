@@ -6,9 +6,11 @@ import type { User } from "./auth";
  * la connexion déconnectait l'utilisateur à chaque lenteur.
  */
 export type SessionCheck =
+  // `httpStatus` présent : le serveur a répondu (403, 5xx), le réseau n'est pas en cause.
+  // Absent : réseau coupé ou délai dépassé, seul cas où la lecture hors ligne peut reprendre.
   | { status: "authenticated"; user: User }
   | { status: "anonymous" }
-  | { status: "unreachable" };
+  | { status: "unreachable"; httpStatus?: number };
 
 export const SESSION_CHECK_TIMEOUT_MS = 10_000;
 
@@ -21,7 +23,7 @@ export async function checkSession(
   try {
     const response = await fetchImpl("/api/auth/me", { credentials: "include", signal: controller.signal });
     if (response.status === 401) return { status: "anonymous" };
-    if (!response.ok) return { status: "unreachable" };
+    if (!response.ok) return { status: "unreachable", httpStatus: response.status };
     return { status: "authenticated", user: (await response.json()) as User };
   } catch {
     return { status: "unreachable" };
