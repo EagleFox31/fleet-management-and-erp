@@ -21,6 +21,7 @@ import { findWholeTableReads } from "../../support/table-select-scan";
  * - une occurrence supprimée fait aussi échouer le test : retirer l'entrée.
  */
 const FROZEN_WHOLE_ROWS: Record<string, string> = {
+  "server/api/capped-statistics.routes.ts#1": "rapport d'inventaire : GET /api/reports/inventory derrière isInventoryReportReader",
   "server/services/excel-export-service.ts#1": "export inventaire : réservé par exportsGuard (EXPORT_ROLE_MATRIX)",
   "server/services/export-service.ts#1": "exports : réservés par exportsGuard (EXPORT_ROLE_MATRIX)",
   "server/services/export-service.ts#2": "exports : réservés par exportsGuard (EXPORT_ROLE_MATRIX)",
@@ -48,6 +49,7 @@ const FROZEN_WHOLE_ROWS: Record<string, string> = {
 
 /** Nombre de références à `parts.unitPrice` par fichier. */
 const FROZEN_PRICE_PROJECTIONS: Record<string, { count: number; reason: string }> = {
+  "server/api/capped-statistics.routes.ts": { count: 1, reason: "valeur du stock du rapport d'inventaire : derrière isInventoryReportReader" },
   "server/api/work-order-parts.routes.ts": { count: 1, reason: "pièces posées d'un OT : sous workOrderCostMask" },
   "server/services/part-requirements-service.ts": {
     count: 5,

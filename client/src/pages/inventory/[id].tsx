@@ -46,6 +46,7 @@ import { Progress } from "@/components/ui/progress";
 import { readyData } from "@/lib/query-view";
 import { listQueryView } from "@/lib/work-order-tires-cost";
 import { InlineQueryError } from "@/components/ui/inline-query-error";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 import { AlertTriangle, ArrowLeft, TrendingUp, TrendingDown, FileText, Download, Package, Wrench, Calendar, BarChart3, Eye, Pencil, User } from "lucide-react";
 
 interface PartDetailsParams {
@@ -87,16 +88,33 @@ export default function PartDetails({ params }: PartDetailsParams) {
   });
   
   // Fetch usage history
-  const { data: usageHistory = [] } = useQuery<any>({
+  const usageQuery = useQuery<any>({
     queryKey: [`/api/parts/${partId}/usage-history`],
     enabled: !!partId,
   });
+  // Échec sans données : « Indisponible » et encart, jamais « Aucune utilisation » ni 0 / jour.
+  const usageView = listQueryView<any>(usageQuery);
+  const usageHistory = readyData(usageView, [] as any[]);
+  const usageFailed = usageView.kind === "error";
   
   // Fetch work orders using this part
-  const { data: workOrders = [] } = useQuery<any>({
+  const workOrdersQuery = useQuery<any>({
     queryKey: [`/api/parts/${partId}/work-orders`],
     enabled: !!partId,
   });
+  // Échec sans données : encart et « Réessayer », jamais « Pièce non utilisée ».
+  const workOrdersView = listQueryView<any>(workOrdersQuery);
+  const workOrders = readyData(workOrdersView, [] as any[]);
+  const workOrdersError = (testId: string) =>
+    workOrdersView.kind === "error" ? (
+      <InlineQueryError
+        data-testid={testId}
+        error={workOrdersView.error}
+        isRetrying={workOrdersView.isRetrying}
+        fallback="Les ordres de travail de cette pièce sont momentanément indisponibles."
+        onRetry={() => void workOrdersQuery.refetch()}
+      />
+    ) : null;
 
   // Fetch stock history
   const stockHistoryQuery = useQuery<any>({
@@ -427,15 +445,15 @@ export default function PartDetails({ params }: PartDetailsParams) {
               {
                 icon: <TrendingDown className="h-4 w-4 text-orange-500" />, iconBg: "bg-orange-50",
                 label: "Consommation",
-                value: `${consumptionRate.toFixed(1)} / jour`,
+                value: usageFailed ? UNAVAILABLE : `${consumptionRate.toFixed(1)} / jour`,
                 sub: <span className="text-[10px] text-gray-400">moyenne 30 jours</span>,
               },
               {
                 icon: <Calendar className="h-4 w-4 text-success" />, iconBg: "bg-success/10",
                 label: "Autonomie",
-                value: daysRemaining > 365 ? "∞" : `${daysRemaining} j`,
-                sub: <span className={`text-[10px] font-medium ${daysRemaining < 30 ? "text-destructive-text" : "text-gray-400"}`}>
-                  {daysRemaining < 30 ? "Réappro. urgente !" : "Délai estimé"}
+                value: usageFailed ? UNAVAILABLE : daysRemaining > 365 ? "∞" : `${daysRemaining} j`,
+                sub: <span className={`text-[10px] font-medium ${!usageFailed && daysRemaining < 30 ? "text-destructive-text" : "text-gray-400"}`}>
+                  {usageFailed ? "Délai estimé" : daysRemaining < 30 ? "Réappro. urgente !" : "Délai estimé"}
                 </span>,
               },
             ].map((kpi) => (
@@ -583,7 +601,7 @@ export default function PartDetails({ params }: PartDetailsParams) {
                 <CardDescription>Dernières utilisations dans les ordres de travail</CardDescription>
               </CardHeader>
               <CardContent>
-                {workOrders.length === 0 ? (
+                {workOrdersView.kind === "error" ? workOrdersError("part-overview-work-orders-error") : workOrders.length === 0 ? (
                   <div className="text-center py-12">
                     <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-muted mb-4">
                       <Package className="h-8 w-8 text-muted-foreground" />
@@ -909,7 +927,7 @@ export default function PartDetails({ params }: PartDetailsParams) {
               <CardDescription>Ordres de travail utilisant cette pièce</CardDescription>
             </CardHeader>
             <CardContent>
-              {workOrders.length === 0 ? (
+              {workOrdersView.kind === "error" ? workOrdersError("part-work-orders-error") : workOrders.length === 0 ? (
                 <div className="text-center py-12">
                   <div className="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-muted mb-4">
                     <Wrench className="h-8 w-8 text-muted-foreground" />
@@ -1078,7 +1096,15 @@ export default function PartDetails({ params }: PartDetailsParams) {
               <CardDescription>Utilisation de cette pièce dans les ordres de travail</CardDescription>
             </CardHeader>
             <CardContent>
-              {usageHistory.length === 0 ? (
+              {usageView.kind === "error" ? (
+                <InlineQueryError
+                  data-testid="part-usage-error"
+                  error={usageView.error}
+                  isRetrying={usageView.isRetrying}
+                  fallback="L'historique d'utilisation de cette pièce est momentanément indisponible."
+                  onRetry={() => void usageQuery.refetch()}
+                />
+              ) : usageHistory.length === 0 ? (
                 <div className="text-center py-8">
                   <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-muted">
                     <i className="fas fa-history text-muted-foreground"></i>

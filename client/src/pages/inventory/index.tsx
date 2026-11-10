@@ -41,7 +41,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { queryClient } from "@/lib/queryClient";
 import { exportInventoryToPDF } from "@/lib/pdf-export";
-import { queryView, readyData } from "@/lib/query-view";
+import { listQueryView, queryView, readyData } from "@/lib/query-view";
 import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 import { useFormDraft } from "@/hooks/use-form-draft";
 import { FormDraftBadge, FormDraftDiscardButton } from "@/components/form-draft/form-draft-indicator";
@@ -80,9 +80,13 @@ export default function InventoryIndex() {
   const statsLoading = statsQuery.isLoading;
   
   // Fetch low stock parts
-  const { data: lowStockParts = [], isLoading: lowStockLoading } = useQuery<any>({
+  const lowStockQuery = useQuery<any[]>({
     queryKey: ["/api/parts/low-on-stock"],
   });
+  // Échec sans données : « Indisponible », jamais « 0 alerte de stock ».
+  const lowStockView = listQueryView<any>(lowStockQuery);
+  const lowStockParts = readyData(lowStockView, [] as any[]);
+  const lowStockLoading = lowStockQuery.isLoading;
   
   // Fetch selected part details
   const { data: selectedPart } = useQuery<any>({
@@ -214,6 +218,7 @@ export default function InventoryIndex() {
     : (stats as any)?.totalItems || 0;
   // Valeurs lues dans les statistiques (pas dans la pièce choisie) et lecture en échec.
   const statsFailed = !(selectedPartId && selectedPart) && statsView.kind === "error";
+  const lowStockFailed = !selectedPartId && lowStockView.kind === "error";
   const lowStockCount = selectedPartId 
     ? (selectedPart && (selectedPart as any).quantity <= (selectedPart as any).minQuantity ? 1 : 0)
     : (lowStockParts as any).length;
@@ -333,7 +338,7 @@ export default function InventoryIndex() {
                   <p className={`text-[11px] font-medium ${lowStockCount > 0 ? 'text-amber-700' : 'text-gray-500'}`}>
                     {selectedPartId ? "Statut stock" : "En rupture de stock"}
                   </p>
-                  <p className={`text-[15px] font-bold leading-tight mt-0.5 ${lowStockCount > 0 ? 'text-amber-800' : 'text-gray-800'}`}>{lowStockCount}</p>
+                  <p className={`text-[15px] font-bold leading-tight mt-0.5 ${lowStockCount > 0 ? 'text-amber-800' : 'text-gray-800'}`} data-testid="kpi-low-stock-value">{lowStockFailed ? UNAVAILABLE : lowStockCount}</p>
                 </div>
               </div>
             )}
