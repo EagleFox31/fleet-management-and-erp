@@ -61,3 +61,10 @@
 - Pourquoi : seul le chemin « 200 » était couvert ; la purge du chemin 401 pouvait disparaître sans qu'un test rougisse.
 - Preuve du rouge : purge retirée du chemin 401 (mutation temporaire) : 3 échecs ; code restauré : 8 verts. Aucun changement de code produit.
 - Tester : `node node_modules/vitest/vitest.mjs run tests/unit/client/pending-logout-purge.test.ts`.
+
+## Relecture de #682, mineur 2 : branche « appareil endormi » de la boucle de session
+
+- Quoi : deux cas dans `auth-bootstrap.test.ts`. L'horloge saute au-delà de l'échéance sans qu'aucun minuteur ne se déclenche (veille), `/me` reste injoignable : au tour suivant la boucle constate l'échéance et coupe la lecture (`expireOfflineGrant`, voile). Variante : réveil avant l'échéance, rien n'est coupé.
+- Pourquoi : la vérification à chaque tour (`auth-bootstrap.ts`, branche `state.offlineGrant && now >= expiresAt`) n'avait aucun test.
+- Preuve du rouge : branche neutralisée (mutation temporaire) : le cas « appareil endormi » échoue ; code restauré : 10 verts. Aucun changement de code produit.
+- Tester : `node node_modules/vitest/vitest.mjs run tests/unit/client/auth-bootstrap.test.ts`.
