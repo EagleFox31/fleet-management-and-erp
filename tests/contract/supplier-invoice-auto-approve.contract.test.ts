@@ -73,7 +73,7 @@ async function invoice(opts: {
 }
 
 const autoApprove = (cookie?: string) =>
-  fetch(`${baseUrl}/api/supplier-invoices/auto-approve`, { method: "POST", headers: cookie ? { Cookie: cookie } : {} });
+  fetch(`${baseUrl}/api/supplier-invoices/auto-approve`, { method: "POST", headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) } });
 
 async function rowOf(id: number) {
   const [row] = await db.select().from(supplierInvoices).where(eq(supplierInvoices.id, id));

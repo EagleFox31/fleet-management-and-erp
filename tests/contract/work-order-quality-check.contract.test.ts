@@ -22,7 +22,7 @@ async function call(method: string, path: string, options: { body?: unknown; coo
   const response = await fetch(baseUrl + path, {
     method,
     headers: {
-      ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...(options.body !== undefined || method !== "GET" ? { "Content-Type": "application/json" } : {}),
       ...(options.cookie ? { Cookie: options.cookie } : {}),
     },
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
