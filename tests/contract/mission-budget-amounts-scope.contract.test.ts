@@ -113,8 +113,14 @@ for (const flag of ["on", "off"] as const) {
       missionId = await missionWith("assigned");
     });
 
-    it("GET /api/missions et /:id : technicien et chauffeur ne reçoivent aucun montant", async () => {
-      for (const actor of ["technician", "driver"] as const) {
+    it("GET /api/missions et /:id : technicien refusé, chauffeur sans aucun montant", async () => {
+      // Technicien : liste et fiche refusées (MISSION_READ_ROLES), aucun montant dans le refus.
+      for (const path of ["/api/missions", `/api/missions/${missionId}`]) {
+        const refused = await call("GET", path, { actor: "technician" });
+        expect(refused.status, path).toBe(403);
+        expect(leaked(refused.body), path).toEqual([]);
+      }
+      for (const actor of ["driver"] as const) {
         const list = await call("GET", "/api/missions", { actor });
         expect(list.status, actor).toBe(200);
         expect(rowOf(list.body, missionId), `${actor} voit la mission`).toBeDefined();
@@ -128,7 +134,8 @@ for (const flag of ["on", "off"] as const) {
 
     it("GET /:id/fuel-records et /:id/launch-readiness : technicien sans montant ni solde, verdicts conservés", async () => {
       const fuel = await call("GET", `/api/missions/${missionId}/fuel-records`, { actor: "technician" });
-      expect(fuel.status).toBe(200);
+      // Liste des pleins fermée au technicien (moindre donnée) : aucun montant ni solde, 403.
+      expect(fuel.status).toBe(403);
       expect(leaked(fuel.body), "fuel-records").toEqual([]);
       const ready = await call("GET", `/api/missions/${missionId}/launch-readiness`, { actor: "technician" });
       expect(ready.status, JSON.stringify(ready.body)).toBe(200);

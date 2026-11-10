@@ -28,7 +28,7 @@ async function loginAs(role: "admin" | "logistics" | "secretary" | "workshop_man
 }
 
 const sync = (cookie?: string) =>
-  fetch(`${baseUrl}/api/drivers/sync-cpc-statuses`, { method: "POST", headers: cookie ? { Cookie: cookie } : {} });
+  fetch(`${baseUrl}/api/drivers/sync-cpc-statuses`, { method: "POST", headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) } });
 
 beforeAll(async () => {
   server = createServer(await getContractApp());

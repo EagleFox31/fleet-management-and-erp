@@ -15,7 +15,7 @@ import { uniqueTestToken } from "../support/ids";
  * un client n'accède pas aux missions, un chauffeur ne reçoit le verdict que pour sa propre fiche.
  */
 
-const ACTORS = { logistics: "logistics", driver: "driver", client: "client", technician: "technician" } as const;
+const ACTORS = { logistics: "logistics", driver: "driver", client: "client", technician: "technician", warehouse: "warehouse" } as const;
 type Actor = keyof typeof ACTORS;
 
 const ids = createIdBag();
@@ -149,10 +149,17 @@ describe("verdict CPC des affectations de mission", () => {
     expect(leakText(res.body)).not.toContain(future);
   }, 60000);
 
-  it("technicien (personnel) : même verdict que la logistique", async () => {
+  it("magasinier (personnel) : même verdict que la logistique", async () => {
     const d = await newDriver("FORMÉ", daysAgo(800));
-    const { driver } = await driverOfDetail(await missionWith(d.id), "technician");
+    const { driver } = await driverOfDetail(await missionWith(d.id), "warehouse");
     expect(driver.cpcEligible).toBe(false);
+  }, 60000);
+
+  it("technicien : fiche mission refusée (aucun écran mission)", async () => {
+    const d = await newDriver("FORMÉ", daysAgo(800));
+    const res = await call("GET", `/api/missions/${await missionWith(d.id)}`, { actor: "technician" });
+    expect(res.status).toBe(403);
+    expect(JSON.stringify(res.body)).not.toContain("cpcEligible");
   }, 60000);
 
   describe("cloison de #127", () => {

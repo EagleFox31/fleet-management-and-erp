@@ -255,7 +255,7 @@ describe("mission à plusieurs affectations (B2)", { timeout: 120000 }, () => {
 });
 
 describe("plafond de points par mission", { timeout: 120000 }, () => {
-  it("au-delà de 50 000 points par chauffeur et par mission : 429 lisible", async () => {
+  it("au-delà de 50 000 points par chauffeur et par mission : 409 lisible, définitif", async () => {
     const [m] = await db.insert(missions).values({ orderNumber: uniqueTestToken("MIS"), pickupAddress: "TEST A", deliveryAddress: "TEST B", status: "in_progress" } as any).returning();
     missionIds.push(m.id);
     await db.insert(assignments).values({ missionId: m.id, vehicleId, driverId: driverAId, status: "in_progress", startedAt: new Date(Date.now() - 30 * 60_000) } as any);
@@ -264,11 +264,12 @@ describe("plafond de points par mission", { timeout: 120000 }, () => {
       SELECT ${vehicleId}, ${m.id}, ${driverAId}, 'phone', ${session.userIdOf("driverA")}, gen_random_uuid(), now() - (g * interval '1 second') - interval '10 minutes', 4.05, 9.7
       FROM generate_series(1, 50000) g`);
     const res = await session.call("POST", `/api/driver/missions/${m.id}/positions`, { actor: "driverA", body: { points: [point()] } });
-    expect(res.status, JSON.stringify(res.body)).toBe(429);
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body).toMatchObject({ code: "GPS_MISSION_CAP_REACHED" });
     expect(JSON.stringify(res.body)).not.toMatch(/violates|constraint|syntax/i);
   });
 
-  it("le rejeu d'un paquet au plafond répond « doublons » (200), pas 429 ; seul un point nouveau est refusé", async () => {
+  it("le rejeu d'un paquet au plafond répond « doublons » (200), pas d'erreur ; seul un point nouveau est refusé", async () => {
     const [m] = await db.insert(missions).values({ orderNumber: uniqueTestToken("MIS"), pickupAddress: "TEST A", deliveryAddress: "TEST B", status: "in_progress" } as any).returning();
     missionIds.push(m.id);
     await db.insert(assignments).values({ missionId: m.id, vehicleId, driverId: driverAId, status: "in_progress", startedAt: new Date(Date.now() - 30 * 60_000) } as any);
@@ -285,7 +286,8 @@ describe("plafond de points par mission", { timeout: 120000 }, () => {
     expect(replay.status, JSON.stringify(replay.body)).toBe(200);
     expect(replay.body).toMatchObject({ accepted: 0, duplicates: 2 });
     const mixed = await session.call("POST", `/api/driver/missions/${m.id}/positions`, { actor: "driverA", body: { points: [known, point()] } });
-    expect(mixed.status, JSON.stringify(mixed.body)).toBe(429);
+    expect(mixed.status, JSON.stringify(mixed.body)).toBe(409);
+    expect(mixed.body).toMatchObject({ code: "GPS_MISSION_CAP_REACHED" });
   });
 });
 

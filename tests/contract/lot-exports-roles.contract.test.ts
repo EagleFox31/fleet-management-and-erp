@@ -118,7 +118,20 @@ describe("garde isStaff au montage (T-62)", { timeout: 60000 }, () => {
       const res = await get(path, "client");
       expect(res.status).toBe(403);
     });
-    for (const role of ["technician", "driver"] as const) {
+    // Moindre donnée : refus au-delà de la garde de montage (CLIENT_DIRECTORY_READ_ROLES,
+    // DRIVER_DIRECTORY_READ_ROLES, MISSION_READ_ROLES).
+    const refused: Record<string, readonly ("technician" | "driver")[]> = {
+      "/api/clients": ["technician", "driver"],
+      "/api/drivers": ["technician", "driver"],
+      "/api/missions": ["technician"],
+    };
+    for (const role of refused[path] ?? []) {
+      it(`${path} : ${role} 403 (hors périmètre de lecture)`, async () => {
+        expect((await get(path, role)).status).toBe(403);
+      });
+    }
+    const allowed = (["technician", "driver", "logistics"] as const).filter((role) => !(refused[path] ?? []).includes(role as never));
+    for (const role of allowed) {
       it(`${path} : ${role} n'est ni 401 ni 403`, async () => {
         const res = await get(path, role);
         expect([401, 403]).not.toContain(res.status);

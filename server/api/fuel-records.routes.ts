@@ -1,23 +1,49 @@
-import { Router } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import { ZodError } from "zod";
 import { AppError } from "../lib/app-error";
 import { withLogContext } from "../lib/error-log-context";
 import { broadcastFuelRecordChanged } from "../lib/fuel-record-realtime";
 import { moduleLogger } from "../lib/logger";
 import { idParam } from "../lib/route-helpers";
+import { withoutFuelCardBalance } from "../lib/fuel-balance-scope";
 import { ownerScopeOf } from "../lib/client-scope";
 import { parseQueryId, parseRouteId } from "../lib/route-id";
 import { assertVehicleSubresourcesReadable } from "../lib/vehicle-subresource-guard";
-import { FUEL_CARD_MANAGER_ROLES } from "@shared/constants/roles";
+import { FUEL_CARD_MANAGER_ROLES, FUEL_READ_ROLES } from "@shared/constants/roles";
 import { fuelRecordCancelSchema } from "@shared/constants/fuel-record-cancel";
 import type { FuelRecord } from "@shared/schema";
-import { authorize, isAnyUser } from "../middleware/auth";
+import { authorize, isAnyUser, isFuelRecordWriter } from "../middleware/auth";
 import { FuelService } from "../services/fuel-service";
 import { storage } from "../storage";
 
 const log = moduleLogger("fuel-records");
 const router = Router();
 const fuelService = new FuelService();
+
+/*
+ * Chemins encore servis par server/routes.ts (gelé). Ce routeur est monté avant registerRoutes :
+ * il garde ou filtre ici, puis passe la main au gestionnaire historique par next().
+ */
+
+/**
+ * POST et PATCH /api/fuel-records renvoient la ligne brute : `balance` et `fuelBalance` (solde de
+ * la carte) partaient chez le chef d'atelier, qui saisit des pleins sans lire la trésorerie. La
+ * réponse est filtrée au moment de l'envoi, quand la garde de routes.ts a chargé `req.user`.
+ */
+function maskFuelCardBalanceInResponse(req: Request, res: Response, next: NextFunction) {
+  const send = res.json.bind(res);
+  res.json = (body: unknown) => send(withoutFuelCardBalance(req.user, body));
+  next();
+}
+router.post("/fuel-records", isFuelRecordWriter, maskFuelCardBalanceInResponse, (_req, _res, next) => next());
+router.patch("/fuel-records/:id", isFuelRecordWriter, maskFuelCardBalanceInResponse, (_req, _res, next) => next());
+
+/**
+ * Agrégats carburant de la flotte : pilotage seulement, plus le client, que routes.ts cloisonne à
+ * ses véhicules (ownerScopeOf). Chauffeur, technicien, magasinier et lecteur n'ont aucun écran
+ * qui les lit.
+ */
+router.get("/fuel-records/statistics", authorize([...FUEL_READ_ROLES, "client"]), (_req, _res, next) => next());
 
 /**
  * Pleins d'un véhicule, sortis de server/routes.ts (gelé) : même cloison que les autres lectures
@@ -31,11 +57,14 @@ router.get("/fuel-records/vehicle/:vehicleId", isAnyUser, async (req, res, next)
     await assertVehicleSubresourcesReadable(req, vehicleId);
     const records = await fuelService.getFuelRecordsByVehicleId(vehicleId);
     return res.status(200).json(
-      records.map((record: FuelRecord) => ({
-        ...record,
-        pricePerLiter: record.quantity > 0 ? Number(record.cost) / record.quantity : 0,
-        totalCost: Number(record.cost),
-      })),
+      withoutFuelCardBalance(
+        req.user,
+        records.map((record: FuelRecord) => ({
+          ...record,
+          pricePerLiter: record.quantity > 0 ? Number(record.cost) / record.quantity : 0,
+          totalCost: Number(record.cost),
+        })),
+      ),
     );
   } catch (err) {
     if (err instanceof AppError) return next(err);
@@ -77,7 +106,7 @@ router.get("/fuel-records", isAnyUser, async (req, res, next) => {
       }
       records.sort((a, b) => (b.date ? new Date(b.date).getTime() : 0) - (a.date ? new Date(a.date).getTime() : 0));
     }
-    return res.status(200).json(records.map(withPrice));
+    return res.status(200).json(withoutFuelCardBalance(req.user, records.map(withPrice)));
   } catch (err) {
     if (err instanceof AppError) return next(err);
     return next(withLogContext(new AppError(500, "Erreur serveur", { cause: err }), { event: "lecture des pleins en échec" }));
@@ -180,7 +209,7 @@ router.post("/fuel-records/:id/cancel", authorize([...FUEL_CARD_MANAGER_ROLES, "
       log.info({ requestId: req.requestId, fuelRecordId: id, userId: user.id }, "Plein carburant annulé");
       broadcastFuelRecordChanged(id, req.requestId);
     }
-    return res.status(200).json(result.record);
+    return res.status(200).json(withoutFuelCardBalance(req.user, result.record));
   } catch (err) {
     if (err instanceof AppError || err instanceof ZodError) return next(err);
     return next(withLogContext(new AppError(500, "Erreur serveur", { cause: err }), { event: "Cancel fuel record error" }));
