@@ -35,7 +35,7 @@ function harness(opts: { pending?: PendingLogoutOutcome; session?: SessionCheck;
     // Marqueur de reprise hors ligne : couvert par session-resume-offline.test.ts.
     async recordOnline() {},
     async restoreOffline() {
-      return false;
+      return null;
     },
     async clearResume() {},
   };
@@ -91,8 +91,11 @@ describe("reprise de session au démarrage (CDC-10a)", () => {
   it("le fournisseur d'authentification amorce par resumeSession, pas par checkSession seul", () => {
     // Garde-fou : une fusion avait remplacé le point d'entrée et rendu la composition morte.
     const src = readFileSync(resolve(__dirname, "../../../client/src/hooks/useAuth.tsx"), "utf8");
-    expect(src).toMatch(/await resumeSession\(\)/);
+    const bootstrap = readFileSync(resolve(__dirname, "../../../client/src/lib/auth-bootstrap.ts"), "utf8");
+    expect(src).toMatch(/createAuthBootstrap\(\{[\s\S]*resumeSession/);
+    expect(bootstrap).toMatch(/await deps\.resumeSession\(\)/);
     expect(src).not.toMatch(/await checkSession\(/);
+    expect(bootstrap).not.toMatch(/await checkSession\(/);
   });
 });
 

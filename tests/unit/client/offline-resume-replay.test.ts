@@ -75,6 +75,19 @@ async function queuedSession(userId: number) {
   vi.stubGlobal("navigator", { onLine: true });
 }
 
+/** IndexedDB factice : énumère les bases du faux idb-keyval et accepte leur suppression (sans bruit sur stderr). */
+function fakeIndexedDb() {
+  return {
+    databases: async () => Array.from(idb.dbs.keys()).map((name) => ({ name })),
+    deleteDatabase: (name: string) => {
+      idb.dbs.delete(name);
+      const request: { onsuccess?: () => void } = {};
+      queueMicrotask(() => request.onsuccess?.());
+      return request;
+    },
+  };
+}
+
 beforeEach(() => {
   idb.dbs.clear();
   lsData.clear();
@@ -85,6 +98,7 @@ beforeEach(() => {
   fetchMock.mockResolvedValue(new Response(JSON.stringify({ id: 7, role: "driver" }), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal("window", fakeWindow);
+  vi.stubGlobal("indexedDB", fakeIndexedDb());
   setActiveOfflineUserId(null);
 });
 
@@ -92,7 +106,7 @@ describe("C1 : aucun rejeu avant la confirmation de la session", () => {
   it("compte rouvert depuis le marqueur, réseau revenu : l'événement online n'envoie rien", async () => {
     await queuedSession(7);
     const stop = setupOfflinePersistence(new QueryClient());
-    expect(await resumeOfflineRead(new QueryClient())).toBe(true);
+    expect(await resumeOfflineRead(new QueryClient())).not.toBeNull();
     expect(getActiveOfflineUserId()).toBe(7);
 
     handlers.get("online")?.();

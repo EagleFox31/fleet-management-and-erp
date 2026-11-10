@@ -5,6 +5,7 @@ import type { SessionCheck } from "../../../client/src/lib/session-check";
 
 const driver = { id: 7, username: "d", name: "D", email: "d@x", role: "driver" };
 
+const GRANT = { userId: 7, profile: "driver", expiresAt: 9_999 };
 function harness(opts: { session: SessionCheck; activeAtStart?: number | null; restored?: boolean }) {
   const calls: string[] = [];
   let active: number | null = opts.activeAtStart ?? null;
@@ -33,7 +34,7 @@ function harness(opts: { session: SessionCheck; activeAtStart?: number | null; r
     },
     async restoreOffline() {
       calls.push("restore");
-      return opts.restored ?? true;
+      return (opts.restored ?? true) ? GRANT : null;
     },
     async clearResume() {
       calls.push("clear-resume");
@@ -45,8 +46,13 @@ function harness(opts: { session: SessionCheck; activeAtStart?: number | null; r
 describe("reprise de session : restauration hors ligne (V5b-3b)", () => {
   it("réseau injoignable au démarrage : la restauration est tentée, le résultat reste unreachable", async () => {
     const h = harness({ session: { status: "unreachable" } });
-    expect(await h.resume()).toEqual({ status: "unreachable" });
+    expect(await h.resume()).toEqual({ status: "unreachable", resumed: GRANT });
     expect(h.calls).toEqual(["me", "restore"]);
+  });
+
+  it("restauration refusée (null) : pas de resumed", async () => {
+    const h = harness({ session: { status: "unreachable" }, restored: false });
+    expect(await h.resume()).toEqual({ status: "unreachable" });
   });
 
   it.each([401, 403, 500, 503])("réponse HTTP %i : jamais de restauration", async (httpStatus) => {
@@ -131,7 +137,7 @@ describe("reprise de session : réponse non JSON et purge (audit)", () => {
       recordOnline: async () => undefined,
       restoreOffline: async () => {
         calls.push("restore");
-        return true;
+        return { userId: 7, profile: "driver", expiresAt: 9_999 };
       },
       clearResume: async () => undefined,
     });
