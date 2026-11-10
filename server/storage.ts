@@ -26,6 +26,7 @@ import {
   type TireRotation
 } from "@shared/schema";
 import { describeStatusChange } from "@shared/constants/vehicle-status";
+import { assertVehicleTypeChangeAllowed } from "./services/trailer-assignment";
 
 type StockMovementType = "in" | "out" | "adjustment" | "initial";
 
@@ -914,11 +915,13 @@ export class DatabaseStorage implements IStorage {
       }
       
       // Effectuer la mise à jour du véhicule
-      const [updatedVehicle] = await db
-        .update(vehicles)
-        .set(vehicle)
-        .where(eq(vehicles.id, id))
-        .returning();
+      // Le type est écrit sous les verrous de l'attelage : pas de course avec une affectation.
+      const [updatedVehicle] = await db.transaction(async (tx) => {
+        if (vehicle.vehicleType && vehicle.vehicleType !== currentVehicle.vehicleType) {
+          await assertVehicleTypeChangeAllowed(tx, id, vehicle.vehicleType);
+        }
+        return tx.update(vehicles).set(vehicle).where(eq(vehicles.id, id)).returning();
+      });
       
       // Si le statut a changé, enregistrer dans l'historique automatiquement
       if (vehicle.status && vehicle.status !== currentVehicle.status) {
@@ -936,7 +939,7 @@ export class DatabaseStorage implements IStorage {
       return updatedVehicle;
     } catch (error) {
       // Une contrainte CHECK refusée est une saisie invalide : la remonter pour que la route réponde 400.
-      if (isCheckViolation(error)) throw error;
+      if (isCheckViolation(error) || error instanceof AppError) throw error;
       storageLog.error({ err: error, vehicleId: id }, "Error updating vehicle");
       return undefined;
     }

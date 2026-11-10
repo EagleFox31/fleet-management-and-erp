@@ -72,6 +72,32 @@ export async function assertTrailerAssignable(tx: Executor, check: TrailerCheck)
   if (hitched) throw new AppError(409, TRAILER_ALREADY_HITCHED_MESSAGE);
 }
 
+export const VEHICLE_HITCHED_TYPE_MESSAGE =
+  "Ce véhicule est sur une affectation en cours : son type ne peut pas passer de camion à remorque (ou l'inverse) tant qu'elle n'est pas terminée ou annulée.";
+
+/**
+ * Changement de `vehicleType` : refusé (409) si le véhicule est sur une affectation active dans le
+ * rôle que le nouveau type lui retirerait (camion → remorque, ou remorque → autre). À appeler dans la
+ * transaction qui écrit le type : la ligne véhicule et les verrous consultatifs de l'affectation
+ * (espaces 1 et 3) sont pris ici, une affectation simultanée passe donc avant ou après, jamais entre.
+ */
+export async function assertVehicleTypeChangeAllowed(tx: Executor, vehicleId: number, newType: string): Promise<void> {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(1, ${vehicleId})`);
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(3, ${vehicleId})`);
+  const [current] = await tx.select({ vehicleType: vehicles.vehicleType }).from(vehicles).where(eq(vehicles.id, vehicleId)).for("update").limit(1);
+  if (!current) return;
+  const wasTrailer = isTrailerVehicleType(current.vehicleType);
+  const willBeTrailer = isTrailerVehicleType(newType);
+  if (wasTrailer === willBeTrailer) return;
+  const role = willBeTrailer ? assignments.vehicleId : assignments.trailerId;
+  const [hitched] = await tx
+    .select({ id: assignments.id })
+    .from(assignments)
+    .where(and(eq(role, vehicleId), inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES])))
+    .limit(1);
+  if (hitched) throw new AppError(409, VEHICLE_HITCHED_TYPE_MESSAGE);
+}
+
 /** Violation de l'index unique partiel (course perdue malgré le verrou) → 409 lisible ; sinon l'erreur d'origine. */
 export function trailerConflictToAppError(error: unknown): unknown {
   if (isUniqueViolation(error) && pgConstraintOf(error) === TRAILER_ACTIVE_INDEX) {

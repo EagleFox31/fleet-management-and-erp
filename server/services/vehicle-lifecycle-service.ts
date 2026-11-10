@@ -64,17 +64,18 @@ async function openWork(tx: DbExecutor, vehicleId: number) {
   const workOrders = (allWorkOrders.rows as { id: number; title: string | null; status: string }[])
     .filter((w) => open.has(w.status))
     .map(({ id, title }) => ({ id, title }));
-  await tx.execute(sql`SELECT id FROM assignments WHERE vehicle_id = ${vehicleId} ORDER BY id FOR UPDATE`);
+  // Camion ou remorque attelée : les deux colonnes comptent (une remorque n'est jamais `vehicle_id`).
+  await tx.execute(sql`SELECT id FROM assignments WHERE vehicle_id = ${vehicleId} OR trailer_id = ${vehicleId} ORDER BY id FOR UPDATE`);
   await tx.execute(sql`SELECT id FROM mission_operations WHERE trailer_vehicle_id = ${vehicleId} ORDER BY id FOR UPDATE`);
   await tx.execute(sql`
     SELECT m.id FROM missions m
-    WHERE EXISTS (SELECT 1 FROM assignments a WHERE a.mission_id = m.id AND a.vehicle_id = ${vehicleId})
+    WHERE EXISTS (SELECT 1 FROM assignments a WHERE a.mission_id = m.id AND (a.vehicle_id = ${vehicleId} OR a.trailer_id = ${vehicleId}))
        OR EXISTS (SELECT 1 FROM mission_operations o WHERE o.mission_id = m.id AND o.trailer_vehicle_id = ${vehicleId})
     ORDER BY m.id FOR UPDATE OF m`);
   const missions = await tx.execute(sql`
     SELECT m.id, m.order_number FROM missions m
     WHERE m.status IN (${list(OPEN_MISSION_STATUSES)})
-      AND (EXISTS (SELECT 1 FROM assignments a WHERE a.mission_id = m.id AND a.vehicle_id = ${vehicleId}
+      AND (EXISTS (SELECT 1 FROM assignments a WHERE a.mission_id = m.id AND (a.vehicle_id = ${vehicleId} OR a.trailer_id = ${vehicleId})
                      AND a.status IN (${list(ACTIVE_ASSIGNMENT_STATUSES)}))
            OR EXISTS (SELECT 1 FROM mission_operations o WHERE o.mission_id = m.id AND o.trailer_vehicle_id = ${vehicleId}))
     ORDER BY m.id`);
