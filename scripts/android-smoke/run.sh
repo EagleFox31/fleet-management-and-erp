@@ -41,15 +41,31 @@ relaunch() {
 }
 
 # --- 1. En ligne ---------------------------------------------------------------------------
-adb install -r "$APK"
-adb shell am start -W -n "$APP/.MainActivity"
-for _ in $(seq 1 60); do
-  [ -s "$REPORT" ] && break
+# Juste après boot_completed, l'émulateur peut encore être sans réseau (ERR_INTERNET_DISCONNECTED) :
+# l'APK afficherait alors sa page hors ligne. On attend que le serveur témoin soit joignable
+# depuis l'émulateur avant le premier lancement.
+adb wait-for-device
+for i in $(seq 1 60); do
+  if adb shell "nc -z -w 2 10.0.2.2 $PORT" > /dev/null 2>&1; then
+    echo "Serveur témoin joignable depuis l'émulateur (essai $i)."
+    break
+  fi
+  [ "$i" = 60 ] && echo "::warning::nc n'a pas joint 10.0.2.2:$PORT en 120 s, lancement quand même."
   sleep 2
+done
+adb install -r "$APK"
+for attempt in 1 2 3; do
+  if [ "$attempt" = 1 ]; then adb shell am start -W -n "$APP/.MainActivity"; else relaunch; fi
+  for _ in $(seq 1 30); do
+    [ -s "$REPORT" ] && break
+    sleep 2
+  done
+  [ -s "$REPORT" ] && break
+  echo "::warning::Aucun rapport après le lancement $attempt, nouvel essai."
 done
 adb exec-out screencap -p > "$OUT/1-en-ligne.png" || true
 if [ ! -s "$REPORT" ]; then
-  echo "::error::L'APK n'a envoyé aucun rapport au serveur témoin en 120 s."
+  echo "::error::L'APK n'a envoyé aucun rapport au serveur témoin après 3 lancements."
   cat "$OUT/server.log"
   exit 1
 fi
