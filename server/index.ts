@@ -10,6 +10,7 @@ import { sessionMiddleware } from "./middleware/session";
 import { findActiveSessionUser } from "./services/session-user";
 import { moduleLogger } from "./lib/logger";
 import { upgradeRoute } from "./lib/upgrade-route";
+import { rejectForeignUpgrade } from "./lib/ws-origin";
 import { relayDatabaseEvent } from "./lib/db-event-relay";
 import { createApp } from "./app";
 import { setAuditSink } from "./lib/audit";
@@ -66,6 +67,8 @@ import { describeInvalidScope, normalizeScope, resolveRecipients } from "./lib/r
       if (route === "reject") socket.destroy();
       return;
     }
+
+    if (rejectForeignUpgrade(request, socket)) return;
 
     const mockResponse = {
       getHeader: () => undefined,
