@@ -1,5 +1,6 @@
 import { get, set, del, clear, createStore, type UseStore } from "idb-keyval";
 import { clientLogger } from "@/lib/logger";
+import { createOfflineResume, RESUME_REVOKED_KEY, type RevokedStore } from "@/lib/offline-resume";
 import {
   createDbRegistry,
   createOfflineScope,
@@ -74,3 +75,15 @@ const idbKv: OfflineKv = {
 };
 
 export const offlineScope = createOfflineScope(idbKv);
+
+/**
+ * Marqueur de reprise hors ligne (voir `offline-resume.ts`) : sa propre base, jamais celle d'un cache de lecture.
+ */
+// localStorage résolu à chaque appel : absent (SSR, tests node) ou levant, la pierre tombale est ignorée.
+const revokedStore: RevokedStore = {
+  read: () => (typeof window === "undefined" ? null : window.localStorage.getItem(RESUME_REVOKED_KEY)),
+  write: (value) => window.localStorage.setItem(RESUME_REVOKED_KEY, value),
+  remove: () => window.localStorage.removeItem(RESUME_REVOKED_KEY),
+};
+
+export const offlineResume = createOfflineResume(idbKv, undefined, revokedStore);

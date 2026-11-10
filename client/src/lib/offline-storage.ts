@@ -4,17 +4,22 @@ import { applyRestoredQueries } from "@/lib/offline-restore";
 import { pendingServerLogout } from "@/lib/pending-logout";
 import {
   DRIVER_READ_PROFILE,
+  confirmOfflineSession,
   getActiveOfflineUserId,
+  markOfflineSessionUnconfirmed,
   setActiveOfflineUserId,
   subscribeActiveOfflineUser,
 } from "@/lib/offline-user-scope";
-import { offlineScope } from "@/lib/offline-kv";
-import { sessionChannel } from "@/lib/offline-session-channel";
+import { offlineResume, offlineScope } from "@/lib/offline-kv";
+import { resumeFlagNames, type FlagSnapshot } from "@/lib/offline-resume";
+import { resolveClientFeatureFlags } from "@/hooks/use-feature";
+import { sessionChannel, type SessionChannelMessage } from "@/lib/offline-session-channel";
 import {
   announceKeptSends,
   cancelScheduledReplay,
   enqueueOfflineWrite,
   isOfflineFlagEnabled,
+  replayOfflineQueue,
   replayOnReconnect,
   startOfflineQueueRuntime,
 } from "@/lib/offline-queue";
@@ -49,6 +54,9 @@ export interface OfflineAction {
   idempotencyKey?: string;
 }
 
+/** Relevé à chaque déconnexion, expiration ou changement de compte : une reprise en cours qui le voit bouger s'abandonne. */
+let sessionGeneration = 0;
+
 /**
  * Appelé à chaque connexion et à chaque restauration de session. Si l'utilisateur
  * change, le cache TanStack du précédent est vidé, ses copies hors ligne et
@@ -59,9 +67,18 @@ export function activateOfflineUser(
   userId: number,
   options: { broadcast?: boolean } = {},
 ): void {
-  if (getActiveOfflineUserId() === userId) return;
+  // Session confirmée par le serveur (connexion ou /me) : si le compte avait été rouvert depuis le
+  // marqueur, la file qui attendait cette confirmation peut enfin partir.
+  const wasUnconfirmed = confirmOfflineSession(userId);
+  if (getActiveOfflineUserId() === userId) {
+    if (wasUnconfirmed) void replayOfflineQueue({ ignoreBackoff: true });
+    return;
+  }
+  sessionGeneration += 1;
   queryClient.clear();
   setActiveOfflineUserId(userId);
+  // Autre compte : le marqueur de reprise de l'ancien ne doit pas survivre (celui du nouveau est écrit après /me).
+  void offlineResume.clearIfNotUser(userId).catch(logResumeFailure);
   // Cookie partagé : les autres onglets cessent de rejouer au nom de l'ancien compte.
   if (options.broadcast !== false) sessionChannel.post({ type: "session-changed", userId });
   void offlineScope.purgeLegacy();
@@ -81,10 +98,17 @@ export function activateOfflineUser(
 export async function purgeOfflineSession(
   queryClient: QueryClient,
   options: { broadcast?: boolean } = {},
-): Promise<void> {
+): Promise<boolean> {
+  let complete = true;
+  sessionGeneration += 1;
   const active = getActiveOfflineUserId();
   setActiveOfflineUserId(null);
   cancelScheduledReplay();
+  // Le marqueur de reprise part en premier : plus aucun démarrage hors ligne ne rouvre ce compte.
+  await offlineResume.clear(active).catch((err) => {
+    complete = false;
+    logResumeFailure(err);
+  });
   // Les autres onglets de l'appareil se purgent aussi (la file est partagée entre onglets).
   if (options.broadcast !== false) sessionChannel.post({ type: "logout" });
   try {
@@ -96,8 +120,10 @@ export async function purgeOfflineSession(
   try {
     await offlineScope.purgeAll(active, { dropOtherQueues: true });
   } catch (err) {
+    complete = false;
     clientLogger.error("Purge du stockage hors ligne en échec", { err });
   }
+  return complete;
 }
 
 /**
@@ -108,6 +134,7 @@ export async function purgeOfflineSession(
  */
 export async function expireOfflineSession(queryClient: QueryClient, userId: number): Promise<void> {
   if (getActiveOfflineUserId() !== userId) return;
+  sessionGeneration += 1;
   setActiveOfflineUserId(null);
   cancelScheduledReplay();
   try {
@@ -118,8 +145,104 @@ export async function expireOfflineSession(queryClient: QueryClient, userId: num
   queryClient.clear();
   // Session expirée : plus de lecture hors ligne pour ce compte (la file d'envois est gardée).
   await offlineScope.dropUserReadCache(userId);
+  await offlineResume.clear(userId).catch(logResumeFailure);
   // Envois gardés : l'utilisateur est prévenu qu'il doit se reconnecter pour qu'ils partent.
   void announceKeptSends(userId);
+}
+
+function logResumeFailure(err: unknown): void {
+  clientLogger.warn("Marqueur de reprise hors ligne non mis à jour", { err });
+}
+
+/**
+ * Valeur des drapeaux de reprise lue sur le réseau (cache TanStack des drapeaux), `null` tant
+ * qu'elle n'a pas répondu : le marqueur garde alors la valeur précédente de ce compte.
+ */
+function resumeFlagSnapshot(queryClient: QueryClient): FlagSnapshot | null {
+  const data = queryClient.getQueryData([FEATURE_FLAGS_PATH]);
+  if (data === undefined) return null;
+  const resolved = resolveClientFeatureFlags(data);
+  const out: FlagSnapshot = {};
+  for (const name of resumeFlagNames()) out[name] = isFeatureKey(name) && resolved[name] === true;
+  return out;
+}
+
+/**
+ * Après un `/api/auth/me` ou une connexion réussis : écrit (ou remplace) le marqueur de reprise
+ * hors ligne du compte renvoyé. Un rôle sans profil de reprise efface le marqueur. Ne lève jamais.
+ */
+export async function recordOfflineResume(
+  queryClient: QueryClient,
+  user: { id: number; role: string },
+  now: number = Date.now(),
+): Promise<void> {
+  try {
+    await offlineResume.record({ id: user.id, role: user.role }, resumeFlagSnapshot(queryClient), now);
+  } catch (err) {
+    logResumeFailure(err);
+  }
+}
+
+/** Contact réseau réussi du compte actif : repousse l'échéance du marqueur et rafraîchit ses drapeaux. */
+export async function refreshOfflineResume(queryClient: QueryClient, now: number = Date.now()): Promise<void> {
+  const userId = getActiveOfflineUserId();
+  if (userId === null) return;
+  try {
+    await offlineResume.touch(userId, resumeFlagSnapshot(queryClient), now);
+  } catch (err) {
+    logResumeFailure(err);
+  }
+}
+
+/**
+ * Une lecture réseau terminée avec succès, pas une écriture manuelle dans le cache (`setQueryData`,
+ * dont la restauration hors ligne) : seule la première prouve que le serveur a répondu.
+ */
+export function isNetworkSuccess(event: { type: string; action?: { type?: string; manual?: boolean } }): boolean {
+  return event.type === "updated" && event.action?.type === "success" && event.action.manual !== true;
+}
+
+/**
+ * Seules les réponses réseau de `/api/feature-flags` et `/api/auth/me` prolongent la reprise : une
+ * lecture quelconque (liste servie puis rafraîchie, copie restaurée) n'identifie pas la session.
+ */
+export function isContactProof(queryKey: readonly unknown[]): boolean {
+  return queryKey[0] === FEATURE_FLAGS_PATH || queryKey[0] === "/api/auth/me";
+}
+
+/**
+ * Démarrage sans réseau : si le marqueur de reprise est valide (profil de lecture, 72 h, drapeaux
+ * allumés au dernier contact), le compte devient l'utilisateur hors ligne actif et SA copie de
+ * lecture est restaurée (marquée périmée, relue dès que le réseau répond). LECTURE SEULE : la file
+ * d'envois n'est PAS rejouée (le compte reste « non confirmé » pour `replayOfflineQueue`) tant qu'un
+ * `/api/auth/me` authentifié ou une connexion n'a pas confirmé la session dans cette page ; le cookie
+ * reste l'unique preuve d'identité. Renvoie vrai si un compte a été rouvert.
+ */
+export async function resumeOfflineRead(queryClient: QueryClient, now: number = Date.now()): Promise<boolean> {
+  if (getActiveOfflineUserId() !== null) return false;
+  // Une déconnexion (autre onglet) ou un changement de compte pendant les lectures asynchrones annule la reprise.
+  const generation = sessionGeneration;
+  const grant = await offlineResume.read(now);
+  if (!grant) return false;
+  if (getActiveOfflineUserId() !== null || generation !== sessionGeneration) return false;
+  markOfflineSessionUnconfirmed(grant.userId);
+  setActiveOfflineUserId(grant.userId);
+  await restoreQueryClientFromIndexedDB(queryClient, grant.isFlagOn, now);
+  return true;
+}
+
+/** Message d'un autre onglet. Exporté pour être testé sans canal réel. */
+export function onSessionChannelMessage(queryClient: QueryClient, message: SessionChannelMessage): void {
+  if (message.type === "logout") void purgeOfflineSession(queryClient, { broadcast: false });
+  // Un autre compte s'est connecté dans un autre onglet : cet onglet adopte ce compte, ce qui
+  // arrête tout rejeu en cours pour l'ancien (garde `aborted` de la file). Le marqueur d'un autre
+  // compte est périmé ; celui du même compte, écrit par l'autre onglet, reste.
+  if (message.type === "session-changed") {
+    void offlineResume.clearIfNotUser(message.userId).catch(logResumeFailure);
+    if (getActiveOfflineUserId() !== message.userId) {
+      activateOfflineUser(queryClient, message.userId, { broadcast: false });
+    }
+  }
 }
 
 /** Lecteur de drapeaux des profils de lecture hors ligne (un drapeau inconnu est éteint). */
@@ -157,11 +280,15 @@ export async function persistQueryClientToIndexedDB(queryClient: QueryClient): P
  * Restaure au démarrage le cache de l'utilisateur actif, sans écraser une donnée
  * déjà plus récente en mémoire.
  */
-export async function restoreQueryClientFromIndexedDB(queryClient: QueryClient): Promise<number> {
+export async function restoreQueryClientFromIndexedDB(
+  queryClient: QueryClient,
+  isFlagOn: (flag: string) => boolean = readFlag,
+  now: number = Date.now(),
+): Promise<number> {
   const userId = getActiveOfflineUserId();
   if (userId === null) return 0;
   try {
-    const queries = await offlineScope.loadCache(userId, Date.now(), readFlag);
+    const queries = await offlineScope.loadCache(userId, now, isFlagOn);
     // L'utilisateur a pu changer pendant la lecture : ne rien appliquer.
     if (getActiveOfflineUserId() !== userId) return 0;
 
@@ -202,6 +329,9 @@ export async function enqueueOfflineAction(action: OfflineAction): Promise<void>
   });
 }
 
+/** Écart minimal entre deux écritures du marqueur de reprise sur contact réseau. */
+const RESUME_TOUCH_INTERVAL_MS = 60_000;
+
 /**
  * Initialise les écouteurs de persistance automatique et de reconnexion
  */
@@ -214,13 +344,18 @@ export function setupOfflinePersistence(queryClient: QueryClient): () => void {
   const stopQueueRuntime = startOfflineQueueRuntime();
 
   // Un autre onglet s'est déconnecté : cet onglet se purge aussi, sans réémettre.
-  const unsubscribeChannel = sessionChannel.subscribe((message) => {
-    if (message.type === "logout") void purgeOfflineSession(queryClient, { broadcast: false });
-    // Un autre compte s'est connecté dans un autre onglet : cet onglet adopte ce compte, ce qui
-    // arrête tout rejeu en cours pour l'ancien (garde `aborted` de la file).
-    if (message.type === "session-changed" && getActiveOfflineUserId() !== message.userId) {
-      activateOfflineUser(queryClient, message.userId, { broadcast: false });
-    }
+  const unsubscribeChannel = sessionChannel.subscribe((message) => onSessionChannelMessage(queryClient, message));
+
+  // Contact réseau réussi : l'échéance du marqueur de reprise suit le DERNIER contact (jamais un
+  // démarrage hors ligne). Écriture espacée d'une minute, sauf quand les drapeaux viennent d'arriver.
+  let lastContactWrite = 0;
+  const unsubscribeContact = queryClient.getQueryCache().subscribe((event) => {
+    if (!isNetworkSuccess(event) || !isContactProof(event.query.queryKey)) return;
+    const flagsArrived = event.query.queryKey[0] === FEATURE_FLAGS_PATH;
+    const now = Date.now();
+    if (!flagsArrived && now - lastContactWrite < RESUME_TOUCH_INTERVAL_MS) return;
+    lastContactWrite = now;
+    void refreshOfflineResume(queryClient, now);
   });
 
   // Sauvegarde debounced lors des modifications de cache
@@ -246,6 +381,7 @@ export function setupOfflinePersistence(queryClient: QueryClient): () => void {
   return () => {
     unsubscribeUser();
     unsubscribeChannel();
+    unsubscribeContact();
     stopQueueRuntime();
     unsubscribe();
     if (timeoutId) clearTimeout(timeoutId);

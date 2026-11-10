@@ -90,7 +90,7 @@ beforeAll(async () => {
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
   const a = server.address();
   baseUrl = `http://127.0.0.1:${typeof a === "object" && a ? a.port : 0}`;
-  for (const role of ["admin", "management", "secretary", "technician", "client", "logistics", "driver"] as const) await login(role);
+  for (const role of ["admin", "management", "secretary", "technician", "client", "logistics", "driver", "warehouse"] as const) await login(role);
 }, 180000);
 
 afterAll(async () => {
@@ -289,7 +289,17 @@ describe("taux de retenue du client", () => {
 describe("fiche client /api/clients : taux de retenue réservés à la lecture finance", () => {
   const FINANCE_KEYS = ["withholdingVatRate", "withholdingIsRate", "withholdingIsBase", "withholdingUpdatedBy"];
 
-  it.each(["technician", "driver"])("%s : liste et fiche sans les taux", async (role) => {
+  // Chauffeur et technicien : aucun écran client (CLIENT_DIRECTORY_READ_ROLES), refus sans donnée.
+  it.each(["driver", "technician"])("%s : liste et fiche refusées (403)", async (role) => {
+    const clientId = await newClient("ttc");
+    for (const path of ["/api/clients", `/api/clients/${clientId}`]) {
+      const res = await call("GET", path, role);
+      expect(res.status, path).toBe(403);
+      for (const key of FINANCE_KEYS) expect(JSON.stringify(res.body)).not.toContain(key);
+    }
+  });
+
+  it.each(["warehouse"])("%s : liste et fiche sans les taux", async (role) => {
     const clientId = await newClient("ttc");
     const list = await call("GET", "/api/clients", role);
     expect(list.status).toBe(200);
