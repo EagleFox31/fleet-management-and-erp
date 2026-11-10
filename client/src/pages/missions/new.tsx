@@ -21,6 +21,7 @@ import { parseAgreedPrice } from "@/lib/tariff-suggestion";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { canSetMissionPrice } from "@shared/constants/roles";
 import { getMissionEligibility } from "@shared/constants/vehicle-eligibility";
+import { isTrailerVehicleType } from "@shared/constants/assignments";
 import { getDriverCpcEligibility, normalizeCpcStatus } from "@shared/constants/driver-cpc-eligibility";
 import { CPC_BLOCK_PREFIX, driverCpcStatusOf, getCpcBlockGuidance, getStepBlockReason } from "@/lib/mission-wizard-rules";
 
@@ -65,6 +66,7 @@ export default function NewMission() {
     // Step 3: Affectation
     vehicleId: "",
     driverId: "",
+    trailerId: "",
   });
 
   // Fetch clients
@@ -81,6 +83,11 @@ export default function NewMission() {
     select: (data: any[]) =>
       (data || []).map((v) => ({ ...v, eligibilite: getMissionEligibility(v) })),
   });
+
+  // Remorques attelables (vehicleType remorque / semi_remorque), même règle que le serveur.
+  const trailers = ((vehicles as any[]) || []).filter((v: any) => isTrailerVehicleType(v.vehicleType));
+  // Une remorque ne roule pas seule : elle n'est proposée que dans la liste des remorques.
+  const trucks = ((vehicles as any[]) || []).filter((v: any) => !isTrailerVehicleType(v.vehicleType));
 
   // Fetch active drivers
   const { data: drivers, isLoading: driversLoading } = useQuery<any>({
@@ -192,6 +199,7 @@ export default function NewMission() {
       assignment: formData.vehicleId && formData.driverId ? {
         vehicleId: parseInt(formData.vehicleId),
         driverId: parseInt(formData.driverId),
+        trailerId: formData.trailerId ? parseInt(formData.trailerId) : null,
       } : null,
     };
 
@@ -504,7 +512,7 @@ export default function NewMission() {
                       <SelectValue placeholder="Sélectionner un véhicule" />
                     </SelectTrigger>
                     <SelectContent>
-                      {vehicles?.map((vehicle: any) => (
+                      {trucks.map((vehicle: any) => (
                         <SelectItem
                           key={vehicle.id}
                           value={vehicle.id.toString()}
@@ -543,6 +551,24 @@ export default function NewMission() {
                       </div>
                     </div>
                   )}
+
+                  <Label>Remorque (facultatif)</Label>
+                  <Select
+                    value={formData.trailerId || "none"}
+                    onValueChange={(value) => updateFormData("trailerId", value === "none" ? "" : value)}
+                  >
+                    <SelectTrigger data-testid="select-trailer">
+                      <SelectValue placeholder="Aucune remorque" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Aucune remorque</SelectItem>
+                      {trailers.map((trailer: any) => (
+                        <SelectItem key={trailer.id} value={trailer.id.toString()} disabled={trailer.id.toString() === formData.vehicleId}>
+                          {trailer.registrationNumber} - {trailer.brand} {trailer.model}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 {/* Driver Selection */}

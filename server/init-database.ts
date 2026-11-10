@@ -750,6 +750,30 @@ export async function reportVehicleDocumentTypeGaps(client: Queryable, log: Warn
  * server/db/migrations/20261103_drivers_user_id_unique.sql : tests/unit/server/drivers-user-id-unique-schema.test.ts
  * compare les deux. Doublons existants : index non posé, rien supprimé, écart relu par reportDriverUserIdUniqueGaps.
  */
+/**
+ * Remorque d'une affectation (assignments.trailer_id) et unicité « une remorque par attelage actif ». Doit rester
+ * identique à server/db/migrations/20261110_assignments_trailer.sql :
+ * tests/unit/server/assignments-trailer-schema.test.ts compare les deux. Index non posé si des doublons
+ * existent, rien supprimé, écart relu par reportAssignmentsTrailerGaps.
+ */
+export const ASSIGNMENTS_TRAILER_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+ALTER TABLE assignments ADD COLUMN IF NOT EXISTS trailer_id integer REFERENCES vehicles(id) ON DELETE SET NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'uq_assignments_trailer_active') THEN
+    IF EXISTS (SELECT 1 FROM assignments WHERE trailer_id IS NOT NULL AND status IN ('pending', 'accepted', 'in_progress') GROUP BY trailer_id HAVING count(*) > 1) THEN
+      RAISE WARNING 'uq_assignments_trailer_active non posé : remorques attelées à plusieurs affectations actives';
+    ELSE
+      CREATE UNIQUE INDEX uq_assignments_trailer_active ON assignments (trailer_id) WHERE trailer_id IS NOT NULL AND status IN ('pending', 'accepted', 'in_progress');
+    END IF;
+  END IF;
+EXCEPTION WHEN lock_not_available OR unique_violation THEN
+  RAISE WARNING 'uq_assignments_trailer_active non posé : verrou indisponible ou doublon apparu pendant la création';
+END $$;`;
+
 export const DRIVERS_USER_ID_UNIQUE_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
 SET LOCAL lock_timeout = '5s';
 
@@ -838,6 +862,114 @@ BEGIN
 EXCEPTION WHEN lock_not_available THEN
   RAISE WARNING 'contraintes de retenue client non posées : verrou indisponible, nouvel essai au démarrage suivant';
 END $$;`;
+
+/**
+ * Verrou d'argent en base sur les factures clients émises (lot V1, D2). Doit rester identique à
+ * server/db/migrations/20261110_money_lock_invoices.sql (AGENTS.md §5), comparé par
+ * tests/unit/server/client-invoices-lock-schema.test.ts. Un seul envoi = une transaction (SET LOCAL
+ * lock_timeout borne l'attente du verrou de table ; un échec est toléré et relu après l'appel).
+ */
+export const CLIENT_INVOICES_ISSUED_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+CREATE OR REPLACE FUNCTION fn_client_invoices_issued_lock()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  -- Liste blanche : toute autre colonne (montants, TVA, lignes, client, mission, numéro, dates, notes, auteur...)
+  -- est gelée, y compris une colonne ajoutée plus tard, qui naît gelée.
+  -- Avoirs (lot V1, PR5) : ajouter 'credited_amount_ttc' à ce tableau, et sa règle (à la hausse seulement, au plus
+  -- le TTC) à l'emplacement marqué plus bas ; le reste de la logique ne change pas.
+  free_cols text[] := ARRAY['status', 'balance', 'updated_at',
+    'deposited_at', 'withholding_vat_amount', 'withholding_is_amount', 'net_payable', 'deposited_by'];
+BEGIN
+  -- Levée explicite pour la transaction en cours : rien à garder.
+  IF current_setting('fleetos.allow_money_override', true) = 'on' THEN
+    IF TG_OP = 'DELETE' THEN
+      RETURN OLD;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Facture émise : suppression refusée.'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
+  END IF;
+
+  IF (to_jsonb(NEW) - free_cols) IS DISTINCT FROM (to_jsonb(OLD) - free_cols) THEN
+    RAISE EXCEPTION 'Facture émise : montants, lignes, client, mission, numéro et dates ne se modifient plus.'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
+  END IF;
+
+  -- Annulée : statut terminal, aucune sortie et aucun mouvement de solde (décision e de 0a).
+  IF OLD.status = 'cancelled'
+     AND (NEW.status IS DISTINCT FROM OLD.status OR NEW.balance IS DISTINCT FROM OLD.balance) THEN
+    RAISE EXCEPTION 'Facture annulée : statut terminal, ni sortie ni modification de montant.'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
+  END IF;
+
+  -- Solde : il ne fait que baisser (paiements), jamais sous zéro. Une hausse rouvrirait une facture payée ;
+  -- un solde déjà hors bornes (donnée ancienne) n'empêche pas de changer le statut tant qu'il ne bouge pas.
+  IF NEW.balance IS DISTINCT FROM OLD.balance AND (NEW.balance > OLD.balance OR NEW.balance < 0) THEN
+    RAISE EXCEPTION 'Facture émise : le solde ne fait que baisser, sans passer sous zéro.'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
+  END IF;
+
+  -- Avoirs (PR5) : règle de credited_amount_ttc ici.
+
+  -- Dépôt. Seul détachement permis après coup : deposited_by vers NULL par l'action de clé étrangère (suppression de
+  -- l'utilisateur ; UPDATE lancé par un trigger, profondeur > 1). pg_trigger_depth() > 1 couvre tout UPDATE émis
+  -- depuis un trigger : aujourd'hui seule cette action ON DELETE SET NULL écrit client_invoices ainsi ; un futur
+  -- trigger qui viderait deposited_by passerait aussi.
+  IF NEW.deposited_by IS NULL AND OLD.deposited_by IS NOT NULL AND pg_trigger_depth() > 1
+     AND (NEW.deposited_at, NEW.withholding_vat_amount, NEW.withholding_is_amount, NEW.net_payable)
+         IS NOT DISTINCT FROM (OLD.deposited_at, OLD.withholding_vat_amount, OLD.withholding_is_amount, OLD.net_payable) THEN
+    RETURN NEW;
+  END IF;
+  -- Sinon le dépôt se pose une seule fois, avec sa date et son auteur, sur une facture en attente de paiement
+  -- avant comme après l'UPDATE (ni payée ni annulée, comme finance-receivables-service.depositInvoice).
+  IF (NEW.deposited_at, NEW.withholding_vat_amount, NEW.withholding_is_amount, NEW.net_payable, NEW.deposited_by)
+       IS DISTINCT FROM (OLD.deposited_at, OLD.withholding_vat_amount, OLD.withholding_is_amount, OLD.net_payable, OLD.deposited_by) THEN
+    IF OLD.deposited_at IS NOT NULL OR OLD.status = 'cancelled' OR NEW.status = 'cancelled'
+       OR OLD.status = 'paid' OR NEW.status = 'paid'
+       OR NEW.deposited_at IS NULL OR NEW.deposited_by IS NULL THEN
+      RAISE EXCEPTION 'Facture émise : le dépôt se pose une seule fois, avec sa date et son auteur.'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION fn_client_invoices_truncate_lock()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF current_setting('fleetos.allow_money_override', true) = 'on' THEN
+    RETURN NULL;
+  END IF;
+  RAISE EXCEPTION 'Factures clients : vidage de la table refusé.'
+    USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
+END;
+$$;
+
+DO $do$
+BEGIN
+  CREATE OR REPLACE TRIGGER trg_client_invoices_issued_lock
+  BEFORE UPDATE OR DELETE ON client_invoices
+  FOR EACH ROW
+  EXECUTE FUNCTION fn_client_invoices_issued_lock();
+
+  CREATE OR REPLACE TRIGGER trg_client_invoices_truncate_lock
+  BEFORE TRUNCATE ON client_invoices
+  FOR EACH STATEMENT
+  EXECUTE FUNCTION fn_client_invoices_truncate_lock();
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'triggers de verrou des factures non posés : verrou de table indisponible, nouvel essai au démarrage suivant';
+END $do$;`;
 
 /**
  * Lot Q1 (drapeau qhse) : contrôles inopinés QHSE. Doit rester identique à
@@ -991,6 +1123,25 @@ export async function reportDriverUserIdUniqueGaps(client: Queryable, log: WarnL
       : "Index uq_drivers_user_id non posé : verrou de table indisponible, nouvel essai au démarrage suivant.",
   );
   return { missing: true, duplicates };
+}
+
+/**
+ * Relit pg_indexes après ASSIGNMENTS_TRAILER_SQL : si uq_assignments_trailer_active manque, journalise chaque
+ * remorque attelée à plusieurs affectations actives pour que l'exploitation corrige à la main.
+ */
+export async function reportAssignmentsTrailerGaps(client: Queryable, log: WarnLogger = initLog) {
+  const idx = await client.query(
+    `SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'uq_assignments_trailer_active'`,
+  );
+  if (idx.rows.length > 0) return;
+  const dup = await client.query(
+    `SELECT trailer_id, array_agg(id ORDER BY id) AS assignment_ids FROM assignments
+     WHERE trailer_id IS NOT NULL AND status IN ('pending', 'accepted', 'in_progress')
+     GROUP BY trailer_id HAVING count(*) > 1`,
+  );
+  for (const row of dup.rows as Array<{ trailer_id: number; assignment_ids: number[] }>) {
+    log.warn({ trailerId: row.trailer_id, assignmentIds: row.assignment_ids }, "Remorque attelée à plusieurs affectations actives : uq_assignments_trailer_active non posé");
+  }
 }
 
 /**
@@ -1261,6 +1412,94 @@ CREATE OR REPLACE TRIGGER trg_users_keep_active_admin
 BEFORE UPDATE OF role, deleted_at OR DELETE ON users
 FOR EACH ROW
 EXECUTE FUNCTION fn_users_keep_active_admin();`;
+
+/**
+ * Verrou d'argent en base sur les pleins validés (lot V1, D2). Doit rester identique à
+ * server/db/migrations/20261110_money_lock_fuel.sql (AGENTS.md §5), comparé par
+ * tests/unit/server/fuel-records-lock-schema.test.ts. Un seul envoi = une transaction (SET LOCAL
+ * lock_timeout borne l'attente du verrou de table ; un échec est toléré et relu après l'appel).
+ */
+export const FUEL_RECORDS_VALIDATED_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+CREATE OR REPLACE FUNCTION fn_fuel_records_validated_lock()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  free_cols text[] := ARRAY['updated_at', 'updated_by', 'mission_id', 'deleted_at', 'deleted_by', 'cancellation_reason'];
+BEGIN
+  -- Levée explicite pour la transaction en cours, ou plein encore en attente (sa validation comprise) : rien à garder.
+  IF current_setting('fleetos.allow_money_override', true) = 'on' OR OLD.validation_status IS DISTINCT FROM 'validated' THEN
+    IF TG_OP = 'DELETE' THEN
+      RETURN OLD;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Plein validé : suppression refusée.'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
+  END IF;
+
+  -- Toute colonne hors liste blanche (montants, quantités, statut de validation, auteur...) est gelée.
+  IF (to_jsonb(NEW) - free_cols) IS DISTINCT FROM (to_jsonb(OLD) - free_cols) THEN
+    RAISE EXCEPTION 'Plein validé : seule son annulation tracée est permise.'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
+  END IF;
+
+  -- La mission ne se change pas ; elle ne se détache que vers NULL, et seulement depuis un trigger imbriqué
+  -- (pg_trigger_depth() > 1). C'est le cas de l'ON DELETE SET NULL d'une mission supprimée, mais l'exemption
+  -- couvre tout trigger imbriqué, pas la seule clé étrangère. En direct, le plein sortirait du budget de sa
+  -- mission sans annulation tracée.
+  IF NEW.mission_id IS DISTINCT FROM OLD.mission_id AND (NEW.mission_id IS NOT NULL OR pg_trigger_depth() <= 1) THEN
+    RAISE EXCEPTION 'Plein validé : la mission ne se change pas.'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
+  END IF;
+
+  -- Annulation tracée : une seule fois, de NULL vers une valeur, avec auteur et motif.
+  IF (NEW.deleted_at, NEW.deleted_by, NEW.cancellation_reason)
+       IS DISTINCT FROM (OLD.deleted_at, OLD.deleted_by, OLD.cancellation_reason) THEN
+    IF OLD.deleted_at IS NOT NULL OR OLD.deleted_by IS NOT NULL OR OLD.cancellation_reason IS NOT NULL
+       OR NEW.deleted_at IS NULL OR NEW.deleted_by IS NULL
+       OR NEW.cancellation_reason IS NULL OR btrim(NEW.cancellation_reason) = ''
+       OR char_length(NEW.cancellation_reason) > 500 THEN
+      RAISE EXCEPTION 'Plein validé : annulation une seule fois, avec un motif de 1 à 500 caractères.'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION fn_fuel_records_truncate_lock()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF current_setting('fleetos.allow_money_override', true) = 'on' THEN
+    RETURN NULL;
+  END IF;
+  RAISE EXCEPTION 'Pleins : vidage de la table refusé.'
+    USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
+END;
+$$;
+
+DO $do$
+BEGIN
+  CREATE OR REPLACE TRIGGER trg_fuel_records_validated_lock
+  BEFORE UPDATE OR DELETE ON fuel_records
+  FOR EACH ROW
+  EXECUTE FUNCTION fn_fuel_records_validated_lock();
+
+  CREATE OR REPLACE TRIGGER trg_fuel_records_truncate_lock
+  BEFORE TRUNCATE ON fuel_records
+  FOR EACH STATEMENT
+  EXECUTE FUNCTION fn_fuel_records_truncate_lock();
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'triggers de verrou des pleins non posés : verrou de table indisponible, nouvel essai au démarrage suivant';
+END $do$;`;
 
 /**
  * L1 : budget de mission (drapeau finance), un par mission. Doit rester identique à
@@ -2252,6 +2491,9 @@ export async function initializeDatabase() {
     // Un pneu actif par position — jumelle de server/db/migrations/20261107_vehicle_tires_active_position_unique.sql.
     await pool.query(VEHICLE_TIRES_ACTIVE_POSITION_UNIQUE_SQL);
     await reportVehicleTireActivePositionGaps(pool);
+    // Remorque par affectation — jumelle de server/db/migrations/20261110_assignments_trailer.sql.
+    await pool.query(ASSIGNMENTS_TRAILER_SQL);
+    await reportAssignmentsTrailerGaps(pool);
     // Contrôles inopinés QHSE (lot Q1) — jumelle de server/db/migrations/20261105_qhse_inspections.sql.
     await pool.query(QHSE_INSPECTIONS_SQL);
     // Cycle de vie du véhicule — jumelle de server/db/migrations/20261105_vehicle_lifecycle.sql.
@@ -2265,6 +2507,19 @@ export async function initializeDatabase() {
     await pool.query(FUEL_RECORDS_REQUEST_KEY_SQL);
     // Retenues à la source (F1) — jumelle de server/db/migrations/20261105_finance_withholding.sql.
     await pool.query(FINANCE_WITHHOLDING_SQL);
+    // Facture émise verrouillée en base (lot V1) — jumelle de server/db/migrations/20261110_money_lock_invoices.sql.
+    await pool.query(CLIENT_INVOICES_ISSUED_LOCK_SQL);
+    // Verrou de table indisponible (lock_timeout) : le RAISE WARNING n'atteint pas les logs applicatifs, relire pg_trigger.
+    const { rows: invoiceLockTriggers } = await pool.query(
+      `SELECT tgname FROM pg_trigger WHERE tgrelid = 'client_invoices'::regclass
+          AND tgname IN ('trg_client_invoices_issued_lock', 'trg_client_invoices_truncate_lock')`,
+    );
+    if (invoiceLockTriggers.length < 2) {
+      initLog.warn(
+        { present: invoiceLockTriggers.map((r: { tgname: string }) => r.tgname) },
+        "Triggers de verrou des factures émises non posés (verrou de table indisponible) : nouvel essai au démarrage suivant.",
+      );
+    }
     // Suppression douce des pleins qui ont mouvementé la carte — jumelle de server/db/migrations/20261103_fuel_records_soft_delete.sql.
     await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS deleted_at timestamp`);
     await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS deleted_by integer REFERENCES users(id)`);
@@ -2537,6 +2792,20 @@ export async function initializeDatabase() {
     await reportUsersPinBcryptGaps(pool);
     // Au moins un administrateur actif — jumelle de server/db/migrations/20261105_users_keep_active_admin.sql.
     await pool.query(USERS_KEEP_ACTIVE_ADMIN_SQL);
+    // Plein validé verrouillé en base (lot V1) — jumelle de server/db/migrations/20261110_money_lock_fuel.sql.
+    await pool.query(FUEL_RECORDS_VALIDATED_LOCK_SQL);
+    // Verrou de table indisponible (lock_timeout) : le RAISE WARNING n'atteint pas les logs applicatifs, relire pg_trigger.
+    const { rows: fuelLockTriggers } = await pool.query(
+      `SELECT tgname FROM pg_trigger WHERE tgrelid = 'fuel_records'::regclass
+          AND tgname IN ('trg_fuel_records_validated_lock', 'trg_fuel_records_truncate_lock')`,
+    );
+    if (fuelLockTriggers.length < 2) {
+      initLog.warn(
+        { present: fuelLockTriggers.map((r: { tgname: string }) => r.tgname) },
+        "Triggers de verrou des pleins validés non posés (verrou de table indisponible) : la garde du service reste " +
+          "active ; nouvel essai au démarrage suivant.",
+      );
+    }
     // Grille tarifaire (O3) — jumelle de server/db/migrations/20261106_tariff_grid.sql.
     await pool.query(TARIFF_GRID_SQL);
     // Prix convenu d'une mission (O3 lot 3) — jumelle de server/db/migrations/20261106_mission_agreed_price.sql.

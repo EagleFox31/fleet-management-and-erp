@@ -3,6 +3,7 @@ import {
   fuelVoucherParamsSchema,
   fuelVouchersQuerySchema,
   fuelVouchersResponseSchema,
+  fuelVoucherValidateBodySchema,
   fuelVoucherValidationResponseSchema,
 } from "@shared/contracts/fuel-vouchers";
 import { REALTIME_EVENTS } from "@shared/contracts/realtime-events";
@@ -28,7 +29,8 @@ const listVouchers: RequestHandler = async (req, res, next) => {
 const validateVoucher: RequestHandler = async (req, res, next) => {
   try {
     const { id } = fuelVoucherParamsSchema.parse(req.params);
-    const result = await validateFuelVoucher(req.user!.id, id);
+    const { version } = fuelVoucherValidateBodySchema.parse(req.body ?? {});
+    const result = await validateFuelVoucher(req.user!.id, id, version);
     // Couche 2 : les autres profils carburant voient le bon passer à « Validé ».
     const broadcast = (global as { broadcastUpdate?: (event: string, data: unknown) => void }).broadcastUpdate;
     if (broadcast) broadcast("fuel_record_validated", { id: result.id, scope: REALTIME_EVENTS.fuel_record_validated.scope });

@@ -171,3 +171,27 @@ Cette entrée remplace l'approche de l'entrée précédente, refusée en relectu
   - E : `AppError`, garde automatique, leçon consignée ;
   - Reuse-first : aucun helper équivalent dans le dépôt ni dans Drizzle (pas de décodage public d'une ligne JSON) : Build, petit et testé ;
   - A, I et le volet rétroactif sont sans objet (lecture seule, aucun schéma).
+
+## 2026-11-10 11:08 — V1 PR3 : plein validé verrouillé en base, et validation sous contrôle de version (F3)
+- **Quoi** :
+  - trigger BEFORE UPDATE OR DELETE `trg_fuel_records_validated_lock` : un plein validé ne se supprime plus et ne change plus, hors liste blanche D2 (`updated_*` libres, `mission_id` vers NULL, annulation tracée une fois avec motif de 1 à 500 caractères). Refus `check_violation` / `fuel_records_validated_locked`, traduit en 409 par `moneyLockMessageOf` ;
+  - F3 : `POST /api/fuel-vouchers/:id/validate` ne valide qu'un plein `pending` non supprimé, et inchangé depuis la `version` affichée si l'écran l'envoie ; sinon 409 « Ce plein a changé ou est déjà validé : rechargez la liste. ». La validation renseigne aussi `updated_by` / `updated_at`.
+- **Comment** :
+  - migration `20261110_money_lock_fuel.sql` (verrou consultatif, `CREATE OR REPLACE`), jumelle `FUEL_RECORDS_VALIDATED_LOCK_SQL` dans `init-database.ts` : même convention que `USERS_KEEP_ACTIVE_ADMIN_SQL`, parité textuelle testée ;
+  - version = `to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SS.US')`, calculée et comparée par Postgres (pas d'arrondi JS) ;
+  - l'écran envoie `version`, recharge la liste sur erreur, affiche `userMessageOf`.
+- **Pourquoi** : la garde de service (PR2) ne couvre que ses appelants ; deux validations simultanées répondaient 200 toutes les deux, et un montant modifié après affichage pouvait être validé sans être vu.
+- **Écart** :
+  - `CREATE OR REPLACE TRIGGER` (comme le précédent en production) plutôt que DROP + CREATE : atomique, PG14+ ;
+  - le test de b7 `fuel-vouchers-prices` attend désormais 409 sur une seconde validation (décision 0a).
+- **Piège** : générer la constante jumelle avec `String.replace` a changé `$$` en `$` (motif de remplacement JS) ; corrigé par découpage, et la parité textuelle l'aurait vu.
+- **Preuve** :
+  - intégration `fuel-records-lock-trigger` : rouge 8/11 sans trigger, vert 11/11 ; contrat `fuel-voucher-validation-race` : rouge 4/4, vert 4/4 ;
+  - non-régression : intégration carburant / mission / budget / trésorerie / sauvegarde 23 fichiers 120/120, contrat 61 fichiers 1240/1240 (avant F3), puis contrats bons carburant 3 fichiers 45/45 ;
+  - `tsc` 0 erreur, `check:tests` 0.
+- **RAIDER** : I (migration rejouée deux fois sans changement, testé) ; R rétroactif (aucune ligne réécrite) ; D (contrat `version` optionnel côté serveur, ancien client accepté) ; E (contrainte nommée, 409 lisible, levée seulement par `withMoneyOverride`).
+
+## 2026-11-10 — V1 PR3 : durcissement après revue sécurité (#633)
+- **Quoi** : `mission_id` d'un plein validé ne passe à NULL que par l'action de clé étrangère (`pg_trigger_depth() > 1`) ; trigger `BEFORE TRUNCATE ... FOR EACH STATEMENT` `trg_fuel_records_truncate_lock` (même levée `withMoneyOverride`) ; `SET LOCAL lock_timeout = '5s'`, pose des deux triggers dans un `DO` qui tolère `lock_not_available` (WARNING), relu dans `pg_trigger` et journalisé par `init-database`.
+- **Pourquoi** : un UPDATE direct de `mission_id` vers NULL sortait un plein validé du budget de sa mission sans annulation tracée ; un TRUNCATE ... CASCADE vidait les pleins sans passer par le trigger par ligne ; un verrou de table retenu par une écriture longue bloquait le démarrage.
+- **Comment prouvé** : intégration rouge 4/13 (UPDATE direct accepté, TRUNCATE CASCADE accepté, migration bloquée 15 s, trigger TRUNCATE absent), vert 13/13. Les essais de TRUNCATE tournent dans une transaction toujours annulée : la base partagée n'est jamais vidée. Aucun TRUNCATE dans les helpers de nettoyage ni dans la restauration.

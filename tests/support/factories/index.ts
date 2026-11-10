@@ -168,8 +168,14 @@ export async function createTestClient(
   return row;
 }
 
+/**
+ * Facture de test. Une facture est émise dès sa création : le trigger `client_invoices_issued_locked`
+ * gèle ensuite client, mission, montants, dates et ne laisse poser le dépôt qu'une fois, avec son auteur.
+ * Tout ce qu'un test veut figer se passe donc ici, à l'insertion (`clientId: null` pour une facture
+ * orpheline, `missionId`, `depositedAt` + retenues...).
+ */
 export async function createTestClientInvoice(
-  overrides: Partial<typeof clientInvoices.$inferInsert> & { clientId: number },
+  overrides: Partial<typeof clientInvoices.$inferInsert> & { clientId: number | null },
 ): Promise<ClientInvoice> {
   const token = uniqueTestToken("cinv");
   const amountHT = overrides.amountHT ?? "100000.00";
@@ -178,6 +184,7 @@ export async function createTestClientInvoice(
   const [row] = await db
     .insert(clientInvoices)
     .values({
+      ...overrides,
       clientId: overrides.clientId,
       invoiceNumber: overrides.invoiceNumber ?? token,
       invoiceDate: overrides.invoiceDate ?? "2026-01-15",

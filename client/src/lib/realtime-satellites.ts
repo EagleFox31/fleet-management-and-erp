@@ -131,6 +131,8 @@ export const SATELLITE_GROUPS = {
   },
   /** Missions : activité au tableau de bord de gestion. */
   missions: { keys: [MANAGEMENT_DASHBOARD] },
+  /** Suivi des opérations (O1) : la remorque de l'affectation active y est préremplie. */
+  missionOperations: { keys: ["/api/mission-operations"] },
   /** Budget de mission (L1f) : liste, budget d'une mission et ses dépenses, besoin du jour. */
   missionBudgets: { keys: ["/api/mission-budgets", "/api/mission-budgets/daily-need"], byId: ["/api/missions/:missionId/launch-readiness"] },
   /** Preuve de livraison déposée : fichiers de la mission, et liste « livrées non facturées ». */
@@ -195,10 +197,10 @@ export const EVENT_SATELLITES: Record<string, readonly SatelliteGroupName[]> = {
   vehicle_deleted: ["vehicleStatus", "vehicleOperations", "documents", "missions"],
   vehicle_restored: ["vehicleStatus", "vehicleOperations", "documents", "missions"],
   vehicle_maintenance_position_updated: ["vehicleOperations"],
-  mission_created: ["missions"],
-  mission_updated: ["missions"],
-  mission_completed: ["missions"],
-  mission_status_changed: ["missions"],
+  mission_created: ["missions", "missionOperations"],
+  mission_updated: ["missions", "missionOperations"],
+  mission_completed: ["missions", "missionOperations"],
+  mission_status_changed: ["missions", "missionOperations"],
   mission_created_from_fuel: ["missions", "fuel"],
   mission_fuel_recorded: ["missions", "fuel"],
   mission_pod_uploaded: ["missions", "missionPod"],

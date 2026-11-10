@@ -390,9 +390,24 @@ Notes :
   contre-passation en trésorerie, rejeu du même motif = 200), puis par la saisie d'un nouveau plein. Refusé (409)
   si le budget de la mission est soldé (`mission_budgets.settled_at`). Le `PATCH` reste déclaré dans
   `server/routes.ts` : le déplacer dans `server/api` est au backlog (`docs/plans/v1-verrou-argent.md`).
+  Le verrou vit **aussi en base** : trigger `trg_fuel_records_validated_lock` (migration
+  `20261110_money_lock_fuel.sql`, jumelle `FUEL_RECORDS_VALIDATED_LOCK_SQL`), refus `check_violation` sur la
+  contrainte `fuel_records_validated_locked`, traduit en 409 par `moneyLockMessageOf`. Seuls passent
+  `updated_at`, `updated_by`, `mission_id` vers NULL par la seule clé étrangère (suppression de la mission,
+  `pg_trigger_depth() > 1`) et l'annulation tracée une fois. `TRUNCATE` de la table est refusé
+  (`trg_fuel_records_truncate_lock`). Le lever : migration ou
+  script, dans une transaction, par `withMoneyOverride(tx, motif)` ; jamais depuis une route, sauf la
+  restauration de sauvegarde admin (`tests/unit/server/money-override-hygiene.test.ts`).
 - Environ 1 000 `console.*` restent côté serveur : les migrer vers `moduleLogger`
   quand on touche un fichier, ne jamais les supprimer (§10).
 - Coût carburant estimé compté comme revenu : `server/services/operations-service.ts` (l. 251, 296, 318) somme `estimatedFuelCost` dans `totalRevenue`, puis la marge en dépend. Aucune garde. Ne pas ajouter de marge ou de revenu nouveau sur ce champ avant correction.
+- Facture client émise : immuable dès sa création (pas de brouillon). Trigger `trg_client_invoices_issued_lock`
+  (migration `20261110_money_lock_invoices.sql`, jumelle `CLIENT_INVOICES_ISSUED_LOCK_SQL`), refus `check_violation`
+  sur `client_invoices_issued_locked`, traduit en 409 par `moneyLockMessageOf`. Seuls passent `status`, `balance`,
+  `updated_at` et le dépôt, posé une seule fois avec sa date et son auteur, ni sur une facture payée ni sur une
+  annulée (même dans le même `UPDATE`). Le solde ne fait que baisser, jamais sous zéro. `cancelled` est terminal. Suppression et
+  `TRUNCATE` refusés. Une correction passe par un avoir (PR5). Un test qui veut une facture déposée, orpheline ou
+  liée à une mission la crée ainsi (`createTestClientInvoice`) : un `UPDATE` après coup est refusé.
 - Clôture automatique de la commande : `autoCloseDeliveredOrderIfFinanceDone`, `server/services/three-way-matching-service.ts` (l. 122-128). L'`UPDATE` du statut `completed` filtre sur l'identifiant seul, sans condition de statut ni verrou. Entrée gelée (1) de `tests/unit/server/status-update-cas-hygiene.test.ts`. Ne pas en ajouter d'autre.
 - Montants en texte libre dans l'audit d'OT : `/api/work-orders/:id/audit-trail` est exempté de `tests/unit/server/work-order-cost-mask-coverage.test.ts` (l. 27). Le masquage par clé ne couvre pas les libellés. Ne pas étendre cette exemption sans son lot dédié.
 - Tests contrat intermittents `tests/contract/finance-withholdings.contract.test.ts` et `tests/contract/qhse-inspections.contract.test.ts` : non reproduits, instrumentés (corps de réponse). Ne pas relever le timeout ni les marquer `skip` sans diagnostic du corps de réponse.

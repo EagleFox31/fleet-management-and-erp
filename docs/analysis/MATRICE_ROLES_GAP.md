@@ -103,3 +103,10 @@ renvoie 403 (`server/lib/vehicle-patch-guard.ts`). Rôles : `VEHICLE_PATCH_ROLES
 - `GET /api/work-orders/:id` (`server/routes.ts` ~1851) refuse un technicien sur l'OT assigné à un autre technicien (403).
 - `assertWorkOrderReadable` (`server/lib/work-order-scope.ts`) n'applique que la cloison client : les sous-ressources `GET /api/work-orders/:id/parts`, `/items`, `/pending-part-requirements` et `/tire-rotations` restent lisibles par tout technicien, quel que soit l'OT.
 - Aucune règle changée : décision métier à prendre (aligner les sous-ressources sur le détail, ou assumer que l'atelier partage la lecture). Le garde `tests/unit/server/routes-hygiene.test.ts` exige seulement une cloison client ou une garde de rôle sur ces lectures.
+
+## Pannes déclarées : lecture restreinte (10 novembre 2026)
+- `GET /api/incidents` : atelier et logistique (`INCIDENT_AUDIENCE_ROLES` = `admin`, `workshop_manager`, `logistics`, ceux qui reçoivent `incident_reported`) lisent tout ; le chauffeur ne lit que ses déclarations.
+- Refusés en 403 : `accountant`, `viewer`, `secretary`, `warehouse`, `technician`, `management`, `user`, `client`. Avant ce lot, tout le personnel lisait la liste.
+- `POST /api/incidents` : `driver` (son véhicule en affectation active) et `admin` seulement.
+- Écart assumé : la direction (`management`) et le technicien n'ont pas la liste ; l'écran `/incidents` n'est ouvert qu'à `admin` et `workshop_manager`. À rouvrir si la direction demande un suivi des pannes.
+- Garde : route (`authorize`) et service (`listIncidents`). Tests : `tests/contract/incidents.contract.test.ts`, `tests/unit/server/incident-service.test.ts`.

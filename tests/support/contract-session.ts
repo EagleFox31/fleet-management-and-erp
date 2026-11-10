@@ -63,5 +63,9 @@ export async function startContractSession<A extends string>(actors: Record<A, T
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   }
 
-  return { ids, call, raw, userId: (actor: A) => userIds.get(actor)!, stop };
+  /** Port et cookie de session, pour une requete envoyee par socket brut (`tests/support/raw-request.ts`). */
+  const port = typeof address === "object" && address ? address.port : 0;
+  const cookieOf = (actor: A) => cookies.get(actor)!;
+
+  return { ids, call, raw, userId: (actor: A) => userIds.get(actor)!, port, cookieOf, stop };
 }

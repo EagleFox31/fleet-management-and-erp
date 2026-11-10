@@ -1,7 +1,8 @@
-import { eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, notInArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
-import { missionOperations, missions, vehicles } from "@shared/schema";
+import { assignments, missionOperations, missions, vehicles } from "@shared/schema";
+import { VOID_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
 import {
   OPERATION_RECAP_STATUSES,
   recapStatusOf,
@@ -35,11 +36,17 @@ export async function listMissionOperations(filter: MissionOperationsFilter): Pr
     SELECT m.id AS mission_id, m.order_number, m.client_id, c.name AS client_name,
            m.pickup_address, m.delivery_address, m.status AS mission_status,
            inv.invoice_number, inv.status AS invoice_status,
-           o.trailer_vehicle_id, o.container_number, o.bl_number, o.sector, to_char(o.loading_date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS loading_date,
+           COALESCE(o.trailer_vehicle_id, att.trailer_id) AS trailer_vehicle_id, o.container_number, o.bl_number, o.sector, to_char(o.loading_date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS loading_date,
            to_char(o.departure_date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS departure_date, to_char(o.return_date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS return_date, to_char(o.unloading_date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS unloading_date, o.goods_nature, o.comment
     FROM missions m
     LEFT JOIN clients c ON c.id = m.client_id
     LEFT JOIN mission_operations o ON o.mission_id = m.id
+    LEFT JOIN LATERAL (
+      SELECT a.trailer_id FROM assignments a
+      WHERE a.mission_id = m.id AND a.trailer_id IS NOT NULL
+        AND a.status NOT IN (${sql.join(VOID_ASSIGNMENT_STATUSES.map((s) => sql`${s}`), sql`, `)})
+      ORDER BY a.id DESC LIMIT 1
+    ) att ON TRUE
     LEFT JOIN LATERAL (
       SELECT ci.invoice_number, ci.status FROM client_invoices ci
       WHERE ci.mission_id = m.id AND ci.status <> 'cancelled'
@@ -97,7 +104,22 @@ function valuesOf(body: MissionOperationBody) {
   return values;
 }
 
-/** Crée ou met à jour la ligne de suivi d'une mission (1-1, `mission_id` unique). */
+/** Remorque de l'affectation non annulée la plus récente (encore visible une fois la mission terminée). */
+async function liveAssignmentTrailer(missionId: number): Promise<number | null> {
+  const [a] = await db
+    .select({ trailerId: assignments.trailerId })
+    .from(assignments)
+    .where(and(eq(assignments.missionId, missionId), isNotNull(assignments.trailerId), notInArray(assignments.status, [...VOID_ASSIGNMENT_STATUSES])))
+    .orderBy(desc(assignments.id))
+    .limit(1);
+  return a?.trailerId ?? null;
+}
+
+/**
+ * Crée ou met à jour la ligne de suivi d'une mission (1-1, `mission_id` unique).
+ * La remorque de l'affectation ne préremplit le suivi que si le corps ne la fixe pas et que la
+ * ligne n'en a pas encore : une saisie O1 explicite n'est jamais écrasée.
+ */
 export async function upsertMissionOperation(missionId: number, body: MissionOperationBody, userId: number) {
   const [mission] = await db.select({ id: missions.id }).from(missions).where(eq(missions.id, missionId));
   if (!mission) throw new AppError(404, "Mission introuvable.");
@@ -106,12 +128,18 @@ export async function upsertMissionOperation(missionId: number, body: MissionOpe
     if (!v) throw new AppError(400, "Remorque introuvable.");
   }
   const values = valuesOf(body);
+  const prefill = body.trailerVehicleId === undefined ? await liveAssignmentTrailer(missionId) : null;
   const [row] = await db
     .insert(missionOperations)
-    .values({ ...values, missionId, createdBy: userId, updatedBy: userId })
+    .values({ ...values, ...(prefill ? { trailerVehicleId: prefill } : {}), missionId, createdBy: userId, updatedBy: userId })
     .onConflictDoUpdate({
       target: missionOperations.missionId,
-      set: { ...values, updatedBy: userId, updatedAt: new Date() },
+      set: {
+        ...values,
+        ...(prefill ? { trailerVehicleId: sql`COALESCE(${missionOperations.trailerVehicleId}, ${prefill})` } : {}),
+        updatedBy: userId,
+        updatedAt: new Date(),
+      },
     })
     .returning();
   return row;

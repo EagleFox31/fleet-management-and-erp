@@ -5,6 +5,7 @@ import { Router } from "express";
 import { db } from "../db";
 import { missions, clients, assignments, drivers, vehicles, vehicleDocuments, alerts, documentRenewalRequests, fuelRecords, tariffGrid } from "@shared/schema";
 import { eq, and, asc, desc, inArray, ne, notInArray, or, ilike, isNull } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { insertMissionSchema, insertAssignmentSchema } from "@shared/schema";
 import { FuelCardService, toFuelCardAppError } from "../services/fuel-card-service";
 import { storage } from "../storage";
@@ -26,6 +27,10 @@ import { MISSION_ID_INVALID_MESSAGE, parseRouteId } from "../lib/route-id";
 import { assertValidDbId } from "../lib/work-order-scope";
 import { assertPlanningStateUnchanged, findPlanningClash, launchRefusalMessage, lockPlanningPairs, lockPlanningResources, planningClashMessage, planningStateKey } from "../services/mission-planning";
 import { ACTIVE_ASSIGNMENT_STATUSES, VOID_ASSIGNMENT_STATUSES, isActiveAssignmentStatus, isVoidAssignmentStatus } from "@shared/constants/assignments";
+import { assertTrailerAssignable, assertTruckIsNotTrailer, trailerConflictToAppError } from "../services/trailer-assignment";
+
+// Remorque attelée à l'affectation : second alias de vehicles, le premier étant le camion.
+const trailerVehicles = alias(vehicles, "assignment_trailer");
 import { getDriverCpcEligibility } from "@shared/constants/driver-cpc-eligibility";
 import { withAssignmentsCpcVerdict } from "../lib/mission-driver-cpc";
 import { toFieldErrors } from "@shared/errors";
@@ -811,6 +816,13 @@ router.get("/", async (req, res) => {
             status: assignments.status,
             startedAt: assignments.startedAt,
             completedAt: assignments.completedAt,
+            trailerId: assignments.trailerId,
+            trailer: {
+              id: trailerVehicles.id,
+              registrationNumber: trailerVehicles.registrationNumber,
+              brand: trailerVehicles.brand,
+              model: trailerVehicles.model,
+            },
             vehicle: {
               id: vehicles.id,
               registrationNumber: vehicles.registrationNumber,
@@ -830,6 +842,7 @@ router.get("/", async (req, res) => {
           })
           .from(assignments)
           .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
+          .leftJoin(trailerVehicles, eq(assignments.trailerId, trailerVehicles.id))
           .leftJoin(drivers, eq(assignments.driverId, drivers.id))
           .where(eq(assignments.missionId, mission.id))
           .orderBy(asc(assignments.id));
@@ -930,6 +943,13 @@ router.get("/:id", async (req, res) => {
         startedAt: assignments.startedAt,
         completedAt: assignments.completedAt,
         assignedAt: assignments.assignedAt,
+        trailerId: assignments.trailerId,
+        trailer: {
+          id: trailerVehicles.id,
+          registrationNumber: trailerVehicles.registrationNumber,
+          brand: trailerVehicles.brand,
+          model: trailerVehicles.model,
+        },
         vehicle: {
           id: vehicles.id,
           registrationNumber: vehicles.registrationNumber,
@@ -952,6 +972,7 @@ router.get("/:id", async (req, res) => {
       })
       .from(assignments)
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
+      .leftJoin(trailerVehicles, eq(assignments.trailerId, trailerVehicles.id))
       .leftJoin(drivers, eq(assignments.driverId, drivers.id))
       .where(eq(assignments.missionId, missionId))
       .orderBy(asc(assignments.id));
@@ -1984,6 +2005,9 @@ router.get("/:id/launch-readiness", async (req, res, next) => {
  * puis avance par PUT /:id/status. Le coût réel et les budgets (`workflowData.budgetPlan`) se
  * saisissent ensuite par PATCH /:id : Zod les retire du corps (relecture de #129, lot 2).
  */
+/** Identifiant d'une affectation : nombre ou chaîne de chiffres ; un booléen n'est pas un identifiant (true ≠ véhicule 1). */
+const assignmentIdSchema = z.union([z.number(), z.string()]).pipe(idSchema);
+
 const createMissionSchema = insertMissionSchema
   .omit({
     status: true,
@@ -2002,6 +2026,15 @@ const createMissionSchema = insertMissionSchema
     // O3 lot 3 : prix convenu en XAF entier ; le tarif d'origine n'a de sens qu'avec un prix.
     agreedPrice: z.number().int().min(0).max(999_999_999_999_999).nullable().optional().transform((v) => (v == null ? null : String(v))),
     tariffGridId: idSchema.nullable().optional(),
+    // Objet imbriqué déclaré : le handler ne relit jamais req.body après safeParse.
+    assignment: z
+      .object({
+        vehicleId: assignmentIdSchema.nullable().optional(),
+        driverId: assignmentIdSchema.nullable().optional(),
+        trailerId: assignmentIdSchema.nullable().optional(),
+      })
+      .nullable()
+      .optional(),
   })
   .refine((m) => m.tariffGridId == null || m.agreedPrice != null, {
     message: "Un tarif d'origine suppose un prix convenu.",
@@ -2031,7 +2064,7 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
         errors: parsed.error.issues.map((issue) => ({ field: issue.path.join("."), message: issue.message })),
       });
     }
-    const validatedData = parsed.data;
+    const { assignment: assignmentInput, ...validatedData } = parsed.data;
 
     if (validatedData.tariffGridId != null) {
       const [tariff] = await db
@@ -2060,17 +2093,16 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
       }
     }
 
-    const hasAssignment =
-      missionData.assignment &&
-      missionData.assignment.vehicleId &&
-      missionData.assignment.driverId;
+    const hasAssignment = Boolean(assignmentInput?.vehicleId && assignmentInput?.driverId);
 
     let assignmentVehicleId: number | null = null;
     let assignmentDriverId: number | null = null;
+    let assignmentTrailerId: number | null = null;
 
     if (hasAssignment) {
-      assignmentVehicleId = Number(missionData.assignment.vehicleId);
-      assignmentDriverId = Number(missionData.assignment.driverId);
+      assignmentVehicleId = assignmentInput!.vehicleId!;
+      assignmentDriverId = assignmentInput!.driverId!;
+      assignmentTrailerId = assignmentInput!.trailerId ?? null;
 
       if (!Number.isInteger(assignmentVehicleId) || !Number.isInteger(assignmentDriverId)) {
         return res.status(400).json({
@@ -2081,6 +2113,7 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
       const [selectedVehicle] = await db
         .select({
           id: vehicles.id,
+          vehicleType: vehicles.vehicleType,
           registrationNumber: vehicles.registrationNumber,
           tonnage: vehicles.tonnage,
           status: vehicles.status,
@@ -2096,6 +2129,7 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
       if (!selectedVehicle) {
         return res.status(400).json({ message: "Véhicule introuvable pour l'affectation." });
       }
+      assertTruckIsNotTrailer(selectedVehicle.vehicleType);
 
       // Le filtre de l'écran de création ne portait que sur `status`, et
       // seulement côté client: l'API acceptait n'importe quel véhicule, y
@@ -2171,6 +2205,7 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
     const withAssignment = assignmentVehicleId !== null && assignmentDriverId !== null;
     const newMission = await db.transaction(async (tx) => {
       if (withAssignment) {
+        // Ordre des verrous identique sur les trois routes : camion (1), chauffeur (2), puis remorque (3).
         await lockPlanningResources(tx, assignmentVehicleId!, assignmentDriverId!);
         const clash = await findPlanningClash(tx, {
           missionId: null,
@@ -2180,6 +2215,9 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
           driverId: assignmentDriverId!,
         });
         if (clash) throw new AppError(409, planningClashMessage(clash));
+        if (assignmentTrailerId) {
+          await assertTrailerAssignable(tx, { loadReceipts: (id) => loadOpenRenewalReceipts(id, tx), trailerId: assignmentTrailerId, vehicleId: assignmentVehicleId! });
+        }
       }
       const [created] = await tx
         .insert(missions)
@@ -2191,12 +2229,13 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
             missionId: created.id,
             vehicleId: assignmentVehicleId,
             driverId: assignmentDriverId,
+            trailerId: assignmentTrailerId,
             status: "pending" as const,
           }),
         );
       }
       return created;
-    });
+    }).catch((error) => { throw trailerConflictToAppError(error); });
 
     await broadcastMissionUpdate("mission_created", newMission as unknown as Record<string, unknown>, {
       hasAssignment: withAssignment,
@@ -2232,6 +2271,7 @@ const updateMissionSchema = z.object({
   assignment: z.object({
     vehicleId: idSchema,
     driverId: idSchema,
+    trailerId: idSchema.optional().nullable(),
   }).optional().nullable(),
 });
 
@@ -2453,6 +2493,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
           status: assignments.status,
           vehicleId: assignments.vehicleId,
           driverId: assignments.driverId,
+          trailerId: assignments.trailerId,
         })
         .from(assignments)
         .where(eq(assignments.missionId, missionId))
@@ -2496,6 +2537,12 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
       } else {
         const assignmentPayload = payload.assignment;
         const { vehicleId, driverId } = assignmentPayload;
+        // Absent = remorque inchangée (ancien écran en cache qui ne connaît pas le champ) ; null = retirée.
+        const trailerId: number | null =
+          assignmentPayload.trailerId === undefined ? (existingAssignment?.trailerId ?? null) : assignmentPayload.trailerId ? Number(assignmentPayload.trailerId) : null;
+        if (trailerId !== null && (!Number.isInteger(trailerId) || trailerId <= 0)) {
+          return res.status(400).json({ message: "Affectation invalide (remorque)." });
+        }
         if (!Number.isInteger(vehicleId) || vehicleId <= 0 || !Number.isInteger(driverId) || driverId <= 0) {
           return res.status(400).json({ message: "Affectation invalide (véhicule/chauffeur)." });
         }
@@ -2503,6 +2550,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
         const [selectedVehicle] = await db
           .select({
             id: vehicles.id,
+            vehicleType: vehicles.vehicleType,
             registrationNumber: vehicles.registrationNumber,
             tonnage: vehicles.tonnage,
             status: vehicles.status,
@@ -2517,6 +2565,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
         if (!selectedVehicle) {
           return res.status(400).json({ message: "Véhicule introuvable pour l'affectation." });
         }
+        assertTruckIsNotTrailer(selectedVehicle.vehicleType);
 
         // Même règle que la création (POST /) : un véhicule à l'atelier ou en défaut
         // d'assurance, de visite technique ou de plaque ne s'affecte pas non plus par PATCH.
@@ -2586,11 +2635,13 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
         if (existingAssignment?.id) {
           const current = existingAssignment;
           writeAssignment = async (tx) => {
+            if (trailerId) await assertTrailerAssignable(tx, { loadReceipts: (id) => loadOpenRenewalReceipts(id, tx), trailerId, vehicleId, excludeAssignmentId: current.id });
             await tx
               .update(assignments)
               .set({
                 vehicleId,
                 driverId,
+                trailerId,
                 status: current.status === "in_progress" ? "in_progress" : "pending",
                 updatedAt: new Date(),
               })
@@ -2598,7 +2649,8 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
           };
         } else {
           writeAssignment = async (tx) => {
-            await tx.insert(assignments).values({ missionId, vehicleId, driverId, status: "pending" });
+            if (trailerId) await assertTrailerAssignable(tx, { loadReceipts: (id) => loadOpenRenewalReceipts(id, tx), trailerId, vehicleId });
+            await tx.insert(assignments).values({ missionId, vehicleId, driverId, trailerId, status: "pending" });
           };
         }
 
@@ -2641,7 +2693,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
         .where(eq(missions.id, missionId))
         .returning();
       return row;
-    });
+    }).catch((error) => { throw trailerConflictToAppError(error); });
 
     await broadcastMissionUpdate("mission_updated", updatedMission as unknown as Record<string, unknown>, {
       source: "mission_edit",
@@ -2658,6 +2710,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
 const addAssignmentSchema = z.object({
   vehicleId: idSchema,
   driverId: idSchema,
+  trailerId: idSchema.optional().nullable(),
 });
 
 const editionBlockedMessage = (status: string) => `Mission ${status === "completed" ? "terminée" : "annulée"} : édition bloquée.`;
@@ -2671,6 +2724,7 @@ router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), validateB
     const missionId = parseMissionId(req.params.id);
     assertValidDbId(missionId, "ID mission invalide.");
     const { vehicleId, driverId } = req.body as z.infer<typeof addAssignmentSchema>;
+    const trailerId = (req.body as z.infer<typeof addAssignmentSchema>).trailerId ?? null;
     assertValidDbId(vehicleId, "Affectation invalide (véhicule/chauffeur).");
     assertValidDbId(driverId, "Affectation invalide (véhicule/chauffeur).");
 
@@ -2694,6 +2748,7 @@ router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), validateB
       const [vehicle] = await tx
         .select({
           id: vehicles.id,
+          vehicleType: vehicles.vehicleType,
           registrationNumber: vehicles.registrationNumber,
           tonnage: vehicles.tonnage,
           status: vehicles.status,
@@ -2705,6 +2760,7 @@ router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), validateB
         .where(and(eq(vehicles.id, vehicleId), isNull(vehicles.deletedAt)))
         .limit(1);
       if (!vehicle) throw new AppError(400, "Véhicule introuvable pour l'affectation.");
+      assertTruckIsNotTrailer(vehicle.vehicleType);
 
       const eligibilite = getMissionEligibility({ ...vehicle, receipts: await loadOpenRenewalReceipts(vehicle.id, tx) });
       if (!eligibilite.eligible) {
@@ -2746,17 +2802,18 @@ router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), validateB
         driverId,
       });
       if (clash) throw new AppError(409, planningClashMessage(clash));
+      if (trailerId) await assertTrailerAssignable(tx, { loadReceipts: (id) => loadOpenRenewalReceipts(id, tx), trailerId, vehicleId });
 
-      const [assignment] = await tx.insert(assignments).values({ missionId, vehicleId, driverId, status: "pending" }).returning();
+      const [assignment] = await tx.insert(assignments).values({ missionId, vehicleId, driverId, trailerId, status: "pending" }).returning();
       const [updatedMission] =
         mission.status === "planned"
           ? await tx.update(missions).set({ status: "assigned", updatedAt: new Date() }).where(eq(missions.id, missionId)).returning()
           : await tx.select().from(missions).where(eq(missions.id, missionId));
       return { assignment, mission: updatedMission };
-    });
+    }).catch((error) => { throw trailerConflictToAppError(error); });
 
     // Après le commit : trame complète au personnel, trame réduite aux chauffeurs affectés (portée nominative).
-    await broadcastMissionUpdate("mission_updated", result.mission as unknown as Record<string, unknown>, { source: "mission_assignment_added", assignmentId: result.assignment.id }, req.requestId);
+    await broadcastMissionUpdate("mission_updated", result.mission as unknown as Record<string, unknown>, { source: "mission_assignment_added", assignmentId: result.assignment.id, trailerId: result.assignment.trailerId }, req.requestId);
     return res.status(201).json(result.assignment);
   } catch (error) {
     next(error);
@@ -2879,6 +2936,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
         id: assignments.id,
         vehicleId: assignments.vehicleId,
         driverId: assignments.driverId,
+        trailerId: assignments.trailerId,
         status: assignments.status,
         acceptedAt: assignments.acceptedAt,
         startedAt: assignments.startedAt,
@@ -3031,6 +3089,33 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
             if (blocker.code === "technical_inspection" && visiteErreur) continue;
             if (blocker.code === "license_plate" && carteGriseErreur) continue;
             rowErrors.push(`${blocker.reason.charAt(0).toUpperCase()}${blocker.reason.slice(1)}.`);
+          }
+
+          // Remorque attelée : même éligibilité qu'à l'affectation, relue au départ (elle a pu passer
+          // en atelier, être supprimée ou voir un papier expirer depuis).
+          if (row.trailerId) {
+            const [trailer] = await db
+              .select({
+                registrationNumber: vehicles.registrationNumber,
+                status: vehicles.status,
+                insuranceExpiry: vehicles.insuranceExpiry,
+                technicalInspectionDate: vehicles.technicalInspectionDate,
+                licensePlateExpiry: vehicles.licensePlateExpiry,
+              })
+              .from(vehicles)
+              .where(and(eq(vehicles.id, row.trailerId), isNull(vehicles.deletedAt)))
+              .limit(1);
+            if (!trailer) {
+              rowErrors.push("Remorque introuvable.");
+            } else {
+              const trailerEligibility = getMissionEligibility({
+                ...trailer,
+                receipts: await loadOpenRenewalReceipts(row.trailerId),
+              });
+              if (!trailerEligibility.eligible) {
+                rowErrors.push(`Remorque ${formatEligibilityRefusal(trailer.registrationNumber, trailerEligibility.blockers)}`);
+              }
+            }
           }
 
           if (mission.pickupDate && mission.deliveryDate) {

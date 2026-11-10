@@ -28,12 +28,20 @@ const withText = (needle: RegExp) => files.filter((f) => needle.test(read(f)));
 
 /** Fichiers autorisés à nommer le réglage (les SQL de verrou et `init-database.ts` à venir sont déclarés d'avance). */
 const ALLOWED_EXACT = new Set([
+  // Preuve en base du trigger des factures : la levée lève le verrou, et seulement pour sa transaction.
+  "tests/integration/client-invoices-lock-trigger.test.ts",
+  // Parité migration / init-database des factures : vérifie que le trigger lit bien ce réglage.
+  "tests/unit/server/client-invoices-lock-schema.test.ts",
   "server/lib/money-override.ts",
   "tests/support/money-override.ts",
   "scripts/lib/recette-data.ts",
   "server/init-database.ts",
   "server/services/backup-import-service.ts",
   "tests/unit/server/money-override-hygiene.test.ts",
+  // Preuve en base du trigger des pleins : la levée lève le verrou, et seulement pour sa transaction.
+  "tests/integration/fuel-records-lock-trigger.test.ts",
+  // Parité migration / init-database : vérifie que le trigger lit bien ce réglage.
+  "tests/unit/server/fuel-records-lock-schema.test.ts",
 ]);
 const ALLOWED_PREFIX = ["server/db/migrations/", "server/db/triggers/"];
 const allowed = (f: string) => ALLOWED_EXACT.has(f) || ALLOWED_PREFIX.some((p) => f.startsWith(p));
@@ -73,8 +81,16 @@ describe("levée des verrous d'argent : hygiène", () => {
     const offenders = files
       .filter((f) => /^(tests|e2e|scripts)\//.test(f))
       .filter((f) => f !== "tests/support/money-override.ts" && f !== "tests/unit/server/money-override-hygiene.test.ts")
+      // Preuve du trigger : la suppression directe d'un plein validé doit être refusée par la base.
+      .filter((f) => f !== "tests/integration/fuel-records-lock-trigger.test.ts")
       // Reset de recette : dans sa transaction, après la levée du verrou (voir le test suivant).
       .filter((f) => f !== "scripts/lib/recette-data.ts")
+      // Preuve du trigger : la suppression directe d'une facture émise doit être refusée par la base.
+      .filter(
+        (f) =>
+          f !== "tests/integration/client-invoices-lock-trigger.test.ts" &&
+          f !== "tests/contract/client-invoices-lock.contract.test.ts",
+      )
       .filter((f) => direct.test(read(f)));
     expect(offenders).toEqual([]);
   });
