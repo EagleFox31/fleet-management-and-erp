@@ -386,8 +386,9 @@ export default function SupplierInvoiceDetailsPage() {
   const numericBalance = Number(invoice.balance || 0);
   const remainingToRecord = Math.max(numericBalance - pendingReconciliationAmount, 0);
   const hasRecordedSettlement = settlements.some((s) => s.status === "recorded");
-  const showRecordPaymentButton = invoice.status === "approved" && canPay && !settlementsFailed && remainingToRecord > 0.01;
-  const showReconcileHint = invoice.status === "approved" && canPay && !settlementsFailed && hasRecordedSettlement && remainingToRecord <= 0.01;
+  // Pas de saisie sans reste dû connu : tant que les règlements ne sont pas lus, `settlements` vaut [] et le solde entier serait proposé.
+  const showRecordPaymentButton = invoice.status === "approved" && canPay && settlementsData !== undefined && !settlementsFailed && remainingToRecord > 0.01;
+  const showReconcileHint = invoice.status === "approved" && canPay && settlementsData !== undefined && !settlementsFailed && hasRecordedSettlement && remainingToRecord <= 0.01;
 
   const validationHint = scope === "parts"
     ? "Validation pièces atelier : Admin, Magasinier ou Chef d'atelier."

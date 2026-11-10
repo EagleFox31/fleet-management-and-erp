@@ -296,6 +296,14 @@ describe("rendu: factures en échec affichent Indisponible, jamais 0", () => {
       expect(html).not.toContain("Aucun règlement saisi");
     });
 
+    it("règlements en chargement (ni donnée ni erreur) : aucune saisie sans reste dû connu", async () => {
+      const { default: Page } = await import("@/pages/procurement/invoices/[id]");
+      const html = render(Page, [[detailKey, { data: DETAIL }]]);
+      expect(html).not.toContain('data-testid="button-record-payment"');
+      expect(html).not.toContain('data-testid="button-record-payment-sidebar"');
+      expect(html).not.toContain('data-testid="button-record-settlement-inline"');
+    });
+
     it("témoin : règlements lus, boutons présents et montant rapproché 12 345", async () => {
       const { default: Page } = await import("@/pages/procurement/invoices/[id]");
       const html = render(Page, [[detailKey, { data: DETAIL }], [settlementsKey, { data: SETTLEMENTS }]]);

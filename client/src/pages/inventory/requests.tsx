@@ -256,7 +256,7 @@ export default function PartRequestsIndex() {
   const requestsFailed = requestsView.kind === "error";
 
   // Récupérer les OT en attente de pièces (pour le magasinier)
-  const { data: awaitingPartsData, isLoading: isLoadingAwaitingParts, isError: awaitingPartsError, error: awaitingPartsErr, refetch: refetchAwaitingParts } = useQuery<{
+  const awaitingPartsQuery = useQuery<{
     workOrders: AwaitingPartsWorkOrder[];
     total: number;
   }>({
@@ -265,8 +265,10 @@ export default function PartRequestsIndex() {
     refetchInterval: isSupplyOperator ? 5000 : false,
     refetchIntervalInBackground: true,
   });
-
-  const awaitingPartsWorkOrders = awaitingPartsData?.workOrders || [];
+  const { isLoading: isLoadingAwaitingParts, refetch: refetchAwaitingParts } = awaitingPartsQuery;
+  // Échec sans données : encart et « Réessayer », jamais une liste vide qui passe pour « aucun OT ».
+  const awaitingPartsView = queryView(awaitingPartsQuery);
+  const awaitingPartsWorkOrders = readyData(awaitingPartsView, undefined)?.workOrders ?? [];
 
   // Filtrer les demandes
   const filteredRequests = requests.filter((request: PartRequirement) => {
@@ -612,8 +614,8 @@ export default function PartRequestsIndex() {
       </div>
 
       {/* ── Awaiting parts WOs (warehouse only) ── */}
-      {isSupplyOperator && awaitingPartsError && !awaitingPartsData && (
-        <InlineQueryError error={awaitingPartsErr} fallback="Les OT en attente de pièces sont momentanément indisponibles." onRetry={() => void refetchAwaitingParts()} />
+      {isSupplyOperator && awaitingPartsView.kind === "error" && (
+        <InlineQueryError data-testid="awaiting-parts-error" error={awaitingPartsView.error} isRetrying={awaitingPartsView.isRetrying} fallback="Les OT en attente de pièces sont momentanément indisponibles." onRetry={() => void refetchAwaitingParts()} />
       )}
 
       {isSupplyOperator && awaitingPartsWorkOrders.length > 0 && (

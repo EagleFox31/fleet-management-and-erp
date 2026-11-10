@@ -13,7 +13,7 @@ const SCREENS: Array<{ path: string; shows: RegExp[] }> = [
   { path: "client/src/pages/maintenance/fault-catalog.tsx", shows: [/isError/, /<InlineQueryError/] },
   { path: "client/src/pages/dashboard.tsx", shows: [/scheduledError/, /Indisponible/] },
   { path: "client/src/pages/workshop-manager/dashboard.tsx", shows: [/complianceError/, /Indisponible/] },
-  { path: "client/src/pages/inventory/requests.tsx", shows: [/awaitingPartsError/, /OT en attente de pièces sont momentanément indisponibles/] },
+  { path: "client/src/pages/inventory/requests.tsx", shows: [/awaitingPartsView\.kind === "error"/, /OT en attente de pièces sont momentanément indisponibles/] },
 ];
 
 describe("lectures alertes et maintenance : l'écran montre l'erreur, jamais 0", () => {

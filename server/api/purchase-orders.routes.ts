@@ -7,7 +7,7 @@ import { moduleLogger } from "../lib/logger";
 import { isAnyUser } from "../middleware/auth";
 import { PURCHASE_ORDER_STATUSES } from "@shared/constants/purchase-order-statuses";
 import { withLogContext } from "../lib/error-log-context";
-import { PROCUREMENT_ROLES } from "@shared/constants/roles";
+import { PROCUREMENT_ROLES, PURCHASE_ORDER_PARTS_SCOPE_ROLES } from "@shared/constants/roles";
 import { bodyIdSchema } from "@shared/contracts/common";
 
 const log = moduleLogger("purchase-orders");
@@ -15,7 +15,7 @@ const log = moduleLogger("purchase-orders");
 const router = Router();
 type PurchaseOrderScope = "parts" | "non_parts";
 
-const PARTS_SCOPE_ROLES = ["admin", "warehouse", "secretary"] as const;
+const PARTS_SCOPE_ROLES = PURCHASE_ORDER_PARTS_SCOPE_ROLES;
 const NON_PARTS_SCOPE_ROLES = ["admin", "warehouse", "secretary", "logistics"] as const;
 const ANY_PROCUREMENT_ROLES = PROCUREMENT_ROLES;
 const DELIVERY_RECORD_ROLES = ["admin", "warehouse"] as const;

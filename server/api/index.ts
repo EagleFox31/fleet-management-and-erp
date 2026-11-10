@@ -65,6 +65,7 @@ import clientStatementRoutes from "./client-statement.routes";
 import missionOperationsRoutes from "./mission-operations.routes";
 import tariffGridRoutes from "./tariff-grid.routes";
 import treasuryRoutes from "./treasury.routes";
+import cappedStatisticsRoutes from "./capped-statistics.routes";
 import paymentInstrumentsRoutes from "./payment-instruments.routes";
 import incidentsRoutes from "./incidents.routes";
 import driverBreakdownsRoutes from "./driver-breakdowns.routes";
@@ -178,6 +179,9 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(statisticsCostGuardRoutes);
   // Lectures argent/stock sorties de routes.ts : erreurs par le gestionnaire central (requestId).
   apiRouter.use(moneyReadsRoutes);
+  // Statistiques OT, rapport d'inventaire, OT en attente de pièces : lectures complètes (plus de plafond à 50),
+  // sorties de routes.ts. Monté avant tout routeur /work-orders pour que awaiting-parts passe avant /:id.
+  apiRouter.use(cappedStatisticsRoutes);
   // Valuation du stock (/api/parts/statistics) : garde, la route reste dans routes.ts.
   apiRouter.use(stockValuationGuardRoutes);
   // Brouillon d'acquisition : liste blanche des champs, statut jamais lu du corps.
