@@ -25,6 +25,12 @@ export type SessionCheck =
 
 export const SESSION_CHECK_TIMEOUT_MS = 10_000;
 
+function isUserPayload(body: unknown): body is User {
+  if (body === null || typeof body !== "object") return false;
+  const id = (body as { id?: unknown }).id;
+  return typeof id === "number" && Number.isInteger(id) && id > 0;
+}
+
 export async function checkSession(
   fetchImpl: typeof fetch = fetch,
   timeoutMs: number = SESSION_CHECK_TIMEOUT_MS,
@@ -38,13 +44,17 @@ export async function checkSession(
     // Une redirection (portail captif) ou une 200 qui n'est pas du JSON est une réponse HTTP, pas un
     // réseau coupé : jamais de restauration hors ligne sur elle.
     if (response.redirected) return { status: "unreachable", httpStatus: response.status };
-    let user: User;
+    let body: unknown;
     try {
-      user = (await response.json()) as User;
+      body = await response.json();
     } catch {
       return { status: "unreachable", httpStatus: response.status };
     }
-    return { status: "authenticated", user };
+    // Un 200 JSON qui n'est pas un utilisateur (`{}`, `null`, id absent ou non entier > 0) est traité comme un
+    // 200 non JSON : réponse HTTP inexploitable, jamais `authenticated` (useAuth ferait `setUser({})`) et jamais
+    // de restauration hors ligne (`httpStatus` présent).
+    if (!isUserPayload(body)) return { status: "unreachable", httpStatus: response.status };
+    return { status: "authenticated", user: body };
   } catch {
     return { status: "unreachable" };
   } finally {
