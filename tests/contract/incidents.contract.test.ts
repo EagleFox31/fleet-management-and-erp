@@ -71,7 +71,10 @@ describe("déclaration de panne", { timeout: 180000 }, () => {
     const adminUser = await createTestUser({ role: "admin" });
     const accountantUser = await createTestUser({ role: "accountant" });
     const client = await createTestUser({ role: "client" });
-    ids.userIds.push(driverUser.id, manager.id, client.id, adminUser.id, accountantUser.id);
+    const viewerUser = await createTestUser({ role: "viewer" });
+    const secretaryUser = await createTestUser({ role: "secretary" });
+    const logisticsUser = await createTestUser({ role: "logistics" });
+    ids.userIds.push(driverUser.id, manager.id, client.id, adminUser.id, accountantUser.id, viewerUser.id, secretaryUser.id, logisticsUser.id);
     const own = await createTestVehicle();
     const other = await createTestVehicle();
     ids.vehicleIds.push(own.id, other.id);
@@ -88,9 +91,8 @@ describe("déclaration de panne", { timeout: 180000 }, () => {
     missionIds.push(mission.id);
     await db.insert(assignments).values({ missionId: mission.id, vehicleId: own.id, driverId: driver.id, status: "accepted" });
 
-    const [driverCookie, managerCookie, clientCookie, adminCookie, accountantCookie] = await Promise.all(
-      [driverUser, manager, client, adminUser, accountantUser].map((u) => login(u.username)),
-    );
+    const [driverCookie, managerCookie, clientCookie, adminCookie, accountantCookie, viewerCookie, secretaryCookie, logisticsCookie] =
+      await Promise.all([driverUser, manager, client, adminUser, accountantUser, viewerUser, secretaryUser, logisticsUser].map((u) => login(u.username)));
     const payload = (vehicleId: number) => ({ vehicleId, description: "Voyant moteur allumé", severity: "high" });
 
     expect((await call("POST", null, payload(own.id))).status).toBe(401);
@@ -113,6 +115,12 @@ describe("déclaration de panne", { timeout: 180000 }, () => {
     expect((await call("POST", adminCookie, payload(other.id))).status).toBe(201);
     expect((await call("POST", managerCookie, payload(other.id))).status).toBe(403);
     expect((await call("POST", accountantCookie, payload(own.id))).status).toBe(403);
+    expect((await call("POST", viewerCookie, payload(own.id))).status).toBe(403);
+
+    // Véhicule inexistant : 404, pas une violation de clé étrangère (500).
+    const missing = await call("POST", adminCookie, payload(2_000_000_000));
+    expect(missing.status).toBe(404);
+    expect(missing.body).toMatchObject({ code: "NOT_FOUND" });
 
     // Listes: le chauffeur ne voit que les siennes, le personnel voit tout, filtre par statut.
     const mine = await call("GET", driverCookie);
@@ -125,5 +133,11 @@ describe("déclaration de panne", { timeout: 180000 }, () => {
     expect(all.status).toBe(200);
     expect(all.body.length).toBeGreaterThanOrEqual(2);
     expect((await call("GET", managerCookie, undefined, "/api/incidents?status=bogus")).status).toBe(400);
+
+    // Lecture réservée à l'atelier, à la logistique et au chauffeur : comptable, lecteur, secrétariat → 403.
+    expect((await call("GET", logisticsCookie)).status).toBe(200);
+    for (const cookie of [accountantCookie, viewerCookie, secretaryCookie]) {
+      expect((await call("GET", cookie)).status).toBe(403);
+    }
   });
 });
