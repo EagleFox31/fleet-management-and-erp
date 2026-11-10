@@ -1,0 +1,12 @@
+## 2026-11-10T21:42:42+01:00 — GPS V1 téléphone : e2e à deux comptes, preuve par la trame WebSocket
+- **Statut** : fait (PR brouillon, test seul, aucun code produit modifié)
+- **Quoi** : nouveau `e2e/21-gps-two-accounts.spec.ts`. Chauffeur affecté (contexte A, géolocalisation simulée), deux logisticiens (contextes B et C), un chauffeur non affecté (contexte D).
+  - Le chauffeur confirme le départ, partage sa position ; la logistique B reçoit la trame `vehicle_position_updated` (mission concernée) puis affiche la position, sous 5 s. Ni `/api/vehicle-positions` ni `/track` n'ont de `refetchInterval` (staleTime 60 s) : l'affichage ne vient pas du polling.
+  - La logistique B enregistre les points A/B ; la logistique C reçoit `mission_updated { geo: true }`, relit `/track`, affiche les deux hubs.
+  - Chauffeur non affecté : POST de positions 403, GET `/track` 403, aucune ligne ajoutée.
+  - Livraison confirmée : le suivi s'arrête, aucun POST après, aucune ligne ajoutée même après déplacement et `online`.
+- **Comment tester (QA)** : serveur local `FEATURE_FLAGS=gps=on` sur une base locale (jamais le `.env` racine), puis `E2E_BASE_URL=... E2E_SKIP_ACCOUNT_CHECK=1 node node_modules/@playwright/test/cli.js test e2e/20-driver-gps-phone.spec.ts e2e/21-gps-two-accounts.spec.ts`. Données `E2E-GPS2C-`, purgées avant et après.
+- **Preuve rouge/vert** : `broadcastVehiclePositionUpdated` forcé à `return false` : le spec 21 échoue à l'attente de la trame (timeout 5 s). Code restauré : vert, délais mesurés trame 51 à 76 ms, affichage 120 à 125 ms, points A/B jusqu'à l'affichage chez le second logisticien 640 à 676 ms. Deux passages consécutifs verts (idempotent).
+- **Pourquoi** : AGENTS.md section 3 : un test temps réel joue deux rôles et vérifie la trame, pas seulement l'écran.
+- **RAIDER** : D (non-régression rouge prouvée), I (purge avant/après), E (aucun secret). Ne s'appliquent pas : R, A, Retroactive.
+- **Reste / risques** : géolocalisation simulée, pas de capteur réel ; diffusion limitée à une par véhicule et par 30 s (le spec n'en attend qu'une).

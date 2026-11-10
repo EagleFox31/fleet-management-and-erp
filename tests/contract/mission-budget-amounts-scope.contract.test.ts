@@ -128,7 +128,8 @@ for (const flag of ["on", "off"] as const) {
 
     it("GET /:id/fuel-records et /:id/launch-readiness : technicien sans montant ni solde, verdicts conservés", async () => {
       const fuel = await call("GET", `/api/missions/${missionId}/fuel-records`, { actor: "technician" });
-      expect(fuel.status).toBe(200);
+      // Liste des pleins fermée au technicien (moindre donnée) : aucun montant ni solde, 403.
+      expect(fuel.status).toBe(403);
       expect(leaked(fuel.body), "fuel-records").toEqual([]);
       const ready = await call("GET", `/api/missions/${missionId}/launch-readiness`, { actor: "technician" });
       expect(ready.status, JSON.stringify(ready.body)).toBe(200);

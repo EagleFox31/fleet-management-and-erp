@@ -3723,3 +3723,26 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/unit/client/offline-queue-core.test.ts` : « bascule de compte pendant la boucle : aucun envoi après le changement », 409 propriétaire classé auth, route non protégée jamais envoyée, envoi trop ancien non rejoué, plafond des 409 « en cours ».
   - `tests/unit/client/offline-registry-routes.test.ts` : chaque type du registre doit correspondre à une route protégée. Rouge sur les anciennes déclarations (3 échecs).
 - **Leçon généralisée** : un contrôle d'identité avant une boucle ne couvre pas la boucle, et le cookie est partagé entre onglets. L'identité se porte par requête et se vérifie côté serveur à chaque écriture, pas une fois côté client. Ne rejouer automatiquement qu'une écriture dont la protection contre le doublon est prouvée par un test, pas par une déclaration.
+
+## 2026-11-10 — Une identité persistée hors ligne est une brèche de cloison en puissance (V5b-3b)
+
+- **Contexte** : restaurer la lecture au démarrage sans réseau exige de savoir qui était connecté, donc de persister une identité (#56 l'interdisait en mémoire seule).
+- **Risque** : un marqueur mêlé au cache de lecture survit à une purge de cache ou est prolongé par chaque relance ; un compte B pourrait relire la copie de A.
+- **Prévention vérifiable** : `tests/unit/client/offline-resume*.test.ts` (clés persistées figées, TTL 72 h / +1 ms refusé, échéance jamais prolongée hors ligne, purge sur chaque événement de session, 401 distinct de réseau coupé, profil non chauffeur refusé, compte B sans accès à la copie de A).
+- **Leçon généralisée** : toute identité persistée vit dans un stockage séparé, ne contient que l'indispensable, s'éteint par échéance fixe jamais repoussée hors ligne, et ne remplace jamais la preuve serveur.
+- **Complément (révocation)** : une révocation qui dépend d'un stockage faillible a besoin d'une trace de repli indépendante (pierre tombale localStorage, `{ userId }` seulement) qui bloque la restauration et fait retenter la purge. Prévention : bloc « pierre tombale » de `tests/unit/client/offline-resume-storage.test.ts`.
+- **Complément (audit #671)** : un mode restauré hors ligne est une identité NON prouvée ; tout chemin qui agit au nom du compte (rejeu de la file) doit exiger un état explicite « session confirmée dans cette page », posé par le serveur. Une réponse HTTP (200 non JSON, redirection) n'est jamais un réseau coupé. Une prolongation de droit ne se déduit que d'une réponse réseau de session. Prévention : `tests/unit/client/offline-resume-replay.test.ts`, `session-check.test.ts`.
+
+## 2026-11-10 — Contrats « no tests » dans un worktree à `node_modules` en jonction (lot carburant, #675)
+
+- **Contexte** : le worktree `fm-acct` partage le `node_modules` du dépôt principal par une jonction Windows. Les contrats y étaient lancés depuis Git Bash (`cd /c/...`).
+- **Symptôme** : « Vitest failed to find the current suite. This is a bug in Vitest », pointé sur le `afterAll` de `tests/support/setup-contract.ts`, puis `Tests no tests`. Le contrat sain de référence (`fuel-record-cancel`) échouait pareil : le défaut ne venait donc pas du test écrit. Juste avant, un « relation "users" does not exist » venait d'une autre cause (base `fleet_test` vide sur le conteneur) : il fallait les séparer.
+- **Cause racine** : le runner vitest est chargé sous deux chemins différents. D'un côté, la racine du projet en `c:` minuscule (répertoire courant de Git Bash) à travers la jonction. De l'autre, le chemin réel résolu par Node en `C:`. Cela fait deux instances du module : le `afterAll` du fichier d'installation s'adresse à une instance qui n'a pas de suite en cours.
+- **Classification** : outillage local, faux échec. Aucun impact sur la CI (Linux, `npm ci`, pas de jonction). Coût : plusieurs relances avant le diagnostic, et le risque de conclure à un test cassé ou de « corriger » le harnais.
+- **Résolution** : mesuré sur le même contrat (14 tests).
+  - Depuis `c:` sans option : échec.
+  - Depuis `C:/...` sans option : vert.
+  - Depuis `c:` avec `node --preserve-symlinks` : vert.
+  - `resolve.preserveSymlinks: true` dans `vitest.contract.config.ts` : échec, donc écarté.
+- **Prévention** : consigne dans `tests/README.md` (section Postgres local) avec le symptôme exact et les deux parades. Prévention documentaire seulement : un garde automatique (refuser de démarrer si la racine vitest et le chemin réel du runner diffèrent par la casse ou par une jonction) reste à faire si le piège revient.
+- **Leçon généralisée** : sous Windows, un même fichier peut avoir plusieurs orthographes (casse de la lettre de lecteur, jonction, lien). Un outil qui identifie ses modules par chemin peut alors en charger deux copies. Devant une erreur qui touche aussi un test de référence sain, comparer d'abord le chemin réel et le chemin d'appel avant de soupçonner le code.

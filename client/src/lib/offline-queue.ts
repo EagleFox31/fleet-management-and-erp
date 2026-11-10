@@ -7,8 +7,8 @@ import { resolveClientFeatureFlags } from "@/hooks/use-feature";
 import { toast } from "@/hooks/use-toast";
 import { clientLogger } from "@/lib/logger";
 import { checkSession } from "@/lib/session-check";
-import { getActiveOfflineUserId, subscribeActiveOfflineUser } from "@/lib/offline-user-scope";
-import { offlineScope } from "@/lib/offline-kv";
+import { getActiveOfflineUserId, isOfflineSessionConfirmed, subscribeActiveOfflineUser } from "@/lib/offline-user-scope";
+import { offlineResume, offlineScope } from "@/lib/offline-kv";
 import { getOfflineAction, requiredFlagsOf } from "@/lib/offline-action-registry";
 import { createLockProvider, type LockManagerLike } from "@/lib/offline-locks";
 import { sessionChannel } from "@/lib/offline-session-channel";
@@ -124,7 +124,11 @@ async function sendEntry(entry: QueueEntry): Promise<SendOutcome> {
 async function checkOwner(): Promise<OwnerCheck> {
   const session = await checkSession();
   if (session.status === "authenticated") return { kind: "user", id: session.user.id };
-  if (session.status === "anonymous") return { kind: "unauthorized" };
+  if (session.status === "anonymous") {
+    // Session refusée par le serveur : plus de reprise hors ligne pour cet appareil.
+    void offlineResume.clear().catch((err) => clientLogger.warn("Marqueur de reprise non effacé", { err }));
+    return { kind: "unauthorized" };
+  }
   return { kind: "unreachable" };
 }
 
@@ -357,6 +361,8 @@ export async function replayOfflineQueue(options: ReplayOptions = {}): Promise<R
   try {
     if (typeof navigator !== "undefined" && navigator.onLine === false) return { status: "skipped", reason: "empty" };
     if (getActiveOfflineUserId() === null) return { status: "skipped", reason: "no-user" };
+    // Compte rouvert depuis le marqueur : pas d'envoi au nom de ce compte avant que /me ait confirmé la session.
+    if (!isOfflineSessionConfirmed()) return { status: "skipped", reason: "no-user" };
     if (!(await ensureOfflineWritesFlag())) return { status: "skipped", reason: "empty" };
 
     const result = await offlineQueue.replay(options);

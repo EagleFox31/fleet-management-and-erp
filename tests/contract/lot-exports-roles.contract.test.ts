@@ -118,7 +118,12 @@ describe("garde isStaff au montage (T-62)", { timeout: 60000 }, () => {
       const res = await get(path, "client");
       expect(res.status).toBe(403);
     });
-    for (const role of ["technician", "driver"] as const) {
+    if (path === "/api/clients") {
+      it(`${path} : driver 403 (fiches clients hors périmètre chauffeur)`, async () => {
+        expect((await get(path, "driver")).status).toBe(403);
+      });
+    }
+    for (const role of path === "/api/clients" ? (["technician", "logistics"] as const) : (["technician", "driver"] as const)) {
       it(`${path} : ${role} n'est ni 401 ni 403`, async () => {
         const res = await get(path, role);
         expect([401, 403]).not.toContain(res.status);

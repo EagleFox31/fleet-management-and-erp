@@ -39,7 +39,10 @@ export async function startContractActors<A extends string>(actors: Record<A, Te
     const response = await fetch(baseUrl + path, {
       method,
       headers: {
-        ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
+        // Toute écriture /api exige un type JSON ou multipart (require-json-content-type), corps ou non.
+        ...(options.body !== undefined || ["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase())
+          ? { "Content-Type": "application/json" }
+          : {}),
         ...(options.actor ? { Cookie: cookies.get(options.actor)! } : {}),
         ...options.headers,
       },

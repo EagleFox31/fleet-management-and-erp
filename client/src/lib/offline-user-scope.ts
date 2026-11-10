@@ -101,6 +101,8 @@ type ActiveUserListener = (userId: number | null, previous: number | null) => vo
 
 interface ActiveUserState {
   userId: number | null;
+  /** Compte rouvert depuis le marqueur, que `/api/auth/me` n'a pas encore confirmé dans cette page. */
+  unconfirmed?: number | null;
   listeners: Set<ActiveUserListener>;
 }
 
@@ -119,6 +121,7 @@ export function setActiveOfflineUserId(userId: number | null): { previous: numbe
   const previous = state.userId;
   if (previous === userId) return { previous, changed: false };
   state.userId = userId;
+  if (userId !== (state.unconfirmed ?? null)) state.unconfirmed = null;
   for (const listener of Array.from(state.listeners)) {
     try {
       listener(userId, previous);
@@ -127,6 +130,24 @@ export function setActiveOfflineUserId(userId: number | null): { previous: numbe
     }
   }
   return { previous, changed: true };
+}
+
+/** À appeler AVANT `setActiveOfflineUserId` à la restauration : l'écouteur de la file doit déjà voir l'état. */
+export function markOfflineSessionUnconfirmed(userId: number): void {
+  state.unconfirmed = userId;
+}
+
+/** Posé par un `/api/auth/me` authentifié ou une connexion. Vrai si ce compte n'était pas encore confirmé. */
+export function confirmOfflineSession(userId: number): boolean {
+  const was = state.unconfirmed === userId;
+  state.unconfirmed = null;
+  return was;
+}
+
+/** Faux pour un compte rouvert hors ligne tant que le serveur ne l'a pas confirmé : aucun rejeu. */
+export function isOfflineSessionConfirmed(): boolean {
+  const pending = state.unconfirmed ?? null;
+  return pending === null || pending !== state.userId;
 }
 
 export function subscribeActiveOfflineUser(listener: ActiveUserListener): () => void {
@@ -217,6 +238,13 @@ export interface OfflineReadProfile {
   id: string;
   /** Drapeaux qui doivent tous être allumés ; aucun = toujours actif. */
   flags: readonly string[];
+  /** Rôles servis par ce profil. */
+  roles: readonly string[];
+  /**
+   * Vrai : l'appareil peut rouvrir la lecture de ce profil au démarrage sans réseau, sur le
+   * marqueur `offline-resume` (voir `offline-resume.ts`). Faux par défaut : opt-in explicite.
+   */
+  resumeOffline: boolean;
   select<T extends CachedQueryLike>(queries: readonly T[]): T[];
 }
 
@@ -256,6 +284,8 @@ function withData<T extends CachedQueryLike>(q: T, data: unknown): T {
 export const DRIVER_READ_PROFILE: OfflineReadProfile = {
   id: "driver",
   flags: ["driver-offline", "offline-writes"],
+  roles: ["driver"],
+  resumeOffline: true,
   select<T extends CachedQueryLike>(queries: readonly T[]): T[] {
     const anchor = queries.find(
       (q) => q.queryKey.length === 1 && q.queryKey[0] === DRIVER_ME_PATH && q.state.status === "success",
@@ -277,6 +307,8 @@ export const DRIVER_READ_PROFILE: OfflineReadProfile = {
 export const TECHNICIAN_READ_PROFILE: OfflineReadProfile = {
   id: "technician",
   flags: [],
+  roles: ["technician"],
+  resumeOffline: false,
   select: selectTechnicianQueries,
 };
 

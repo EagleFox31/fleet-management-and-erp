@@ -30,7 +30,7 @@ async function sessionOf(role: TestUserRole) {
   return res.headers.get("set-cookie")!.split(";")[0];
 }
 
-const refresh = (cookie?: string) => fetch(baseUrl + PATH, { method: "POST", headers: cookie ? { Cookie: cookie } : {} });
+const refresh = (cookie?: string) => fetch(baseUrl + PATH, { method: "POST", headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) } });
 const cacheRow = async () => (await db.select().from(fleetKpiCache).where(eq(fleetKpiCache.id, 1)))[0];
 
 /** Ligne de cache visiblement fausse : un recalcul doit l'écraser. */
