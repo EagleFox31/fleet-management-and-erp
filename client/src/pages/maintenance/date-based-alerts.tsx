@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,7 +21,8 @@ import {
 import { format, differenceInDays } from "date-fns";
 import { fr } from "date-fns/locale";
 import { useAuth } from "@/hooks/useAuth";
-import { fetchAllWorkOrders } from "@/lib/fetch-all-work-orders";
+import { ALL_VEHICLES_UNREADABLE, useAllVehicles } from "@/hooks/use-all-vehicles";
+import { useAllWorkOrders } from "@/hooks/use-all-work-orders";
 import { InlineQueryError } from "@/components/ui/inline-query-error";
 
 interface Vehicle {
@@ -64,24 +65,21 @@ export default function DateBasedAlertsPage() {
   // Créer un OT relève de l'atelier (même règle que le serveur).
   const canCreateWorkOrder = user?.role === 'admin' || user?.role === 'workshop_manager';
 
-  const { data: vehiclesData, isLoading: loadingVehicles } = useQuery<any>({
-    queryKey: ["/api/vehicles"]
-  });
+  // Flotte complète : sans `limit`, `/api/vehicles` ne rend que les 10 véhicules les plus récents,
+  // et les échéances des autres n'apparaissaient jamais.
+  const vehiclesQuery = useAllVehicles();
+  const loadingVehicles = vehiclesQuery.isLoading;
 
   // OT existants, pour savoir si une alerte a déjà son OT : liste complète (toutes les pages).
   // Lue sur les 300 derniers seulement, un OT plus ancien était ignoré, l'alerte redevenait
   // « à faire » et la génération en masse pouvait créer un doublon. Même préfixe de clé : les
   // invalidations et le rechargement après création s'appliquent.
-  const workOrdersQuery = useQuery<any[]>({
-    queryKey: ["/api/work-orders", "all"],
-    queryFn: () => fetchAllWorkOrders(),
-    staleTime: 0,
-  });
+  const workOrdersQuery = useAllWorkOrders();
   // Tant que la liste complète n'est pas lue avec succès, on ne sait pas quelles alertes ont
   // déjà leur OT : aucune création, jamais « à faire » par défaut.
   const workOrdersKnown = workOrdersQuery.status === "success";
 
-  const vehicles = (vehiclesData as any)?.vehicles || [];
+  const vehicles = vehiclesQuery.data ?? [];
 
   // Correspondance type d'alerte → fragment de titre en BD
   const TYPE_TO_TITLE: Record<string, string> = {
@@ -337,6 +335,16 @@ export default function DateBasedAlertsPage() {
             }
           </Button>}
         </div>
+        {vehiclesQuery.isError && (
+          <div className="px-6 pb-3">
+            <InlineQueryError
+              error={vehiclesQuery.error}
+              fallback={ALL_VEHICLES_UNREADABLE}
+              onRetry={() => vehiclesQuery.refetch()}
+              isRetrying={vehiclesQuery.isFetching}
+            />
+          </div>
+        )}
         {workOrdersQuery.isError && (
           <div className="px-6 pb-3">
             <InlineQueryError

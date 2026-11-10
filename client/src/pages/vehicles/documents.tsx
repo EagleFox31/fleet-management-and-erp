@@ -32,6 +32,8 @@ import { TabIcon } from "@/lib/premium-tab-icons";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import { ALL_VEHICLES_UNREADABLE, useAllVehicles } from "@/hooks/use-all-vehicles";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { DOCUMENT_RENEWAL_VIEWER_ROLES } from "@shared/constants/roles";
 import { appToast } from "@/lib/app-toast";
 import { userMessageOf } from "@/lib/api-error";
@@ -287,10 +289,9 @@ export default function VehicleDocumentsPage() {
     refetchOnMount: "always",
   });
 
-  const { data: vehiclesData } = useQuery<{ vehicles: Vehicle[]; total: number }>({
-    queryKey: ["/api/vehicles"],
-  });
-  const vehicles = vehiclesData?.vehicles ?? [];
+  // Flotte complète : sans `limit`, `/api/vehicles` ne rend que 10 véhicules (libellés et filtre tronqués).
+  const vehiclesQuery = useAllVehicles<Vehicle>();
+  const vehicles = vehiclesQuery.data ?? [];
 
   const vehicleById = useMemo(() => {
     const map = new Map<number, { registrationNumber: string; brand?: string | null; model?: string | null }>();
@@ -490,6 +491,15 @@ export default function VehicleDocumentsPage() {
               </Select>
             </div>
           </div>
+
+          {vehiclesQuery.isError && (
+            <InlineQueryError
+              error={vehiclesQuery.error}
+              fallback={ALL_VEHICLES_UNREADABLE}
+              onRetry={() => vehiclesQuery.refetch()}
+              isRetrying={vehiclesQuery.isFetching}
+            />
+          )}
 
           <KpiGrid columns={4} withTopBorder={false} className="gap-2 grid-cols-2 xl:grid-cols-4">
             <KpiTile

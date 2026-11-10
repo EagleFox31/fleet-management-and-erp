@@ -6,26 +6,27 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Truck, Search, AlertTriangle, CheckCircle, Wrench, Fuel, Calendar } from "lucide-react";
 import { Link } from "wouter";
+import { ALL_VEHICLES_UNREADABLE, useAllVehicles } from "@/hooks/use-all-vehicles";
+import { ALL_WORK_ORDERS_UNREADABLE, useAllWorkOrders } from "@/hooks/use-all-work-orders";
 import { InlineQueryError } from "@/components/ui/inline-query-error";
 
 export default function TechnicianVehiclesPage() {
   const [searchTerm, setSearchTerm] = React.useState("");
   
-  const { data: vehiclesData, isLoading } = useQuery<any>({
-    queryKey: ['/api/vehicles'],
-  });
+  // Flotte et OT complets : sans `limit`, `/api/vehicles` rend 10 véhicules et
+  // `/api/work-orders` 50 OT. La liste du technicien s'arrêtait aux 10 véhicules les plus
+  // récents, et l'OT ouvert d'un véhicule n'était pas vu s'il était plus ancien que les 50 derniers.
+  const vehiclesQuery = useAllVehicles();
+  const isLoading = vehiclesQuery.isLoading;
 
   const { data: maintenanceSchedules, error: maintenanceError, refetch: refetchMaintenance } = useQuery<any>({
     queryKey: ['/api/maintenance-schedules'],
   });
 
-  const { data: workOrdersData } = useQuery<any>({
-    queryKey: ['/api/work-orders'],
-  });
+  const workOrdersQuery = useAllWorkOrders();
 
-  // Extract arrays from response objects
-  const vehicles = (vehiclesData as any)?.vehicles || [];
-  const workOrders = (workOrdersData as any)?.workOrders || [];
+  const vehicles = vehiclesQuery.data ?? [];
+  const workOrders = workOrdersQuery.data ?? [];
 
   if (isLoading) {
     return (
@@ -99,6 +100,22 @@ export default function TechnicianVehiclesPage() {
         </div>
       </div>
 
+      {vehiclesQuery.isError && (
+        <InlineQueryError
+          error={vehiclesQuery.error}
+          fallback={ALL_VEHICLES_UNREADABLE}
+          onRetry={() => vehiclesQuery.refetch()}
+          isRetrying={vehiclesQuery.isFetching}
+        />
+      )}
+      {workOrdersQuery.isError && (
+        <InlineQueryError
+          error={workOrdersQuery.error}
+          fallback={ALL_WORK_ORDERS_UNREADABLE}
+          onRetry={() => workOrdersQuery.refetch()}
+          isRetrying={workOrdersQuery.isFetching}
+        />
+      )}
       {maintenanceError && (
         <InlineQueryError
           error={maintenanceError}
@@ -212,7 +229,7 @@ export default function TechnicianVehiclesPage() {
         })}
       </div>
 
-      {filteredVehicles.length === 0 && (
+      {!vehiclesQuery.isError && filteredVehicles.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-8">
             <Truck className="h-12 w-12 text-muted-foreground mb-4" />

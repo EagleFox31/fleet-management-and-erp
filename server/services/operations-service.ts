@@ -297,14 +297,22 @@ export class OperationsService {
       return acc;
     }, {} as Record<string, any>);
 
-    const results = Object.values(byDestination);
+    // `estimatedFuelCost` : nom exact de la somme ; `totalRevenue` (même valeur) est déprécié, voir getStatsByClient.
+    const results = Object.values(byDestination).map((row) => ({ ...row, estimatedFuelCost: row.totalRevenue }));
     log.debug({ count: results.length }, "Statistiques par destination calculées");
 
     return results;
   }
 
   /**
-   * Statistiques globales par client
+   * Statistiques globales par client.
+   *
+   * `estimatedFuelCost` = somme des carburants estimés des missions. Ce n'est PAS un chiffre
+   * d'affaires (décision du 2026-11-09) : le CA réel viendra des factures clients.
+   * Dépréciés, servis une version encore pour les anciens écrans puis retirés :
+   * - `totalRevenue` : même valeur que `estimatedFuelCost` sous un nom trompeur ;
+   * - `margin`, `marginPercentage` : tirés de ce faux chiffre d'affaires.
+   * Les trois et l'alias sont masqués hors lecteurs du budget (`redactMissionBudget`, Q19).
    */
   async getStatsByClient() {
     log.debug("Calcul des statistiques par client");
@@ -332,7 +340,10 @@ export class OperationsService {
         totalMissions: Number(r.missions),
         totalFuelConsumed: parseFloat(r.totalFuel || "0"),
         totalFuelCost: fuelCost,
+        estimatedFuelCost: revenue,
+        /** @deprecated même valeur que `estimatedFuelCost`, ce n'est pas un chiffre d'affaires. */
         totalRevenue: revenue,
+        /** @deprecated tiré de `totalRevenue`. */
         margin,
         marginPercentage: revenue > 0 ? (margin / revenue * 100) : 0,
       };

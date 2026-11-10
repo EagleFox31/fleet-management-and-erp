@@ -6,11 +6,7 @@ import { WorkOrderTable } from "@/components/maintenance/work-order-table";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Clock, PlayCircle, CheckCircle, XCircle, Package, Wrench, Download, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { exportWorkOrdersToPDF } from "@/lib/pdf-export";
-import { fetchAllWorkOrders } from "@/lib/fetch-all-work-orders";
-import { reportErrorContext } from "@/lib/fetch-all-pages";
-import { userMessageOf } from "@/lib/api-error";
-import { clientLogger } from "@/lib/logger";
+import { runWorkOrdersExport } from "@/lib/work-orders-export";
 import { RoleExplanationCard } from "@/components/RoleExplanationCard";
 import { cn } from "@/lib/utils";
 import { HeaderCard, KpiGrid, KpiTile } from "@/components/design-system";
@@ -53,20 +49,7 @@ export default function WorkOrdersIndex() {
     exportingRef.current = true;
     setIsExporting(true);
     try {
-      const workOrders = await fetchAllWorkOrders();
-      if (workOrders.length === 0) {
-        toast({ title: "Aucun ordre de travail à exporter", description: "Le rapport n'a pas été généré." });
-        return;
-      }
-      await exportWorkOrdersToPDF(workOrders);
-      toast({ title: "Export réussi", description: "Le rapport des ordres de travail a été téléchargé." });
-    } catch (error) {
-      clientLogger.error("Export PDF des ordres de travail non généré", reportErrorContext(error));
-      toast({
-        title: "Erreur d'export",
-        description: userMessageOf(error, "Une erreur est survenue lors de l'export."),
-        variant: "destructive",
-      });
+      await runWorkOrdersExport(toast);
     } finally {
       exportingRef.current = false;
       setIsExporting(false);
