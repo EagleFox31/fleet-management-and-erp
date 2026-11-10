@@ -226,6 +226,14 @@ describe("POD : dépôt par la logistique", { timeout: 180000 }, () => {
     expect(await rowsOf(mission.id)).toHaveLength(0);
   });
 
+  it("mission inexistante : 404 et aucun dossier créé sur le disque", async () => {
+    const missingId = 2_000_000_000;
+    expect(fs.existsSync(podDir(missingId))).toBe(false);
+    const res = await upload(missingId, [{ name: "bon.pdf", type: "application/pdf", data: tinyPdf() }]);
+    expect(apiErrorProblems(res.status, res.body, 404)).toEqual([]);
+    expect(fs.existsSync(podDir(missingId))).toBe(false);
+  });
+
   it("aucun fichier joint : 400", async () => {
     const mission = await newMission();
     const res = await upload(mission.id, []);
@@ -288,6 +296,23 @@ describe("POD : lecture", { timeout: 180000 }, () => {
     expect(response.headers.get("content-disposition")).toMatch(/^inline/);
     expect(response.headers.get("content-security-policy")).toBe("sandbox");
     expect((await response.text()).startsWith("%PDF-")).toBe(true);
+  });
+
+  it("nom d'origine non ASCII ou avec CR/LF : 200 et Content-Disposition valide, cache interdit", async () => {
+    const mission = await newMission();
+    for (const name of ["reçu été 日本.pdf", "a\r\nX-Injected: 1.pdf"]) {
+      const seeded = await seedPodFile(mission.id, actors.userIdOf("logistics"));
+      await db.update(missionPodFiles).set({ originalName: name }).where(eq(missionPodFiles.id, seeded.id));
+      const response = await fetch(`${actors.baseUrl}/api/missions/${mission.id}/pod-files/${seeded.id}`, {
+        headers: { Cookie: actors.cookies.get("logistics")! },
+      });
+      expect(response.status).toBe(200);
+      const disposition = response.headers.get("content-disposition") ?? "";
+      expect(disposition).toMatch(/^inline; filename="[\x20-\x7e]+"/);
+      expect(response.headers.get("x-injected")).toBeNull();
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
+      await response.arrayBuffer();
+    }
   });
 
   it("fileId d'une autre mission : 404", async () => {

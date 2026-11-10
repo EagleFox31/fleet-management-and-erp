@@ -96,8 +96,20 @@ const upload = multer({
     }
     cb(refusedFormat(file));
   },
-  limits: { fileSize: POD_MAX_FILE_BYTES, files: POD_MAX_FILES },
+  limits: { fileSize: POD_MAX_FILE_BYTES, files: POD_MAX_FILES, fields: 5, fieldSize: 1024 },
 }).array("files", POD_MAX_FILES);
+
+/** La mission doit exister avant multer : sinon un 404 laisse un dossier vide `mission-<id>` sur le disque. */
+async function ensureMissionExists(req: Request, _res: Response, next: NextFunction) {
+  try {
+    const missionId = parseMissionId(req.params.id);
+    const [mission] = await db.select({ id: missions.id }).from(missions).where(eq(missions.id, missionId)).limit(1);
+    if (!mission) throw new AppError(404, "Mission non trouvée.");
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
 
 function uploadFiles(req: Request, res: Response, next: NextFunction) {
   upload(req, res, (error: unknown) => {
@@ -111,7 +123,8 @@ function uploadFiles(req: Request, res: Response, next: NextFunction) {
             : "Dépôt de fichiers invalide.";
       return next(new AppError(400, message, { cause: error }));
     }
-    next(error);
+    // Multipart tronqué ou mal formé : une erreur du client, pas un 500.
+    next(error instanceof AppError ? error : new AppError(400, "Dépôt de fichiers invalide.", { cause: error }));
   });
 }
 
@@ -138,10 +151,17 @@ function readHead(stored: string): Uint8Array {
   }
 }
 
-function sha256Of(stored: string): string {
+/** Empreinte en flux : un fichier de 10 Mo (jusqu'à 100 Mo par dépôt) ne bloque plus la boucle d'événements. */
+function sha256Of(stored: string): Promise<string> {
   const file = uploadedFileCandidates(stored).find(() => true);
-  if (!file) throw new AppError(400, UNREADABLE_UPLOAD_MESSAGE);
-  return createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  if (!file) return Promise.reject(new AppError(400, UNREADABLE_UPLOAD_MESSAGE));
+  return new Promise((resolve, reject) => {
+    const hash = createHash("sha256");
+    fs.createReadStream(file)
+      .on("error", reject)
+      .on("data", (chunk) => hash.update(chunk))
+      .on("end", () => resolve(hash.digest("hex")));
+  });
 }
 
 const publicFile = (row: {
@@ -161,7 +181,7 @@ const publicFile = (row: {
 });
 
 // POST /api/missions/:id/pod-files
-router.post("/:id/pod-files", authorize([...MISSION_STATUS_ROLES]), uploadFiles, async (req, res, next) => {
+router.post("/:id/pod-files", authorize([...MISSION_STATUS_ROLES]), ensureMissionExists, uploadFiles, async (req, res, next) => {
   const files = (req.files as Express.Multer.File[] | undefined) ?? [];
   let recorded = false;
   try {
@@ -169,14 +189,15 @@ router.post("/:id/pod-files", authorize([...MISSION_STATUS_ROLES]), uploadFiles,
     if (files.length === 0) throw new AppError(400, "Aucun fichier reçu : joignez une photo ou un PDF.");
 
     // Le contenu réel doit correspondre au type déclaré : sinon rien n'est gardé.
-    const prepared = files.map((file) => {
+    const prepared: { file: Express.Multer.File; mime: UploadMime; sha256: string }[] = [];
+    for (const file of files) {
       const head = readHead(file.path);
       const detected = detectUploadMime(head);
       if (detected !== file.mimetype) {
         throw new AppError(400, isHeic(head) ? HEIC_UPLOAD_MESSAGE : UNREADABLE_UPLOAD_MESSAGE);
       }
-      return { file, mime: detected, sha256: sha256Of(file.path) };
-    });
+      prepared.push({ file, mime: detected, sha256: await sha256Of(file.path) });
+    }
 
     const userId = req.user!.id;
     const result = await db.transaction(async (tx) => {
@@ -319,6 +340,7 @@ router.get("/:id/pod-files/:fileId", async (req, res, next) => {
 
     const inline = ALLOWED_MIMES.includes(row.mime);
     res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Cache-Control", "private, no-store");
     if (inline) res.setHeader("Content-Security-Policy", "sandbox");
     const headers = {
       "Content-Type": row.mime,
