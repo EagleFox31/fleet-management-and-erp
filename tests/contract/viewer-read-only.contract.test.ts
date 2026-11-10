@@ -28,7 +28,8 @@ import { matchesAllowedWrite } from "@shared/constants/roles";
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 // apiRouter +2 (#675) : POST /api/fuel-records et PATCH /api/fuel-records/:id, gardes chaînées en relais
 // qui masquent la réponse de leur doublon de routes.ts. Même clé que ce doublon : total inchangé.
-const EXPECTED = { apiRouter: 150, registerRoutes: 38, horsApi: 0, total: 182 };
+// apiRouter +1 et total +1 (#670) : avoirs clients.
+const EXPECTED = { apiRouter: 151, registerRoutes: 38, horsApi: 0, total: 183 };
 
 /** `/api/x/:id(\d+)/y` → `/api/x/1/y` : la garde refuse avant toute lecture de l'objet. */
 const concrete = (path: string) => path.replace(/:[A-Za-z_]+(\([^)]*\))?\??/g, "1");
