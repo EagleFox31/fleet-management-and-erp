@@ -256,6 +256,13 @@ describe("couche 3 : table des écrans satellites", () => {
     expect(satelliteTargetsOf("mission_budget_updated", {}).keys.some((k) => k.includes("launch-readiness"))).toBe(false);
   });
 
+  it("dépôt de POD : la liste des POD de la seule mission touchée et les factures à émettre", () => {
+    const { keys } = satelliteTargetsOf("mission_pod_uploaded", { missionId: 9 });
+    expect(keys).toEqual(expect.arrayContaining(["/api/missions/9/pod-files", "/api/billing/pending-invoices"]));
+    expect(keys.filter((k) => k.includes("pod-files"))).toEqual(["/api/missions/9/pod-files"]);
+    expect(satelliteTargetsOf("mission_pod_uploaded", {}).keys.some((k) => k.includes("pod-files"))).toBe(false);
+  });
+
   it("sans identifiant dans la charge, repli sur toutes les fiches véhicule (trop plutôt que pas assez)", () => {
     for (const payload of [undefined, {}, { vehicleId: "abc" }, { vehicleId: 0 }]) {
       expect(satelliteTargetsOf("vehicle_mileage_updated", payload).prefixes).toContain("/api/vehicles/");

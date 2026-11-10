@@ -59,6 +59,16 @@ export const IDEMPOTENCY_ROUTES: readonly IdempotencyRoute[] = [
     ignoreFeatureFlag: true,
     inProgressMessage: "Opération en cours ou au résultat incertain : vérifiez le stock avant de réessayer.",
   },
+  // Panne déclarée par le chauffeur (V5b-1) : un rejeu ne doit créer ni second incident ni second OT.
+  // Clé jamais reprise ni libérée sur une issue incertaine : l'incident a pu être validé, un réessai
+  // reçoit 409 `IDEMPOTENCY_IN_PROGRESS` ou la réponse enregistrée, jamais une seconde exécution.
+  {
+    method: "POST",
+    pattern: /^\/driver\/breakdowns$/,
+    staleSeconds: null,
+    keepKeyOnUncertainOutcome: true,
+    inProgressMessage: "Cette déclaration est déjà en cours d'envoi. Elle apparaîtra dès que le serveur l'aura enregistrée.",
+  },
 ];
 
 /** Clé acceptée : 1 à 255 caractères ASCII imprimables sans espace (UUID conseillé). */

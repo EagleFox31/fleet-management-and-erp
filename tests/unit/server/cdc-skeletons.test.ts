@@ -31,11 +31,12 @@ describe("journal d'audit des ressources CDC", () => {
 });
 
 describe("garde d'idempotence (socle)", () => {
-  it("lot #10b (statut de mission, kilométrage) + ajustement de stock, qui garde sa clé", () => {
+  it("lot #10b (statut de mission, kilométrage), stock et panne chauffeur, qui gardent leur clé", () => {
     expect(IDEMPOTENCY_ROUTES.map((r) => `${r.method} ${r.pattern.source}`)).toEqual([
       "PUT ^\\/missions\\/\\d+\\/status$",
       "PUT ^\\/vehicles\\/\\d+\\/mileage$",
       "POST ^\\/parts\\/\\d+\\/update-stock$",
+      "POST ^\\/driver\\/breakdowns$",
     ]);
     for (const route of IDEMPOTENCY_ROUTES.slice(0, 2)) {
       expect(route.staleSeconds).toBeUndefined();
@@ -43,6 +44,9 @@ describe("garde d'idempotence (socle)", () => {
       expect(route.ignoreFeatureFlag).toBeUndefined();
     }
     expect(IDEMPOTENCY_ROUTES[2]).toMatchObject({ staleSeconds: null, keepKeyOnUncertainOutcome: true, ignoreFeatureFlag: true });
+    // Panne du chauffeur (V5b-1) : clé gardée, mais soumise au drapeau offline-writes.
+    expect(IDEMPOTENCY_ROUTES[3]).toMatchObject({ staleSeconds: null, keepKeyOnUncertainOutcome: true });
+    expect(IDEMPOTENCY_ROUTES[3].ignoreFeatureFlag).toBeUndefined();
   });
 
   it("transmet une route non listée, drapeau coupé ou allumé", () => {

@@ -3519,6 +3519,21 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - le contrat serveur des noms servis est figé par `tests/contract/operations-budget-scope.contract.test.ts` (`totalFuelCost`, et `estimatedFuelCost` avec T2).
 - **Leçon généralisée** : un chiffre affiché lit un champ que le contrat serveur sert réellement, sous un type nommé et non `any`. Un repli `|| 0` sur une donnée lue est interdit : un champ absent est « inconnu », jamais zéro. Avant de brancher une tuile, vérifier le nom du champ dans la réponse réelle, par un test de contrat ou un test de rendu sur une réponse de la forme servie.
 
+## 2026-11-10 — insertMissionSchema laissait POST /api/missions poser une fausse preuve de livraison (lot POD)
+
+- **Contexte** : à la préparation de la preuve de livraison obligatoire avant facture, relecture des chemins qui écrivent `missions.pod_url` et `missions.pod_uploaded_at`. `insertMissionSchema` (dérivé de la table) ne les omettait pas : un `POST /api/missions` portant `podUrl` et `podUploadedAt` les enregistrait tels quels. Le PATCH était déjà protégé par la liste blanche `updateMissionSchema`.
+- **Cause racine** :
+  - un schéma d'insertion dérivé de la table est une liste noire : toute colonne qui n'est pas omise est écrivable par le corps de la requête ;
+  - la route de création omettait `podUploadedAt` localement dans `createMissionSchema`, mais pas `podUrl` ; la protection était posée route par route, pas au schéma commun ;
+  - aucun test ne posait une colonne dérivée de l'état (preuve, horodatage) dans un corps de création pour vérifier qu'elle était ignorée.
+- **Classification** : défaut de validation d'entrée (affectation de masse), sans exploitation connue. Latent tant que la preuve ne conditionnait rien ; critique dès qu'elle conditionne la facturation.
+- **Résolution** :
+  - `podUrl` et `podUploadedAt` sortent de `insertMissionSchema` ; ils ne sont plus écrits que par `POST /api/missions/:id/pod-files`, qui vérifie le contenu réel du fichier ;
+  - la preuve vit dans `mission_pod_files` (ajouts seulement), `generateInvoiceFromMission` refuse (409) sans mission livrée ni fichier.
+- **Prévention vérifiée** :
+  - `tests/contract/mission-pod.contract.test.ts`, deux premiers cas : un POST avec `podUrl` et `podUploadedAt`, puis un PATCH avec `podUrl`, laissent les deux colonnes à `NULL` (rouge constaté avant le correctif, vert après) ;
+  - `tests/contract/client-invoice-generate.contract.test.ts` : 409 sans POD, 409 mission non livrée.
+- **Leçon généralisée** : un champ qui prouve un fait métier (preuve, validation, horodatage d'étape) ne s'écrit que par la route qui établit ce fait. Il est omis du schéma d'insertion commun, jamais seulement d'un schéma de route, et un test de contrat vérifie qu'un corps qui le porte est ignoré.
 ## 2026-11-10 — Garde de doublon d'OT préventif limitée aux OT « en attente » (V5a)
 
 - **Contexte** : le contrôle `checkDateBasedMaintenance` passe de la route manuelle à l'ordonnanceur (plusieurs passages par jour). La garde de `createDateBasedWorkOrder` ne regardait que les OT « en attente ». L'échéance du véhicule (`vehicles.nextMaintenanceDate`) n'avance pas à la clôture de l'OT. Near miss : trouvé en revue avant le premier passage en production, aucun OT en double créé.
@@ -3531,6 +3546,31 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/unit/server/preventive-date-check.test.ts` : table des états d'OT de `isDateBasedDueAlreadyHandled`.
 - **Leçon généralisée** : tout contrôle d'idempotence est revu état par état quand son appelant devient périodique ; une garde se teste sur chaque état possible de l'objet qu'elle protège, pas sur le cas qui l'a motivée.
 
+## 2026-11-10 — Journal d'audit contourné par un préfixe /API en majuscules (near miss, #631)
+
+- **Contexte** : le journal d'audit des écritures (`auditWrites`) retirait le préfixe `/api` par un remplacement sensible à la casse. Express route `/API/...` comme `/api/...`. Near miss : trouvé en relecture de #631 avant fusion, aucune écriture non journalisée constatée en production.
+- **Cause racine** : le chemin était normalisé en deux endroits (décodage et minuscules dans `matchAuditRule`, retrait du préfixe ailleurs), avec des règles de casse différentes ; une écriture authentifiée pouvait échapper au journal et donc à l'historique des ordres de travail.
+- **Classification** : contournement d'un contrôle transversal par normalisation incohérente du chemin ; quasi-incident évité en revue.
+- **Résolution** : une seule fonction `normalizeAuditPath` (décodage, minuscules, préfixe `api` retiré sans casse, barre finale retirée) sert `matchAuditRule` et `wantsResponseId` ; `auditWrites` lui passe l'URL brute.
+- **Prévention vérifiée** :
+  - `tests/contract/work-order-audit-lifecycle.contract.test.ts`, cas « prefixe /API en majuscules » : échoue avec l'ancien middleware (1 test sur 2 en échec) ;
+  - `tests/unit/server/audit-config.test.ts` : `/API`, `/Api`, `/%61pi` et `wantsResponseId`.
+- **Leçon généralisée** : un contrôle transversal qui lit le chemin le normalise comme le routeur le fait (décodage, casse, préfixe) en un seul point ; on teste le contournement par la casse et l'encodage, pas seulement le chemin nominal.
+
+### Suite (2026-11-10, même PR) — trois contournements de plus, trouvés par la revue sécurité
+
+- **Contexte** : après le correctif `/API`, trois écritures s'exécutaient encore sans entrée d'audit : `PATCH /api//technician/work-orders/62/status`, `POST /api/work-orders//62/parts` (barre doublée), `PATCH http://h/api/... HTTP/1.1` (forme absolue de la ligne de requête), et `PATCH .../0x3e/status`, `.../%2062/...`, `.../6.2e1/...` (id lu par `z.coerce.number()`, que le motif `(\d+)` de l'audit ne voit pas).
+- **Cause racine** : « normaliser comme le routeur » avait été compris comme une fonction de chaînes testée sur une liste de chaînes. Or c'est Express qui décide de ce qui s'exécute : chaque montage (`app.use("/api")`, `apiRouter.use("/work-orders")`) absorbe une barre en trop, `req.originalUrl` garde `schéma://hôte` en forme absolue, et c'est la route qui lit l'id, avec sa propre règle. « Une seule fonction » ne suffisait donc pas : le point unique était juste, mais il ne connaissait pas toutes les façons dont le routeur accepte un chemin.
+- **Classification** : même famille que l'entrée ci-dessus (contrôle transversal contourné par un chemin non canonique) ; erreur répétée dans la même PR, d'où un contrôle plus fort : test sur un vrai routeur et garde-fou de code.
+- **Résolution** :
+  - `auditedPath` retire la forme absolue et réduit les barres répétées ; le chemin journalisé est ce chemin canonique ;
+  - les ids de route se lisent par `parseRouteId` ou `routeIdSchema` (chiffres seuls), 400 sinon : sept routes ou schémas de paramètres lisaient `idSchema` (technicien, droit de sortie de stock, suivi de mission, QHSE, grille tarifaire, contrôle qualité, déverrouillage de compte, export et historique d'ordre de travail, coût véhicule) ;
+  - `server/routes.ts` (gelé) : les deux derniers `parseInt(req.params.id)` (`PATCH /api/users/:id`, `.../toggle`, journalisés) passent à `routeIdOrNaN` en place ; `parseInt("0x3e")` valait 62.
+- **Prévention vérifiée** :
+  - `tests/unit/server/audit-writes-router.test.ts` : routeur Express monté comme `server/app.ts` ; propriété « réponse < 400 ⇒ une entrée sur l'objet 62 » pour `//`, `/api/x//62`, forme absolue, casse, encodage ; ids `0x3e`, `%2062`, `6.2e1` refusés en 400. Échoue sur l'ancien middleware (5 tests) ;
+  - même fichier : capture de l'id de création (absent, texte, décimal, nul, corps null) ;
+  - `tests/unit/server/route-id-parse-hygiene.test.ts` : aucun `idSchema` sur `req.params`, ni dans un `*ParamsSchema`, cliquet `parseInt`/`Number` de `server/routes.ts` ramené à 0 (liste gelée : `shared/contracts/fuel-vouchers.ts`, verrouillé par un autre chantier) ; le test détecte les sept fichiers d'avant correctif.
+- **Leçon généralisée** : un contrôle qui reconnaît une requête par son chemin se prouve contre le vrai routeur, pas contre une liste de chaînes : barres absorbées par les montages, forme absolue, casse, encodage, et règle de lecture de l'id par la route. Si le contrôle et la route lisent l'id différemment, l'écart est un contournement. À défaut de déclarer le contrôle comme une route Express (cas de `retired-vehicle-write-guard`), on aligne la lecture de l'id sur une règle unique et stricte.
 ## 2026-11-10 — Interblocage annulation de plein / solde du budget : verrous pris dans l'ordre inverse (V1)
 
 - **Contexte** : V1, pleins validés immuables. Le test de course « solde du budget et annulation d'un plein en parallèle » a échoué avec `deadlock detected`. Trouvé avant la fusion, aucune donnée touchée.

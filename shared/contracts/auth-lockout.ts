@@ -7,7 +7,7 @@
  * (défaut D-06 : 5 échecs, 15 minutes).
  */
 import { z } from "zod";
-import { idSchema, isoDateTimeSchema } from "./common";
+import { routeIdSchema, isoDateTimeSchema } from "./common";
 
 export const LOCKOUT_DEFAULTS = { maxAttempts: 5, lockMinutes: 15 } as const;
 
@@ -15,7 +15,7 @@ export type LockoutConfig = { maxAttempts: number; lockMinutes: number };
 
 export const LOCKED_USERS_PATH = "/api/admin/users/locked";
 export const unlockUserPath = (id: number) => `/api/admin/users/${id}/unlock`;
-export const unlockUserParamsSchema = z.object({ id: idSchema });
+export const unlockUserParamsSchema = z.object({ id: routeIdSchema });
 
 /** Corps de la réponse 429 : le contrat d'erreur commun, plus `lockedUntil`. */
 export const lockedResponseSchema = z.object({

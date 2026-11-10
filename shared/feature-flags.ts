@@ -22,7 +22,7 @@ export type FeatureFlagDefinition = {
 export const FEATURE_FLAGS = {
   exports: { level: "must", defaultEnabled: true, label: "Exports PDF, Excel et Word" },
 
-  "work-order-audit-trail": { level: "should", defaultEnabled: false, label: "Historique d'un ordre de travail" },
+  "work-order-audit-trail": { level: "should", defaultEnabled: true, label: "Historique d'un ordre de travail" },
   "vehicle-cost-summary": { level: "should", defaultEnabled: false, label: "Coût d'un véhicule" },
   "tire-movements": { level: "should", defaultEnabled: true, label: "Mouvements de pneus" },
   "part-requirement-receive": { level: "should", defaultEnabled: false, label: "Réception signée des pièces" },
@@ -44,6 +44,8 @@ export const FEATURE_FLAGS = {
   "maintenance-report": { level: "should", defaultEnabled: false, label: "Rapport de maintenance" },
   "excel-import": { level: "should", defaultEnabled: false, label: "Import Excel" },
   "technician-offline": { level: "should", defaultEnabled: false, label: "Saisie hors ligne du technicien" },
+  // Appli chauffeur hors ligne (V5b). Exige `offline-writes` : sans lui, aucun effet.
+  "driver-offline": { level: "should", defaultEnabled: false, label: "Saisie hors ligne du chauffeur" },
   // Protection serveur contre les doublons des écritures rejouées (lot #10b), indépendante du rôle.
   // Un drapeau d'écran hors ligne (technician-offline, driver-offline) exige celui-ci.
   "offline-writes": { level: "should", defaultEnabled: false, label: "Écritures rejouables sans doublon" },
