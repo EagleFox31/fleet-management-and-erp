@@ -40,3 +40,20 @@ export function offlineBannerText(input: {
   const until = formatOfflineStamp(input.expiresAt);
   return until ? `Hors ligne, données du ${stamp}, session hors ligne jusqu'au ${until}` : `Hors ligne, données du ${stamp}`;
 }
+
+/**
+ * Bandeau de la consultation seule (reprise hors ligne sans utilisateur confirmé). Il ne dépend pas de
+ * `navigator.onLine` : serveur injoignable avec un réseau « en ligne » donne le même écran. Sans date de
+ * lecture, seule l'échéance est citée.
+ */
+export function offlineReadOnlyBannerText(input: {
+  updatedAt: number | undefined | null;
+  expiresAt: number | undefined | null;
+}): string {
+  const stamp = formatOfflineStamp(input.updatedAt);
+  const until = formatOfflineStamp(input.expiresAt);
+  const parts = ["Hors ligne."];
+  if (stamp) parts.push(`Données du ${stamp}.`);
+  parts.push(until ? `Consultation seule jusqu'au ${until}.` : "Consultation seule.");
+  return parts.join(" ");
+}

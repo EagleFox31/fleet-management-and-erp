@@ -1,7 +1,9 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { clientLogger } from "@/lib/logger";
+import { purgeGpsBuffersOfOthers } from "@/lib/gps-tracking";
 import { applyRestoredQueries } from "@/lib/offline-restore";
 import { pendingServerLogout } from "@/lib/pending-logout";
+import { purgeBrowserUserState } from "@/lib/form-draft-storage";
 import {
   DRIVER_READ_PROFILE,
   confirmOfflineSession,
@@ -13,6 +15,7 @@ import {
 import { offlineResume, offlineScope } from "@/lib/offline-kv";
 import { resumeFlagNames, type FlagSnapshot } from "@/lib/offline-resume";
 import { resolveClientFeatureFlags } from "@/hooks/use-feature";
+import type { OfflineGrantInfo } from "@/lib/session-check";
 import { sessionChannel, type SessionChannelMessage } from "@/lib/offline-session-channel";
 import {
   announceKeptSends,
@@ -75,6 +78,9 @@ export function activateOfflineUser(
     return;
   }
   sessionGeneration += 1;
+  // Tampons GPS : même règle que la file hors ligne (S1). L'époque avance, les envois en vol de l'ancien
+  // compte s'arrêtent, ses tampons sont détruits (jamais envoyés sous le cookie du nouveau).
+  purgeGpsBuffersOfOthers(userId);
   queryClient.clear();
   setActiveOfflineUserId(userId);
   // Autre compte : le marqueur de reprise de l'ancien ne doit pas survivre (celui du nouveau est écrit après /me).
@@ -123,6 +129,13 @@ export async function purgeOfflineSession(
     complete = false;
     clientLogger.error("Purge du stockage hors ligne en échec", { err });
   }
+  return complete;
+}
+
+/** Même purge locale que la déconnexion (`auth.ts`) : magasins hors ligne, cache TanStack, état navigateur. */
+async function purgeAfterLogout(queryClient: QueryClient): Promise<boolean> {
+  const complete = await purgeOfflineSession(queryClient);
+  purgeBrowserUserState();
   return complete;
 }
 
@@ -216,19 +229,40 @@ export function isContactProof(queryKey: readonly unknown[]): boolean {
  * lecture est restaurée (marquée périmée, relue dès que le réseau répond). LECTURE SEULE : la file
  * d'envois n'est PAS rejouée (le compte reste « non confirmé » pour `replayOfflineQueue`) tant qu'un
  * `/api/auth/me` authentifié ou une connexion n'a pas confirmé la session dans cette page ; le cookie
- * reste l'unique preuve d'identité. Renvoie vrai si un compte a été rouvert.
+ * reste l'unique preuve d'identité. Renvoie la reprise accordée (compte, profil de lecture, échéance), `null` sinon.
+ *
+ * Avant d'ouvrir quoi que ce soit, le marqueur est confronté au stockage : si la copie de lecture n'appartient
+ * pas au compte du marqueur (enveloppe d'un autre propriétaire, ou copie d'un autre compte sur l'appareil),
+ * tout est purgé et rien n'est rouvert.
  */
-export async function resumeOfflineRead(queryClient: QueryClient, now: number = Date.now()): Promise<boolean> {
-  if (getActiveOfflineUserId() !== null) return false;
+export async function resumeOfflineRead(queryClient: QueryClient, now: number = Date.now()): Promise<OfflineGrantInfo | null> {
+  if (getActiveOfflineUserId() !== null) return null;
   // Une déconnexion (autre onglet) ou un changement de compte pendant les lectures asynchrones annule la reprise.
   const generation = sessionGeneration;
   const grant = await offlineResume.read(now);
-  if (!grant) return false;
-  if (getActiveOfflineUserId() !== null || generation !== sessionGeneration) return false;
+  if (!grant) return null;
+  if (getActiveOfflineUserId() !== null || generation !== sessionGeneration) return null;
+  let ownership: "ok" | "foreign";
+  try {
+    ownership = await offlineScope.cacheOwnership(grant.userId);
+  } catch (err) {
+    // Propriétaire illisible : on ne rouvre pas ce qu'on ne sait pas attribuer.
+    clientLogger.warn("Propriétaire du cache hors ligne illisible, reprise refusée", { err });
+    return null;
+  }
+  if (getActiveOfflineUserId() !== null || generation !== sessionGeneration) return null;
+  if (ownership === "foreign") {
+    clientLogger.warn("Cache hors ligne d'un autre compte que le marqueur de reprise, purge locale");
+    await purgeOfflineSession(queryClient);
+    return null;
+  }
   markOfflineSessionUnconfirmed(grant.userId);
+  // Même règle que activateOfflineUser (S1) : l'appareil est rouvert au nom de ce compte, les tampons GPS
+  // d'un autre compte (laissés par une session expirée) sont détruits et l'époque avance.
+  purgeGpsBuffersOfOthers(grant.userId);
   setActiveOfflineUserId(grant.userId);
   await restoreQueryClientFromIndexedDB(queryClient, grant.isFlagOn, now);
-  return true;
+  return { userId: grant.userId, profile: grant.profile, expiresAt: grant.expiresAt };
 }
 
 /** Message d'un autre onglet. Exporté pour être testé sans canal réel. */
@@ -370,8 +404,10 @@ export function setupOfflinePersistence(queryClient: QueryClient): () => void {
   // Retour du réseau : déconnexion différée d'abord, puis rejeu de la file. La barrière
   // du resync temps réel est levée dans tous les cas (voir offline-replay-gate.ts).
   const handleOnline = () => {
+    // La purge locale est refaite avant d'effacer le repère : une purge restée incomplète à la déconnexion
+    // ne doit pas être oubliée parce que le serveur a fini par répondre. Repère gardé si elle échoue encore.
     void pendingServerLogout
-      .flush()
+      .flush({ beforeClear: () => purgeAfterLogout(queryClient) })
       .then((outcome) => (outcome !== "pending" ? replayOnReconnect() : undefined))
       .finally(() => releaseReplayGate());
   };
