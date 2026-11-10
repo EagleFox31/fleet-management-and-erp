@@ -13,6 +13,7 @@ export const VEHICLE_ACTIVITY_SOURCES: readonly { table: string; column: string;
   { table: "fuel_records", column: "vehicle_id", label: "pleins" },
   { table: "treasury_entries", column: "vehicle_id", label: "écritures de trésorerie" },
   { table: "assignments", column: "vehicle_id", label: "affectations de mission" },
+  { table: "assignments", column: "trailer_id", label: "affectations de mission (remorque)" },
   { table: "mission_operations", column: "trailer_vehicle_id", label: "missions (remorque)" },
   { table: "vehicle_tires", column: "vehicle_id", label: "pneus montés" },
   { table: "tire_rotations", column: "vehicle_id", label: "rotations de pneus" },

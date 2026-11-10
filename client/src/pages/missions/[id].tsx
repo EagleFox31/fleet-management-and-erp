@@ -24,6 +24,7 @@ import { PremiumTabsNav, AlertModal, PremiumDataTable, type PremiumDataTableColu
 import { TabIcon } from "@/lib/premium-tab-icons";
 import { extractMissionActualRoadExpensesHT } from "@shared/constants/management-mission-profitability";
 import { MISSION_MANAGER_ROLES, canRoleSetMissionStatus } from "@shared/constants/roles";
+import { isTrailerVehicleType } from "@shared/constants/assignments";
 import { isApiError, userMessageOf } from "@/lib/api-error";
 import { useFuelPrice } from "@/hooks/use-fuel-price";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
@@ -559,6 +560,7 @@ export default function MissionDetailsPage() {
     specialInstructions: "",
     vehicleId: "",
     driverId: "",
+    trailerId: "",
   });
 
   const { data: mission, isLoading, isError, error } = useQuery<any>({
@@ -1162,6 +1164,7 @@ export default function MissionDetailsPage() {
           ? {
               vehicleId: Number(editForm.vehicleId),
               driverId: Number(editForm.driverId),
+              trailerId: editForm.trailerId ? Number(editForm.trailerId) : null,
             }
           : null,
       };
@@ -1997,6 +2000,7 @@ export default function MissionDetailsPage() {
       specialInstructions: mission.specialInstructions || "",
       vehicleId: mission.assignment?.vehicle?.id ? String(mission.assignment.vehicle.id) : "",
       driverId: mission.assignment?.driver?.id ? String(mission.assignment.driver.id) : "",
+      trailerId: mission.assignment?.trailer?.id ? String(mission.assignment.trailer.id) : "",
     });
     setOpenEditDialog(true);
   };
@@ -2299,6 +2303,15 @@ export default function MissionDetailsPage() {
                         </div>
                       )}
                     </div>
+                    {mission.assignment?.trailer && (
+                      <div data-testid="mission-trailer">
+                        <p className="text-xs text-gray-400 mb-1.5">Remorque</p>
+                        <div className="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2.5">
+                          <p className="text-sm font-semibold text-gray-800">{mission.assignment.trailer.registrationNumber}</p>
+                          <p className="text-xs text-gray-500">{mission.assignment.trailer.brand} {mission.assignment.trailer.model}</p>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -3451,6 +3464,24 @@ export default function MissionDetailsPage() {
                     {driver.firstName} {driver.lastName} ({driver.employeeNumber})
                   </option>
                 ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label>Remorque (facultatif)</Label>
+              <select
+                value={editForm.trailerId}
+                onChange={(e) => setEditForm((prev) => ({ ...prev, trailerId: e.target.value }))}
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+                data-testid="select-edit-trailer"
+              >
+                <option value="">Aucune remorque</option>
+                {(availableVehicles || [])
+                  .filter((vehicle: any) => isTrailerVehicleType(vehicle.vehicleType) && String(vehicle.id) !== editForm.vehicleId)
+                  .map((vehicle: any) => (
+                    <option key={vehicle.id} value={vehicle.id}>
+                      {vehicle.registrationNumber} - {vehicle.brand} {vehicle.model}
+                    </option>
+                  ))}
               </select>
             </div>
 
