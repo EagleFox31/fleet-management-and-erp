@@ -20,6 +20,9 @@ import {
 import { isCheckViolation, pgConstraintOf } from "../lib/pg-errors";
 import { broadcastVehiclePositionUpdated } from "../lib/vehicle-position-realtime";
 
+/** Points au plus par chauffeur et par mission (1 point / 5 s pendant 14 h = 10 000 ; marge pour un long trajet). */
+export const GPS_MISSION_POINTS_CAP = 50_000;
+
 export type PositionActor = { id: number; role: string };
 
 export type IngestResult = {
@@ -116,10 +119,25 @@ export async function ingestDriverPositions(
   const [previous] = await db
     .select({ lat: vehiclePositions.lat, lng: vehiclePositions.lng, recordedAt: vehiclePositions.recordedAt })
     .from(vehiclePositions)
-    .where(and(eq(vehiclePositions.missionId, missionId), sql`${vehiclePositions.recordedAt} <= ${earliest.toISOString()}::timestamptz`))
+    // Même véhicule : une mission à plusieurs affectations (A sur V1, puis B sur V2) ne compare pas
+    // la position de B à celle de A, sinon un relais ferait passer le point de B pour un saut.
+    .where(and(
+      eq(vehiclePositions.missionId, missionId),
+      eq(vehiclePositions.vehicleId, route.vehicleId),
+      sql`${vehiclePositions.recordedAt} <= ${earliest.toISOString()}::timestamptz`,
+    ))
     .orderBy(desc(vehiclePositions.recordedAt))
     .limit(1);
   const suspects = suspectPointIds(previous ?? null, accepted);
+
+  // Plafond par chauffeur et par mission : un compte (ou un téléphone qui boucle) ne remplit pas la table.
+  const [{ n }] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(vehiclePositions)
+    .where(and(eq(vehiclePositions.missionId, missionId), eq(vehiclePositions.driverId, route.driverId)));
+  if (n + accepted.length > GPS_MISSION_POINTS_CAP) {
+    throw new AppError(429, "Trop de positions enregistrées pour cette mission. Contactez la logistique.");
+  }
 
   const tuples = accepted.map(
     (p) => sql`(${route.vehicleId}, ${missionId}, ${route.driverId}, 'phone', ${actor.id}, ${p.clientPointId}::uuid, ${p.recordedAt.toISOString()}::timestamptz, ${p.lat}, ${p.lng}, ${p.accuracyM}, ${p.speedKmh}, ${p.heading}, ${suspects.has(p.clientPointId)})`,
@@ -216,7 +234,7 @@ export type MissionTrack = {
   status: string;
   pickup: { lat: number | null; lng: number | null; hubCode: string | null; address: string };
   delivery: { lat: number | null; lng: number | null; hubCode: string | null; address: string };
-  points: Array<{ id: number; recordedAt: string; lat: number; lng: number; accuracyM: number | null; speedKmh: number | null; heading: number | null; suspect: boolean }>;
+  points: Array<{ id: number; vehicleId: number; recordedAt: string; lat: number; lng: number; accuracyM: number | null; speedKmh: number | null; heading: number | null; suspect: boolean }>;
   truncated: boolean;
 };
 
@@ -230,12 +248,14 @@ export async function missionTrack(
   missionId: number,
   options: { since?: Date; limit?: number } = {},
 ): Promise<MissionTrack> {
+  let ownDriverIds: number[] | null = null;
   if (actor.role === "driver") {
     const driverIds = await driverScopeOf(actor);
     const own = driverIds && driverIds.length > 0
       ? await db.select({ id: assignments.id }).from(assignments).where(and(eq(assignments.missionId, missionId), driverLiveAssignmentFilter(driverIds))).limit(1)
       : [];
     if (own.length === 0) throw new AppError(403, OUT_OF_DRIVER_SCOPE_MESSAGE);
+    ownDriverIds = driverIds ?? null;
   }
   const [mission] = await db
     .select({
@@ -257,10 +277,13 @@ export async function missionTrack(
 
   const limit = Math.min(Math.max(options.limit ?? TRACK_MAX_POINTS, 1), TRACK_MAX_POINTS);
   const conditions = [eq(vehiclePositions.missionId, missionId)];
+  // Mission à plusieurs affectations : le chauffeur ne lit que les points relevés sous son identité.
+  if (ownDriverIds) conditions.push(inArray(vehiclePositions.driverId, ownDriverIds));
   if (options.since) conditions.push(sql`${vehiclePositions.recordedAt} > ${options.since.toISOString()}::timestamptz`);
   const rows = await db
     .select({
       id: vehiclePositions.id,
+      vehicleId: vehiclePositions.vehicleId,
       recordedAt: vehiclePositions.recordedAt,
       lat: vehiclePositions.lat,
       lng: vehiclePositions.lng,

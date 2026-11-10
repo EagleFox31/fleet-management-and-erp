@@ -1,10 +1,9 @@
 /**
  * Purge quotidienne des positions GPS (vehicle_positions), rétention configurable (30 jours par
- * défaut, `GPS_POSITION_RETENTION_DAYS`). Garde-fous : drapeau `gps` coupé, rien. La suppression
+ * défaut, `GPS_POSITION_RETENTION_DAYS`). Elle tourne même drapeau `gps` coupé : la rétention est une promesse de conservation, pas un réglage de la fonctionnalité (des positions écrites avant une coupure restent supprimées à l'échéance). La suppression
  * vit en base (`purge_vehicle_positions`), idempotente : deux instances qui passent ensemble
  * suppriment chacune ce qui reste, sans verrou nécessaire. Aucune exception vers l'appelant.
  */
-import { isFeatureEnabled } from "../lib/feature-flags";
 import { gpsPositionRetentionDays, purgeVehiclePositions } from "../lib/gps-retention";
 import { moduleLogger } from "../lib/logger";
 
@@ -13,15 +12,13 @@ const log = moduleLogger("gps-positions-purge");
 type Queryable = Parameters<typeof purgeVehiclePositions>[0];
 
 export type GpsPurgeDeps = {
-  isEnabled: () => boolean;
   retentionDays: () => number;
   client: () => Promise<Queryable>;
 };
 
-export type GpsPurgeOutcome = "disabled" | { purged: number; retentionDays: number };
+export type GpsPurgeOutcome = { purged: number; retentionDays: number };
 
 export async function runGpsPositionsPurge(deps: GpsPurgeDeps): Promise<GpsPurgeOutcome> {
-  if (!deps.isEnabled()) return "disabled";
   const retentionDays = deps.retentionDays();
   const purged = await purgeVehiclePositions(await deps.client(), retentionDays);
   if (purged > 0) log.info({ purged, retentionDays }, "positions GPS expirées supprimées");
@@ -32,7 +29,6 @@ async function productionDeps(): Promise<GpsPurgeDeps> {
   const { db } = await import("../db");
   const { sql } = await import("drizzle-orm");
   return {
-    isEnabled: () => isFeatureEnabled("gps"),
     retentionDays: () => gpsPositionRetentionDays(),
     client: async () => ({
       query: async (text: string, params: unknown[] = []) => {
@@ -48,7 +44,6 @@ async function productionDeps(): Promise<GpsPurgeDeps> {
 /** Un tick du planificateur : jamais d'exception vers l'appelant. */
 export async function gpsPositionsPurgeTick(): Promise<void> {
   try {
-    if (!isFeatureEnabled("gps")) return;
     await runGpsPositionsPurge(await productionDeps());
   } catch (err) {
     log.error({ err }, "purge des positions GPS en échec");

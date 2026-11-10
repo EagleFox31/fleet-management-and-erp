@@ -881,3 +881,10 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 - **Pourquoi** : décision du 2026-11-10 (chauffeurs informés, pas de consentement) ; Nominatim et OSRM publics exclus.
 - **Limite** : Traccar Client ne sait pas s'authentifier par cookie de session. Le format est lu, mais l'appareil réel exigera un jeton d'appareil (à décider avec le lot balises).
 - **Preuve** : voir la PR (tsc, unitaires, contrat 13 cas sur Postgres local).
+
+## 2026-11-10 — GPS V1 téléphone : correctifs d'audit sécurité de #660
+
+- **Quoi** : B1 (CSRF) : `GET /api/driver/positions` supprimé, POST en `application/json` seulement (415), `parseOsmandReport` ne lit plus la requête. B2 (mission à plusieurs affectations) : la trace d'un chauffeur est filtrée sur ses `driver_id`, le point précédent de la détection de saut sur le véhicule, chaque point de trace porte `vehicleId`. Mineurs : horodatage hors bornes (`null`, plus de 500), relevé OsmAnd passé dans `gpsPointSchema` (précision et vitesse ramenées à la borne), cap arrondi au dixième et ramené à 0 si 360 (float4), purge sans consulter le drapeau, `z.number().finite()` sur /geo, champs géo de `POST /api/missions` ignorés drapeau coupé, plafond de 50 000 points par chauffeur et par mission (429).
+- **Comment** : voir `server/api/driver-positions.routes.ts`, `server/services/vehicle-positions-service.ts`, `server/lib/gps-points.ts`. Prévention : `tests/unit/server/get-no-write-hygiene.test.ts` (liste gelée vide), règle `AGENTS.md` §10, entrée `LESSONS_LEARNED.md`.
+- **Pourquoi** : cookie `SameSite=None` sans jeton CSRF ; une trace ne doit pas fuir d'un chauffeur à l'autre sur un relais.
+- **Dette** : le plafond est un compte par paquet (une requête de plus) ; un débit par seconde (limiteur) n'est pas posé. GET et formulaire reviendront avec le jeton d'appareil (lot balises).

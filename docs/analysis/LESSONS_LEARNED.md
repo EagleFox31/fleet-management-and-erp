@@ -3683,3 +3683,16 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/unit/server/corridor-fleet.test.ts` : aucun véhicule sans mission en transit sur 30 rangs, aucune coordonnée ni progression sans source, aucune valeur de repli.
   - `tests/contract/management-dashboard-kpis.contract.test.ts` (GPS-FE-4) : sur `GET /api/management/dashboard`, véhicule sans mission en `stopped`, aucun véhicule avec coordonnée tant qu'aucune source n'existe. Rouge sur l'ancien service (1 échec), vert après.
 - **Leçon généralisée** : un champ de contrat obligatoire pousse à fabriquer une valeur quand la donnée manque. Toute donnée dont la source n'existe pas encore est optionnelle et accompagnée d'un champ qui dit d'où elle vient (ici `positionSource`) ; un repli « plausible » n'est jamais acceptable dans une réponse que lit la direction.
+
+## 2026-11-10 — Écriture déclenchable en GET avec un cookie SameSite=None (GPS V1 API, #660)
+
+- **Contexte** : le lot API des positions téléphone exposait `GET /api/driver/positions?lat=&lon=&timestamp=` (format OsmAnd) qui déposait une position, à côté du POST. L'audit sécurité de #660 l'a relevé avant tout allumage du drapeau `gps`.
+- **Cause racine** : le protocole OsmAnd/Traccar envoie ses relevés en GET ou en formulaire ; le format a été repris tel quel sans se demander qui peut émettre une telle requête. Le cookie de session est en `SameSite=None` et il n'existe pas de jeton CSRF : une image, un lien ou un formulaire d'une page tierce ouverte dans le navigateur d'un chauffeur connecté aurait écrit des positions sous son identité (pollution de la trace, plafond de points consommé).
+- **Classification** : sécurité (CSRF), near miss relevé en revue avant mise en production.
+- **Résolution** : le GET est supprimé ; `POST /api/driver/positions` et le POST par paquets refusent tout corps autre que `application/json` (415) ; `parseOsmandReport` ne lit plus la requête ; GET et formulaire reviendront avec le jeton d'appareil du lot balises.
+- **Prévention vérifiable** :
+  - `tests/unit/server/get-no-write-hygiene.test.ts` : échoue sur un `router.get` de `server/api/` qui écrit (`.insert/.update/.delete`, `ingest*`, `create*`), liste gelée vide.
+  - `tests/contract/gps-phone-api.contract.test.ts` : GET 404, formulaire / `text/plain` / sans type 415, nombre de lignes de `vehicle_positions` inchangé.
+  - Règle ajoutée à `AGENTS.md` §10.
+- **Leçon généralisée** : un protocole tiers impose son transport ; on ne l'adopte pas avant d'avoir nommé qui peut émettre la requête. Sans jeton CSRF, une écriture exige POST et `application/json` (le navigateur envoie alors une requête préalable CORS), et le client qui ne sait pas faire attend un jeton d'appareil plutôt que d'ouvrir le cookie.
+

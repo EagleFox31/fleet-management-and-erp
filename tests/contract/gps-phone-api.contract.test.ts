@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { resetVehiclePositionBroadcasts } from "../../server/lib/vehicle-position-realtime";
@@ -148,13 +148,21 @@ describe("ingestion par paquets", { timeout: 120000 }, () => {
 });
 
 describe("format OsmAnd / Traccar Client", { timeout: 120000 }, () => {
-  it("GET en query (vitesse en nœuds) et POST JSON, rejeu sans doublon", async () => {
+  const postRaw = (path: string, contentType: string | null, body: string, actor: Actor = "driverA") =>
+    fetch(session.baseUrl + path, {
+      method: "POST",
+      headers: { ...(contentType ? { "Content-Type": contentType } : {}), Cookie: session.cookies.get(actor)! },
+      body,
+    });
+  const positionCount = async () => (await db.select().from(vehiclePositions).where(eq(vehiclePositions.missionId, missionId))).length;
+
+  it("POST JSON (Traccar Client et OsmAnd à plat), vitesse convertie, rejeu sans doublon", async () => {
     const ts = Math.floor((Date.now() - 90_000) / 1000);
-    const url = `/api/driver/positions?id=tel1&lat=4.06&lon=9.71&timestamp=${ts}&speed=10&bearing=180&accuracy=12`;
-    const get = await session.call("GET", url, { actor: "driverA" });
-    expect(get.status, JSON.stringify(get.body)).toBe(200);
-    expect(get.body.accepted).toBe(1);
-    const again = await session.call("GET", url, { actor: "driverA" });
+    const flat = { id: "tel1", lat: 4.06, lon: 9.71, timestamp: ts, speed: 10, bearing: 180, accuracy: 12 };
+    const first = await session.call("POST", "/api/driver/positions", { actor: "driverA", body: flat });
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    expect(first.body.accepted).toBe(1);
+    const again = await session.call("POST", "/api/driver/positions", { actor: "driverA", body: flat });
     expect(again.body).toMatchObject({ accepted: 0, duplicates: 1 });
     const [row] = await db.select().from(vehiclePositions).where(eq(vehiclePositions.lat, 4.06));
     expect(row.speedKmh).toBeCloseTo(18.52, 1);
@@ -167,9 +175,97 @@ describe("format OsmAnd / Traccar Client", { timeout: 120000 }, () => {
     expect(json.body.accepted).toBe(1);
   });
 
-  it("illisible : 400 ; non chauffeur : 403", async () => {
-    expect((await session.call("GET", "/api/driver/positions?id=x", { actor: "driverA" })).status).toBe(400);
-    expect((await session.call("GET", `/api/driver/positions?lat=4&lon=9&timestamp=${Math.floor(Date.now() / 1000)}`, { actor: "admin" })).status).toBe(403);
+  it("B1 CSRF : GET d'écriture supprimé (404), formulaire ou texte (415), aucune ligne écrite", async () => {
+    const before = await positionCount();
+    const ts = Math.floor(Date.now() / 1000);
+    const get = await session.call("GET", `/api/driver/positions?id=x&lat=4.5&lon=9.5&timestamp=${ts}`, { actor: "driverA" });
+    expect(get.status).toBe(404);
+    const form = await postRaw("/api/driver/positions", "application/x-www-form-urlencoded", `lat=4.5&lon=9.5&timestamp=${ts}`);
+    expect(form.status).toBe(415);
+    const query = await postRaw(`/api/driver/positions?lat=4.5&lon=9.5&timestamp=${ts}`, "application/x-www-form-urlencoded", "");
+    expect(query.status).toBe(415);
+    const text = await postRaw("/api/driver/positions", "text/plain", JSON.stringify({ lat: 4.5, lon: 9.5, timestamp: ts }));
+    expect(text.status).toBe(415);
+    const none = await postRaw("/api/driver/positions", null, "");
+    expect(none.status).toBe(415);
+    const batchForm = await postRaw(`/api/driver/missions/${missionId}/positions`, "application/x-www-form-urlencoded", "points=1");
+    expect(batchForm.status).toBe(415);
+    // La requête n'est plus lue : un POST JSON sans corps utile reste illisible (400), jamais une écriture.
+    const queryOnly = await postRaw(`/api/driver/positions?lat=4.5&lon=9.5&timestamp=${ts}`, "application/json", "{}");
+    expect(queryOnly.status).toBe(400);
+    expect(await positionCount()).toBe(before);
+  });
+
+  it("illisible : 400 (date hors bornes comprise, jamais 500) ; relevé bruité accepté ; non chauffeur : 403", async () => {
+    expect((await session.call("POST", "/api/driver/positions", { actor: "driverA", body: { id: "x" } })).status).toBe(400);
+    expect((await session.call("POST", "/api/driver/positions", { actor: "driverA", body: { lat: 4, lon: 9, timestamp: "9".repeat(30) } })).status).toBe(400);
+    expect((await session.call("POST", "/api/driver/positions", { actor: "driverA", body: { lat: 95, lon: 9, timestamp: Math.floor(Date.now() / 1000) } })).status).toBe(400);
+    const wild = await session.call("POST", "/api/driver/positions", { actor: "driverA", body: { lat: 4.5, lon: 9.5, timestamp: Math.floor(Date.now() / 1000) - 30, accuracy: 1e12, bearing: 359.999999 } });
+    expect(wild.status, JSON.stringify(wild.body)).toBe(200);
+    expect((await session.call("POST", "/api/driver/positions", { actor: "admin", body: { lat: 4, lon: 9, timestamp: Math.floor(Date.now() / 1000) } })).status).toBe(403);
+  });
+
+  it("paquet : cap 359.999999 accepté, jamais refusé en bloc", async () => {
+    const res = await session.call("POST", `/api/driver/missions/${missionId}/positions`, {
+      actor: "driverA",
+      body: { points: [point({ recordedAt: minutesAgo(0.5), lat: 4.052, heading: 359.999999 })] },
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const [row] = await db.select().from(vehiclePositions).where(eq(vehiclePositions.lat, 4.052));
+    expect(row.heading).toBe(0);
+  });
+});
+
+describe("mission à plusieurs affectations (B2)", { timeout: 120000 }, () => {
+  let relayMissionId = 0;
+  let vehicle2Id = 0;
+
+  beforeAll(async () => {
+    const vehicle2 = await createTestVehicle({});
+    ids.vehicleIds.push(vehicle2.id);
+    vehicle2Id = vehicle2.id;
+    const [m] = await db.insert(missions).values({ orderNumber: uniqueTestToken("MIS"), pickupAddress: "TEST A", deliveryAddress: "TEST B", status: "in_progress" } as any).returning();
+    relayMissionId = m.id;
+    missionIds.push(m.id);
+    const [driverB] = await db.select().from(drivers).where(eq(drivers.userId, session.userIdOf("driverB")));
+    const startedAt = new Date(Date.now() - 30 * 60_000);
+    await db.insert(assignments).values([
+      { missionId: m.id, vehicleId, driverId: driverAId, status: "in_progress", startedAt },
+      { missionId: m.id, vehicleId: vehicle2.id, driverId: driverB.id, status: "in_progress", startedAt },
+    ] as any);
+  });
+
+  it("la trace lue par A ne contient aucun point de B ; un point de B à 100 km au même instant n'est pas suspect", async () => {
+    const at = minutesAgo(2);
+    const a = await session.call("POST", `/api/driver/missions/${relayMissionId}/positions`, { actor: "driverA", body: { points: [point({ recordedAt: at, lat: 4.0, lng: 9.7 })] } });
+    expect(a.status, JSON.stringify(a.body)).toBe(201);
+    const b = await session.call("POST", `/api/driver/missions/${relayMissionId}/positions`, { actor: "driverB", body: { points: [point({ recordedAt: at, lat: 4.9, lng: 9.7 })] } });
+    expect(b.status, JSON.stringify(b.body)).toBe(201);
+    expect(b.body.suspect).toBe(0);
+
+    const trackA = await session.call("GET", `/api/missions/${relayMissionId}/track`, { actor: "driverA" });
+    expect(trackA.status).toBe(200);
+    expect(trackA.body.points).toHaveLength(1);
+    expect(trackA.body.points[0]).toMatchObject({ vehicleId, lat: 4.0, suspect: false });
+    const trackB = await session.call("GET", `/api/missions/${relayMissionId}/track`, { actor: "driverB" });
+    expect(trackB.body.points.map((p: any) => p.vehicleId)).toEqual([vehicle2Id]);
+    const staff = await session.call("GET", `/api/missions/${relayMissionId}/track`, { actor: "logistics" });
+    expect(staff.body.points.map((p: any) => p.vehicleId).sort()).toEqual([vehicleId, vehicle2Id].sort());
+  });
+});
+
+describe("plafond de points par mission", { timeout: 120000 }, () => {
+  it("au-delà de 50 000 points par chauffeur et par mission : 429 lisible", async () => {
+    const [m] = await db.insert(missions).values({ orderNumber: uniqueTestToken("MIS"), pickupAddress: "TEST A", deliveryAddress: "TEST B", status: "in_progress" } as any).returning();
+    missionIds.push(m.id);
+    await db.insert(assignments).values({ missionId: m.id, vehicleId, driverId: driverAId, status: "in_progress", startedAt: new Date(Date.now() - 30 * 60_000) } as any);
+    await db.execute(sql`
+      INSERT INTO vehicle_positions (vehicle_id, mission_id, driver_id, source, submitted_by, client_point_id, recorded_at, lat, lng)
+      SELECT ${vehicleId}, ${m.id}, ${driverAId}, 'phone', ${session.userIdOf("driverA")}, gen_random_uuid(), now() - (g * interval '1 second') - interval '10 minutes', 4.05, 9.7
+      FROM generate_series(1, 50000) g`);
+    const res = await session.call("POST", `/api/driver/missions/${m.id}/positions`, { actor: "driverA", body: { points: [point()] } });
+    expect(res.status, JSON.stringify(res.body)).toBe(429);
+    expect(JSON.stringify(res.body)).not.toMatch(/violates|constraint|syntax/i);
   });
 });
 
@@ -244,5 +340,24 @@ describe("points A/B des missions", { timeout: 120000 }, () => {
     });
     expect(res.status).toBe(400);
     expect(res.body.message).toMatch(/Hub/);
+  });
+});
+
+describe("points A/B : drapeau coupé", { timeout: 120000 }, () => {
+  it("POST /api/missions ignore les champs géo (aucune écriture, aucun refus de hub)", async () => {
+    process.env.FEATURE_FLAGS = "gps=off";
+    try {
+      const res = await session.call("POST", "/api/missions", {
+        actor: "logistics",
+        body: { orderNumber: uniqueTestToken("MIS"), pickupAddress: "TEST A", deliveryAddress: "TEST B", missionType: "delivery", pickupHubCode: "inconnu", deliveryLat: 3.87, deliveryLng: 11.52 },
+      });
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      missionIds.push(res.body.id);
+      const [row] = await db.select().from(missions).where(eq(missions.id, res.body.id));
+      expect(row.pickupHubCode).toBeNull();
+      expect(row.deliveryLat).toBeNull();
+    } finally {
+      process.env.FEATURE_FLAGS = "gps=on";
+    }
   });
 });
