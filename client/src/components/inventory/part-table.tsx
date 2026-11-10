@@ -146,7 +146,7 @@ export function PartTable({ onRowClick }: PartTableProps) {
     setCurrentPage(1);
   };
 
-  const { data, isLoading, isFetching } = useQuery<{ parts: Part[]; total: number }>({
+  const partsQuery = useQuery<{ parts: Part[]; total: number }>({
     queryKey: [
       "/api/parts",
       {
@@ -159,6 +159,10 @@ export function PartTable({ onRowClick }: PartTableProps) {
     ],
     placeholderData: keepPreviousData,
   });
+  const { isLoading, isFetching } = partsQuery;
+  // Échec sans données : encart et « Réessayer » dans le tableau, jamais « Aucune pièce ».
+  const partsView = queryView(partsQuery);
+  const data = readyData(partsView, undefined);
 
   const activeRequirementsQuery = useQuery<Record<number, ActiveRequirement>>({
     queryKey: ["/api/part-requirements/active-by-part"],
@@ -594,7 +598,15 @@ export function PartTable({ onRowClick }: PartTableProps) {
         }}
         tableContainerClassName="max-h-[560px]"
         emptyState={
-          isInitialLoad ? (
+          partsView.kind === "error" ? (
+            <InlineQueryError
+              error={partsView.error}
+              fallback="Le catalogue des pièces est momentanément indisponible."
+              onRetry={() => void partsQuery.refetch()}
+              isRetrying={partsView.isRetrying}
+              data-testid="parts-error"
+            />
+          ) : isInitialLoad ? (
             "Chargement des pièces..."
           ) : (
             <div className="flex flex-col items-center gap-2 text-gray-400 py-4">
