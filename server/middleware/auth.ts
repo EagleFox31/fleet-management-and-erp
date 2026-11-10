@@ -16,13 +16,10 @@ const ROLE_ALIASES: Record<string, AppRole> = {
   secretary: "secretary",
   secretaire: "secretary",
   "secrétaire": "secretary",
-<<<<<<< HEAD
   accountant: "accountant",
   comptable: "accountant",
-=======
   viewer: "viewer",
   lecteur: "viewer",
->>>>>>> 4a6b5662 (Rôle lecteur : garde lecture seule globale, écran, menu, landing, contrat parcourant les écritures)
   logistics: "logistics",
   logisticien: "logistics",
   warehouse: "warehouse",

@@ -365,9 +365,12 @@ export const STAFF_ROLES: readonly AppRole[] = ALL_APP_ROLES.filter((role) => ro
 /**
  * Saisie d'exploitation sur un véhicule (kilométrage, position de maintenance, incident) : le
  * personnel moins le comptable, qui consulte sans saisir. `isStaff` ne suffit pas : il s'ouvre
- * à tout nouveau rôle du personnel sans que le diff le montre.
+ * à tout nouveau rôle du personnel sans que le diff le montre. Le lecteur est exclu ici aussi, en plus
+ * de la garde globale de lecture seule.
  */
-export const VEHICLE_OPERATION_WRITE_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "accountant");
+export const VEHICLE_OPERATION_WRITE_ROLES: readonly AppRole[] = STAFF_ROLES.filter(
+  (role) => role !== "accountant" && role !== "viewer",
+);
 
 /**
  * Coût d'un OT (taux horaire servi par `GET /api/work-orders/:id/labor-rate`) : le personnel

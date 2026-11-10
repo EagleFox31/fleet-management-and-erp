@@ -28,11 +28,8 @@ export type TestUserRole =
   | "management"
   | "technician"
   | "secretary"
-<<<<<<< HEAD
   | "accountant"
-=======
   | "viewer"
->>>>>>> 4a6b5662 (Rôle lecteur : garde lecture seule globale, écran, menu, landing, contrat parcourant les écritures)
   | "logistics"
   | "warehouse"
   | "driver"
