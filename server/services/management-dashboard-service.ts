@@ -39,13 +39,8 @@ import {
   buildManagementVehicleObsolescenceItem,
   type ManagementVehicleObsolescence,
 } from "@shared/constants/management-vehicle-obsolescence";
-import {
-  findCorridorByDestination,
-  interpolateCorridorPosition,
-  LOGISTICS_HUBS,
-  type LiveCorridorVehicle,
-  type TransitStatus,
-} from "@shared/constants/cemac-corridors";
+import { type LiveCorridorVehicle } from "@shared/constants/cemac-corridors";
+import { buildCorridorVehicle } from "./corridor-fleet";
 import {
   alerts,
   assignments,
@@ -913,7 +908,6 @@ export class ManagementDashboardService {
         brand: vehicles.brand,
         model: vehicles.model,
         status: vehicles.status,
-        locationCode: vehicles.locationCode,
       })
       .from(vehicles)
       .where(sql`${vehicles.deletedAt} IS NULL`);
@@ -941,84 +935,37 @@ export class ManagementDashboardService {
       .leftJoin(clients, eq(missions.clientId, clients.id))
       .leftJoin(drivers, eq(assignments.driverId, drivers.id))
       .where(
-        inArray(missions.status, ["in_progress", "assigned", "planned", "delivered"])
+        and(
+          inArray(missions.status, ["in_progress", "assigned", "planned"]),
+          // Une affectation annulée, refusée ou terminée ne place pas le véhicule en mission.
+          notInArray(assignments.status, ["cancelled", "rejected", "completed"]),
+        ),
       );
 
+    // Une seule mission par véhicule : la plus avancée (en cours avant affectée avant planifiée).
+    const missionRank: Record<string, number> = { in_progress: 0, assigned: 1, planned: 2 };
     const assignmentMap = new Map<number, typeof activeAssignments[0]>();
     for (const item of activeAssignments) {
-      if (item.vehicleId && !assignmentMap.has(item.vehicleId)) {
+      if (!item.vehicleId) continue;
+      const known = assignmentMap.get(item.vehicleId);
+      if (!known || (missionRank[item.missionStatus] ?? 9) < (missionRank[known.missionStatus] ?? 9)) {
         assignmentMap.set(item.vehicleId, item);
       }
     }
 
-    return vehicleRows.map((vehicle, index) => {
+    // Aucune position réelle n'est encore lue ici (remontée GPS : GPS-API-1) : pas de coordonnée.
+    return vehicleRows.map((vehicle) => {
       const active = assignmentMap.get(vehicle.id);
-      const corridor = findCorridorByDestination(
-        active?.deliveryAddress || vehicle.locationCode || "Garoua"
+      return buildCorridorVehicle(
+        vehicle,
+        active && {
+          ...active,
+          driverName: active.driverFirstName
+            ? `${active.driverFirstName} ${active.driverLastName || ""}`.trim()
+            : undefined,
+          cargoLabel: active.cargo ? extractCargoLabel(active.cargo) : undefined,
+        },
       );
-
-      let transitStatus: TransitStatus = "stopped";
-      let progressPercent = 0;
-
-      if (vehicle.status === "out_of_service" || vehicle.status === "maintenance") {
-        transitStatus = "alert";
-        progressPercent = ((index * 23) % 90) + 5; // Répartition sur l'axe
-      } else if (active) {
-        if (active.missionStatus === "in_progress") {
-          transitStatus = "in_transit";
-          progressPercent = Math.min(95, Math.max(10, (active.currentStep || 2) * 25 + (index * 7) % 20));
-        } else if (active.missionStatus === "assigned" || active.missionStatus === "planned") {
-          transitStatus = "loading";
-          progressPercent = 5;
-        } else if (active.missionStatus === "delivered") {
-          transitStatus = "returning";
-          progressPercent = 85;
-        }
-      } else {
-        // Véhicule disponible à la base ou en rotation
-        transitStatus = index % 3 === 0 ? "stopped" : "in_transit";
-        progressPercent = (index * 17) % 85 + 10;
-      }
-
-      const [currentLat, currentLng] = interpolateCorridorPosition(
-        corridor.polyline,
-        progressPercent
-      );
-
-      const driverName = active?.driverFirstName
-        ? `${active.driverFirstName} ${active.driverLastName || ""}`.trim()
-        : undefined;
-
-      const cargoLabel = active?.cargo ? extractCargoLabel(active.cargo) : undefined;
-      const weightTonnes = active?.weight ? parseFloat(String(active.weight)) : undefined;
-
-      // Consommation estimée
-      const dist = active?.actualDistance || active?.estimatedDistance || 800;
-      const fuelLiters = active?.actualFuelQuantity || (dist * 0.34);
-      const fuelConsumptionAvg = dist > 0 ? (fuelLiters / dist) * 100 : 34.5;
-
-      return {
-        vehicleId: vehicle.id,
-        registrationNumber: vehicle.registrationNumber,
-        brand: vehicle.brand,
-        model: vehicle.model,
-        vehicleStatus: vehicle.status as "operational" | "maintenance" | "out_of_service",
-        missionId: active?.missionId,
-        orderNumber: active?.orderNumber,
-        clientName: active?.clientName || undefined,
-        driverName,
-        origin: active?.pickupAddress || "Douala (Port)",
-        destination: active?.deliveryAddress || corridor.hubs[corridor.hubs.length - 1] || "Garoua",
-        cargoLabel,
-        weightTonnes: Number.isFinite(weightTonnes) ? weightTonnes : undefined,
-        currentLat,
-        currentLng,
-        corridorId: corridor.id,
-        transitStatus,
-        progressPercent,
-        fuelConsumptionAvg: Number(fuelConsumptionAvg.toFixed(1)),
-        speedKmh: transitStatus === "in_transit" ? 65 : transitStatus === "returning" ? 70 : 0,
-      };
     });
   }
 }

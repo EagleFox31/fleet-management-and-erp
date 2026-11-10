@@ -237,3 +237,40 @@ describe("DIR1 : partage du CA d'une mission à plusieurs affectations (#227)", 
     }
   });
 });
+
+describe("GPS-FE-4 : la flotte des corridors n'invente ni position ni statut", { timeout: 60000 }, () => {
+  it("véhicule sans mission : jamais en transit, aucune coordonnée ; mission en cours : en transit, toujours sans coordonnée", async () => {
+    const idle = await newVehicle();
+    const rolling = await newVehicle();
+    const [mission] = await db
+      .insert(missions)
+      .values({
+        orderNumber: uniqueTestToken("GPS4"),
+        pickupAddress: "TEST A",
+        deliveryAddress: "TEST Garoua",
+        status: "in_progress",
+      } as any)
+      .returning();
+    const [assignment] = await db
+      .insert(assignments)
+      .values({ missionId: mission.id, vehicleId: rolling.id, status: "in_progress" } as any)
+      .returning({ id: assignments.id });
+
+    try {
+      const fleet = (await dashboard()).corridorFleet as Array<Record<string, unknown>>;
+      const rowOf = (vehicleId: number) => fleet.find((v) => v.vehicleId === vehicleId)!;
+
+      expect(rowOf(idle.id)).toMatchObject({ transitStatus: "stopped", positionSource: "none" });
+      expect(rowOf(rolling.id)).toMatchObject({ transitStatus: "in_transit", positionSource: "none", missionId: mission.id });
+      // Aucune position réelle n'existe encore : aucun véhicule ne porte de coordonnée.
+      for (const row of fleet) {
+        expect(row.positionSource).toBe("none");
+        expect(row.currentLat).toBeUndefined();
+        expect(row.currentLng).toBeUndefined();
+      }
+    } finally {
+      await db.delete(assignments).where(eq(assignments.id, assignment.id));
+      await db.delete(missions).where(eq(missions.id, mission.id));
+    }
+  });
+});
