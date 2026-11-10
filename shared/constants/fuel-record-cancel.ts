@@ -11,7 +11,7 @@ export const FUEL_RECORD_VALIDATED_EDIT_MESSAGE =
 export const FUEL_RECORD_VALIDATED_DELETE_MESSAGE =
   "Un plein validé ne se supprime pas : annulez-le avec un motif.";
 export const FUEL_RECORD_BUDGET_SETTLED_MESSAGE =
-  "Budget de la mission soldé : rouvrez le budget ou passez une régularisation.";
+  "Le budget de la mission est soldé : l'annulation n'est plus possible, contactez la comptabilité.";
 export const FUEL_RECORD_CANCEL_NOT_VALIDATED_MESSAGE =
   "Ce plein n'est pas validé : supprimez-le au lieu de l'annuler.";
 export const FUEL_RECORD_ALREADY_REMOVED_MESSAGE =
@@ -20,11 +20,6 @@ export const FUEL_RECORD_CANCEL_FORBIDDEN_MESSAGE =
   "Vous n'avez pas le droit d'annuler ce plein.";
 export const FUEL_RECORD_CANCEL_REASON_MIN_LENGTH = 3;
 export const FUEL_RECORD_CANCEL_REASON_MAX_LENGTH = 500;
-
-/** Budget de mission soldé : `settled_at` posé (par le seul chemin de solde, mission-budgets-service). */
-export function isMissionBudgetSettled(budget: { settledAt?: Date | string | null }): boolean {
-  return budget.settledAt != null;
-}
 
 export function isFuelRecordValidated(record: { validationStatus?: string | null }): boolean {
   return record.validationStatus === "validated";

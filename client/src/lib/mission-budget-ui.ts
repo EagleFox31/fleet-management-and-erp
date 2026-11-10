@@ -11,6 +11,7 @@ import {
   MISSION_BUDGET_WRITE_ROLES,
 } from "@shared/constants/roles";
 import {
+  isMissionBudgetSettled,
   MISSION_STATUSES_WITHOUT_BUDGET,
   MISSION_STATUSES_WITHOUT_EXPENSES,
   type DailyNeed,
@@ -48,7 +49,7 @@ export function missionBudgetActions(
   const open = !(MISSION_STATUSES_WITHOUT_BUDGET as readonly string[]).includes(String(missionStatus ?? ""));
   const write = open && has(MISSION_BUDGET_WRITE_ROLES, role);
   const status = budget?.status ?? null;
-  const settled = !!budget?.settledAt;
+  const settled = budget ? isMissionBudgetSettled(budget) : false;
   return {
     create: write && status === null,
     edit: write && status === "requested",

@@ -7,8 +7,8 @@ import {
   canCancelFuelRecord,
   fuelRecordCancelSchema,
   isFuelRecordValidated,
-  isMissionBudgetSettled,
 } from "../../../shared/constants/fuel-record-cancel";
+import { isMissionBudgetSettled } from "../../../shared/contracts/mission-budgets";
 import { fuelValidationLabel } from "../../../client/src/lib/fuel-record-status";
 import { fuelRecords, insertFuelRecordSchema } from "../../../shared/schema";
 
@@ -20,7 +20,7 @@ describe("Plein validé : messages", () => {
       "Ce plein est validé : il ne se modifie plus. Annulez-le avec un motif, puis saisissez-en un nouveau.",
     );
     expect(FUEL_RECORD_VALIDATED_DELETE_MESSAGE).toBe("Un plein validé ne se supprime pas : annulez-le avec un motif.");
-    expect(FUEL_RECORD_BUDGET_SETTLED_MESSAGE).toBe("Budget de la mission soldé : rouvrez le budget ou passez une régularisation.");
+    expect(FUEL_RECORD_BUDGET_SETTLED_MESSAGE).toBe("Le budget de la mission est soldé : l'annulation n'est plus possible, contactez la comptabilité.");
   });
 });
 

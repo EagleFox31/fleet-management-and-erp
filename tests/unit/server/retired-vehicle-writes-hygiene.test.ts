@@ -34,7 +34,6 @@ const NOT_GUARDED: Record<string, string> = {
   "POST /api/missions/:p/assignments": "garde en ligne historique, 400 (vehicle-soft-delete.contract.test.ts)",
   "PUT /api/missions/:p/status": "plusieurs véhicules par affectation ; retrait refusé tant qu'une mission est ouverte",
   "POST /api/missions/:p/document-renewal-requests": "plusieurs véhicules par affectation ; retrait refusé tant qu'une mission est ouverte",
-  "POST /api/fuel-records/:p/cancel": "annule un plein existant par son id (ligne verrouillée), aucune saisie sur le véhicule",
   "PATCH /api/fuel-card/anomalies/:p": "traitement d'une anomalie (clé d'anomalie), aucune saisie sur le véhicule",
   "DELETE /api/work-orders/bulk-pending-unassigned": "purge administrative en masse, pas une saisie sur un véhicule",
   "POST /api/vehicles/activate-from-workflow": "crée le véhicule, ne vise pas un véhicule existant",
@@ -44,7 +43,7 @@ const NOT_GUARDED: Record<string, string> = {
 
 // Égal à la taille de la table : en ajouter une entrée oblige à relever ce nombre, sinon le cliquet
 // se périmerait et laisserait retirer une entrée sans revue.
-const TABLE_FLOOR = 46;
+const TABLE_FLOOR = 47;
 const VEHICLE_MARKER = /\b(vehicleId|vehicle_id|vehicleTireId|fuelRecordId|workOrderId|work_order_id|partRequirementId|part_requirement_id)\b/;
 // Objet d'OT désigné par le chemin : le véhicule s'atteint par l'OT, même si la poignée ne nomme ni l'un ni l'autre.
 const WORK_ORDER_PATH = /\/(work-orders|work-order-items|parts-used|part-requirements)\/:p(\/|$)/;

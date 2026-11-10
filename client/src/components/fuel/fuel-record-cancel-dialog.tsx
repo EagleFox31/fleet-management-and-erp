@@ -34,7 +34,7 @@ function dropFromCachedLists(recordId: number): void {
   );
 }
 
-/** Couche 3 : détail, listes et écrans satellites (carte, statistiques, tableau de bord, budget de mission). */
+/** Couche 3 : détail, listes et écrans satellites (carte, statistiques, tableau de bord, budget de mission, trésorerie). */
 function invalidateAfterCancel(record: CancellableFuelRecord): void {
   const { keys, prefixes } = satelliteTargetsOf("fuel_record_changed", {
     vehicleId: record.vehicleId ?? undefined,

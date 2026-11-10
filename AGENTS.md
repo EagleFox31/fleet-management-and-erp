@@ -386,7 +386,7 @@ Notes :
   Voir `docs/analysis/MATRICE_ROLES_GAP.md`.
 - Plein carburant validé (`validation_status = validated`) : immuable. `PATCH` et `DELETE` répondent 409
   (`FuelService.updateFuelRecord` / `deleteFuelRecord`, sous `SELECT ... FOR UPDATE`). La correction passe par
-  `POST /api/fuel-records/:id/cancel` (motif de 3 caractères minimum, `cancellation_reason`, suppression douce,
+  `POST /api/fuel-records/:id/cancel` (motif de 3 à 500 caractères, `cancellation_reason`, suppression douce,
   contre-passation en trésorerie, rejeu du même motif = 200), puis par la saisie d'un nouveau plein. Refusé (409)
   si le budget de la mission est soldé (`mission_budgets.settled_at`). Le `PATCH` reste déclaré dans
   `server/routes.ts` : le déplacer dans `server/api` est au backlog (`docs/plans/v1-verrou-argent.md`).

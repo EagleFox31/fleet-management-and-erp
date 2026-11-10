@@ -85,7 +85,7 @@ Plan établi le 2026-11-10 sur main e7b0f5ba. Les numéros de ligne ci-dessous v
 - **b. Avoir sur une facture déposée : autorisé.**
   - `net_payable` reste figé et l'avoir réduit le solde.
   - Le PDF de l'avoir cite la facture d'origine et son numéro de dépôt.
-- **c. Annulation d'un plein sur un budget de mission soldé : 409.** Message : « Budget de la mission soldé : rouvrez le budget ou passez une régularisation. »
+- **c. Annulation d'un plein sur un budget de mission soldé : 409.** Message : « Le budget de la mission est soldé : l'annulation n'est plus possible, contactez la comptabilité. »
 - **d. Remboursement : hors v1.**
   - L'avoir est plafonné au solde de la facture.
   - Ajouter une ligne au backlog, et une au journal QA à soumettre au client.
