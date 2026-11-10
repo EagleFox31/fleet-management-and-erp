@@ -154,8 +154,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      # 10.0.2.2 = l'hôte vu depuis l'émulateur Android.
-      CAP_SERVER_URL: http://10.0.2.2:8080
+      # localhost (renvoyé vers le serveur témoin par `adb reverse`) : contexte sécurisé, comme
+      # l'origine https de prod. Une origine http://10.0.2.2 n'expose pas navigator.serviceWorker.
+      CAP_SERVER_URL: http://localhost:8080
 
     steps:
       - name: 📥 Récupérer le code source

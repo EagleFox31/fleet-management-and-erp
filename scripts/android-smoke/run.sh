@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Test de fumée de l'APK sur émulateur (job `smoke` de build-android-apk.yml).
-# L'APK debug est construite avec CAP_SERVER_URL=http://10.0.2.2:<port> (10.0.2.2 = l'hôte vu
-# de l'émulateur). Trois temps :
+# L'APK debug est construite avec CAP_SERVER_URL=http://localhost:<port>, renvoyé vers le serveur
+# témoin par `adb reverse`. localhost est un contexte sécurisé, comme l'origine https de prod :
+# avec http://10.0.2.2, navigator.serviceWorker n'existe pas. Trois temps :
 #   1. en ligne : bridge natif, /api, cookie et /ws en même origine, service worker aux
 #      commandes, donnée écrite dans IndexedDB ;
 #   2. serveur coupé, APK fermée puis relancée : la coque doit venir du service worker (pas de
@@ -41,16 +42,16 @@ relaunch() {
 }
 
 # --- 1. En ligne ---------------------------------------------------------------------------
-# Juste après boot_completed, l'émulateur peut encore être sans réseau (ERR_INTERNET_DISCONNECTED) :
-# l'APK afficherait alors sa page hors ligne. On attend que le serveur témoin soit joignable
-# depuis l'émulateur avant le premier lancement.
+# localhost:<port> de l'émulateur -> serveur témoin de l'hôte. On vérifie qu'il répond avant le
+# premier lancement : sinon l'APK afficherait sa page hors ligne.
 adb wait-for-device
+adb reverse "tcp:$PORT" "tcp:$PORT"
 for i in $(seq 1 60); do
-  if adb shell "nc -z -w 2 10.0.2.2 $PORT" > /dev/null 2>&1; then
+  if adb shell "nc -z -w 2 127.0.0.1 $PORT" > /dev/null 2>&1; then
     echo "Serveur témoin joignable depuis l'émulateur (essai $i)."
     break
   fi
-  [ "$i" = 60 ] && echo "::warning::nc n'a pas joint 10.0.2.2:$PORT en 120 s, lancement quand même."
+  [ "$i" = 60 ] && echo "::warning::nc n'a pas joint localhost:$PORT en 120 s, lancement quand même."
   sleep 2
 done
 adb install -r "$APK"
