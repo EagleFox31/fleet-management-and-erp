@@ -31,6 +31,29 @@ describe("isAllowedOrigin (source commune CORS / anti-CSRF)", () => {
     expect(isAllowedOrigin("http://192.168.1.5:5000")).toBe(false);
   });
 
+  it("production : http://localhost refusé, origines de l'APK admises", () => {
+    process.env.NODE_ENV = "production";
+    expect(isAllowedOrigin("http://localhost")).toBe(false);
+    expect(isAllowedOrigin("http://localhost:5000")).toBe(false);
+    expect(isAllowedOrigin("https://localhost")).toBe(true);
+    expect(isAllowedOrigin("capacitor://localhost")).toBe(true);
+    process.env.NODE_ENV = "development";
+    expect(isAllowedOrigin("http://localhost")).toBe(true);
+  });
+
+  it("NODE_ENV absent ou inconnu : réseau privé refusé", () => {
+    delete (process.env as Record<string, string | undefined>).NODE_ENV;
+    expect(isAllowedOrigin("http://192.168.1.10")).toBe(false);
+    expect(isAllowedOrigin("http://localhost")).toBe(false);
+    process.env.NODE_ENV = "staging";
+    expect(isAllowedOrigin("http://192.168.1.10")).toBe(false);
+  });
+
+  it("test : tolérance active comme en développement", () => {
+    process.env.NODE_ENV = "test";
+    expect(isAllowedOrigin("http://192.168.1.10")).toBe(true);
+  });
+
   it("tolère localhost et réseaux privés hors production seulement", () => {
     process.env.NODE_ENV = "development";
     expect(isAllowedOrigin("http://192.168.1.5:5000")).toBe(true);
@@ -56,8 +79,11 @@ describe("isTrustedRequestOrigin", () => {
     ["cross-site, APK capacitor", { secFetchSite: "cross-site", origin: "capacitor://localhost" }, true],
     ["cross-site, APK https://localhost", { secFetchSite: "cross-site", origin: "https://localhost" }, true],
     ["cross-site, origine configurée", { secFetchSite: "cross-site", origin: "https://app.example" }, true],
-    ["Origin égale à l'hôte de la requête", { origin: `https://${HOST}`, host: HOST }, true],
-    ["Origin proche de l'hôte (sous-domaine)", { origin: `https://x.${HOST}`, host: HOST }, false],
+    ["Origin égale à l'hôte de la requête (https)", { origin: "https://autre-hote.example", host: "autre-hote.example", secure: true }, true],
+    ["Origin http sur un site en https", { origin: "http://autre-hote.example", host: "autre-hote.example", secure: true }, false],
+    ["Origin https sur un site en http", { origin: "https://autre-hote.example", host: "autre-hote.example", secure: false }, false],
+    ["Origin égale à l'hôte, schéma inconnu", { origin: "https://autre-hote.example", host: "autre-hote.example" }, false],
+    ["Origin proche de l'hôte (sous-domaine)", { origin: `https://x.${HOST}`, secure: true }, false],
     ["Origin illisible", { secFetchSite: "cross-site", origin: "::pas une url" }, false],
   ] as const)("%s", (_nom, meta, attendu) => {
     expect(isTrustedRequestOrigin({ host: HOST, ...meta })).toBe(attendu);
@@ -79,10 +105,16 @@ describe("requireSameOrigin", () => {
     expect(err.message).not.toMatch(/evil|origin|sec-fetch/i);
   });
 
+  it.each(["/API/x", "/Api/x"])("%s cross-site : 403 (préfixe insensible à la casse)", (path) => {
+    expect((run("POST", path, CROSS) as { status: number }).status).toBe(403);
+  });
+
   it.each([
     ["GET", "/api/vehicles", CROSS],
     ["OPTIONS", "/api/vehicles", CROSS],
     ["POST", "/hors-api", CROSS],
+    ["POST", "/apix", CROSS],
+    ["POST", "/apix/y", CROSS],
     ["POST", "/api/x", {}],
     ["POST", "/api/x", { "sec-fetch-site": "same-origin" }],
     ["POST", "/api/x", { ...CROSS, origin: "capacitor://localhost" }],

@@ -16,6 +16,7 @@ export function rejectForeignUpgrade(request: IncomingMessage, socket: Duplex): 
     origin,
     secFetchSite: first(request.headers["sec-fetch-site"]),
     host: request.headers.host,
+    secure: Boolean((request.socket as { encrypted?: boolean }).encrypted) || first(request.headers["x-forwarded-proto"])?.split(",")[0].trim() === "https",
   });
   if (trusted) return false;
   moduleLogger("websocket").warn({ origin }, "upgrade WebSocket refusé : origine non admise");

@@ -10,7 +10,7 @@ import { sessionMiddleware } from "./middleware/session";
 import { findActiveSessionUser } from "./services/session-user";
 import { moduleLogger } from "./lib/logger";
 import { upgradeRoute } from "./lib/upgrade-route";
-import { rejectForeignUpgrade } from "./lib/ws-origin";
+import { attachWsUpgrade, toPositiveInteger, type WsConnectionMeta, type WsSessionRequest } from "./lib/ws-upgrade";
 import { relayDatabaseEvent } from "./lib/db-event-relay";
 import { createApp } from "./app";
 import { setAuditSink } from "./lib/audit";
@@ -27,20 +27,6 @@ import { describeInvalidScope, normalizeScope, resolveRecipients } from "./lib/r
   // noServer: true pour ne pas intercepter les upgrades du HMR Vite
   const wss = new WebSocketServer({ noServer: true });
 
-  interface WsConnectionMeta {
-    userId: number;
-    role: string | null;
-    /** Session HTTP qui a ouvert la socket (pour garder ouverte celle qui reste valide). */
-    sessionId?: string;
-  }
-
-  interface WsSessionRequest extends IncomingMessage {
-    sessionID?: string;
-    session?: {
-      userId?: number;
-    };
-    wsMeta?: WsConnectionMeta;
-  }
 
   interface DatabaseRealtimeMessage {
     source?: string;
@@ -52,74 +38,9 @@ import { describeInvalidScope, normalizeScope, resolveRecipients } from "./lib/r
     emittedAt?: string;
   }
 
-  const toPositiveInteger = (value: unknown): number | null => {
-    if (typeof value === "number" && Number.isInteger(value) && value > 0) {
-      return value;
-    }
-    return null;
-  };
 
   // Router manuellement les upgrades : /ws → app, reste → Vite HMR en développement, refus sinon.
-  const isDevelopment = app.get("env") === "development";
-  server.on('upgrade', (request, socket, head) => {
-    const route = upgradeRoute(request.url, isDevelopment);
-    if (route !== "app") {
-      if (route === "reject") socket.destroy();
-      return;
-    }
-
-    if (rejectForeignUpgrade(request, socket)) return;
-
-    const mockResponse = {
-      getHeader: () => undefined,
-      setHeader: () => undefined,
-      end: () => undefined,
-      writeHead: () => undefined,
-    };
-
-    sessionMiddleware(request as any, mockResponse as any, (sessionError?: unknown) => {
-      if (sessionError) {
-        moduleLogger("websocket").error({ err: sessionError }, "Erreur session sur upgrade WebSocket");
-        socket.write("HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n");
-        socket.destroy();
-        return;
-      }
-
-      const sessionRequest = request as WsSessionRequest;
-      const sessionUserId = toPositiveInteger(sessionRequest.session?.userId);
-      if (!sessionUserId) {
-        socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
-        socket.destroy();
-        return;
-      }
-
-      // Le rôle est relu en base, comme dans `authenticate` : celui de la session
-      // est figé à la connexion et survivrait à un changement de rôle (ADM2-3).
-      findActiveSessionUser(sessionUserId)
-        .then((user) => {
-          if (!user) {
-            socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
-            socket.destroy();
-            return;
-          }
-
-          sessionRequest.wsMeta = {
-            userId: sessionUserId,
-            role: typeof user.role === "string" ? user.role : null,
-            sessionId: typeof sessionRequest.sessionID === "string" ? sessionRequest.sessionID : undefined,
-          };
-
-          wss.handleUpgrade(request, socket, head, (ws) => {
-            wss.emit('connection', ws, request);
-          });
-        })
-        .catch((err: unknown) => {
-          moduleLogger("websocket").error({ err, userId: sessionUserId }, "Relecture du compte impossible sur upgrade WebSocket");
-          socket.write("HTTP/1.1 500 Internal Server Error\r\nConnection: close\r\n\r\n");
-          socket.destroy();
-        });
-    });
-  });
+  attachWsUpgrade(server, wss, app.get("env") === "development");
 
   const inferEntityFromEvent = (event: string): string => {
     if (event.startsWith("work_order")) return "work_order";

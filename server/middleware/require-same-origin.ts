@@ -24,7 +24,7 @@ export const requireSameOrigin: RequestHandler = (req, _res, next) => {
   if (!WRITE_METHODS.has(req.method.toUpperCase()) || !isApiPath(req.path)) return next();
   const origin = headerValue(req.headers.origin);
   const secFetchSite = headerValue(req.headers["sec-fetch-site"]);
-  if (isTrustedRequestOrigin({ origin, secFetchSite, host: req.headers.host })) return next();
+  if (isTrustedRequestOrigin({ origin, secFetchSite, host: req.headers.host, secure: req.secure })) return next();
   log.warn({ origin, secFetchSite, method: req.method, path: req.path, requestId: req.requestId }, "écriture /api refusée : origine non admise");
   return next(new AppError(403, FOREIGN_ORIGIN_MESSAGE));
 };

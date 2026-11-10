@@ -2,10 +2,12 @@ import { createServer, type Server } from "http";
 import type { AddressInfo } from "net";
 import { eq, inArray, sql } from "drizzle-orm";
 import { WebSocket, WebSocketServer } from "ws";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { findActiveSessionUser } from "../../server/services/session-user";
+import { restoreEnv, snapshotEnv } from "../support/env-restore";
 import { db } from "../../server/db";
 import { FOREIGN_ORIGIN_MESSAGE } from "../../server/middleware/require-same-origin";
-import { rejectForeignUpgrade } from "../../server/lib/ws-origin";
+import { attachWsUpgrade, type WsSessionRequest } from "../../server/lib/ws-upgrade";
 import {
   fuelRecords,
   partRequirements,
@@ -191,21 +193,23 @@ describe("Anti-CSRF par origine : écritures /api", { timeout: 120_000 }, () => 
 });
 
 /**
- * /ws : le serveur de contrat n'ouvre pas de WebSocket (c'est `server/index.ts`). On branche la vraie
- * fonction de vérification d'upgrade (`rejectForeignUpgrade`, appelée par `server/index.ts`) sur un
- * serveur HTTP réel et on s'y connecte avec le client `ws`.
+ * /ws : l'upgrade RÉEL de server/index.ts (`attachWsUpgrade` : origine, session, relecture du compte)
+ * monté sur un serveur HTTP réel. Seul le `WebSocketServer` est local : sa réaction à la connexion
+ * renvoie l'identité posée par l'upgrade (`wsMeta`), comme le fait `wss.on("connection")` d'index.ts.
  */
-describe("Anti-CSRF par origine : upgrade /ws", () => {
+describe("Anti-CSRF par origine : upgrade /ws réel", () => {
+  const lookupSpy = vi.fn(findActiveSessionUser);
   let wsServer: Server;
   let url = "";
 
   beforeAll(async () => {
     const wss = new WebSocketServer({ noServer: true });
-    wsServer = createServer();
-    wsServer.on("upgrade", (request, socket, head) => {
-      if (rejectForeignUpgrade(request, socket)) return;
-      wss.handleUpgrade(request, socket, head, (ws) => wss.emit("connection", ws, request));
+    wss.on("connection", (ws, req) => {
+      const meta = (req as WsSessionRequest).wsMeta;
+      ws.send(JSON.stringify({ type: "auth_success", userId: meta?.userId, role: meta?.role }));
     });
+    wsServer = createServer();
+    attachWsUpgrade(wsServer, wss, false, lookupSpy);
     await new Promise<void>((resolve) => wsServer.listen(0, "127.0.0.1", () => resolve()));
     url = `ws://127.0.0.1:${(wsServer.address() as AddressInfo).port}/ws`;
   });
@@ -213,27 +217,77 @@ describe("Anti-CSRF par origine : upgrade /ws", () => {
     await new Promise<void>((resolve) => wsServer.close(() => resolve()));
   });
 
-  function open(headers: Record<string, string>) {
-    return new Promise<{ opened: boolean; status?: number }>((resolve) => {
-      const ws = new WebSocket(url, { headers });
-      ws.on("open", () => {
+  const hostOrigin = () => `http://127.0.0.1:${(wsServer.address() as AddressInfo).port}`;
+
+  function open(headers: Record<string, string>, path = "/ws") {
+    return new Promise<{ opened: boolean; status?: number; hello?: any }>((resolve) => {
+      const ws = new WebSocket(url.replace(/\/ws$/, path), { headers });
+      ws.on("message", (data) => {
         ws.close();
-        resolve({ opened: true });
+        resolve({ opened: true, hello: JSON.parse(data.toString()) });
       });
       ws.on("unexpected-response", (_req, res) => resolve({ opened: false, status: res.statusCode }));
       ws.on("error", () => undefined);
     });
   }
+  const cookie = () => ({ Cookie: session.cookies.get("admin")! });
+  const withEnv = async (nodeEnv: string, run: () => Promise<void>) => {
+    const previous = snapshotEnv(["NODE_ENV"]);
+    process.env.NODE_ENV = nodeEnv;
+    try {
+      await run();
+    } finally {
+      restoreEnv(previous);
+    }
+  };
+  const lookups = () => lookupSpy.mock.calls.length;
+  const refused = async (headers: Record<string, string>, path = "/ws") => {
+    lookupSpy.mockClear();
+    expect(await open(headers, path)).toEqual({ opened: false, status: 403 });
+    expect(lookups(), "le compte ne doit pas être relu avant le refus").toBe(0);
+  };
 
-  it("Origin étrangère : upgrade refusé en 403", async () => {
-    expect(await open({ Origin: "https://evil.example" })).toEqual({ opened: false, status: 403 });
+  it.each([
+    ["Origin étrangère + cross-site", { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" }, "/ws"],
+    ["Origin null (opaque)", { Origin: "null", "Sec-Fetch-Site": "cross-site" }, "/ws"],
+    ["sous-domaine + same-site", { Origin: "https://sub.example", "Sec-Fetch-Site": "same-site" }, "/ws"],
+    ["/ws?x=1 avec Origin étrangère", { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" }, "/ws?x=1"],
+  ])("cookie valide, %s : 403, jamais 101, aucune relecture du compte", async (_nom, headers, path) => {
+    await refused({ ...cookie(), ...headers }, path);
   });
 
-  it("Origin d'une coque native : upgrade accepté", async () => {
-    expect(await open({ Origin: "capacitor://localhost" })).toEqual({ opened: true });
+  it("Origin étrangère SANS cookie : 403 et non 401, le refus passe avant l'authentification", async () => {
+    await refused({ Origin: "https://evil.example" });
   });
 
-  it("sans Origin (client non navigateur) : upgrade accepté", async () => {
-    expect(await open({})).toEqual({ opened: true });
+  it("production : réseau privé http://192.168.1.5 refusé (403)", async () => {
+    await withEnv("production", () => refused({ ...cookie(), Origin: "http://192.168.1.5", "Sec-Fetch-Site": "cross-site" }));
+  });
+
+  it("production : Origin égale au Host (même schéma) : connecté (101)", async () => {
+    await withEnv("production", async () => {
+      const res = await open({ ...cookie(), Origin: hostOrigin() });
+      expect(res.opened).toBe(true);
+      expect(res.hello).toMatchObject({ type: "auth_success", userId: session.userIdOf("admin") });
+    });
+  });
+
+  it("production : Origin de même hôte mais en https alors que le site est en http : 403", async () => {
+    await withEnv("production", () => refused({ ...cookie(), Origin: hostOrigin().replace("http:", "https:") }));
+  });
+
+  it("capacitor://localhost + cookie valide : connecté et authentifié (101)", async () => {
+    const res = await open({ ...cookie(), Origin: "capacitor://localhost", "Sec-Fetch-Site": "cross-site" });
+    expect(res.opened).toBe(true);
+    expect(res.hello).toMatchObject({ type: "auth_success", userId: session.userIdOf("admin"), role: "admin" });
+  });
+
+  it("sans Origin + cookie valide : connecté (101)", async () => {
+    const res = await open(cookie());
+    expect(res.hello).toMatchObject({ type: "auth_success", userId: session.userIdOf("admin") });
+  });
+
+  it("sans Origin ni cookie : 401, l'authentification reste exigée", async () => {
+    expect(await open({})).toEqual({ opened: false, status: 401 });
   });
 });
