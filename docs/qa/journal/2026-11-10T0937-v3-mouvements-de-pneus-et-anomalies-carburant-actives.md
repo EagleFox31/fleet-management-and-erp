@@ -1,0 +1,6 @@
+## V3 point 1 : mouvements de pneus et anomalies carburant activés par défaut
+
+**Quoi** : les drapeaux `tire-movements` et `fuel-anomalies` passent à `defaultEnabled: true` dans `shared/feature-flags.ts`, après un e2e du parcours principal (`e2e/30-tire-movements-fuel-anomalies.spec.ts`).
+**Comment** : le magasinier retrouve un montage du jour dans les mouvements (pneu, immatriculation). Un plein de 80 L sur un réservoir de 50 L remonte en `tank-overflow` ; la logistique le traite (Justifiée, commentaire en base), le chef d'atelier le consulte sans bouton « Traiter ». La garde « seuls les MUST allumés par défaut » devient une liste explicite de SHOULD recettés (`SHOULD_ACTIVATED_AFTER_RECETTE`), pour que chaque activation soit une décision versionnée.
+**Pourquoi** : pas de `FEATURE_FLAGS` sur le VPS ; l'activation passe par le défaut versionné. Tolérance de 5 % de `tank-overflow` : valeur provisoire à confirmer par le client (constante nommée `TANK_OVERFLOW_TOLERANCE_PERCENT`, un seul endroit à changer). La fabrique `createTestVehicle` ignore `tankCapacityL` : le spec le renseigne en base, sinon la règle reste muette.
+**Preuve** : `node node_modules/@playwright/test/cli.js test e2e/30-tire-movements-fuel-anomalies.spec.ts` (2 passés, Postgres local) ; contrats feature-flags, fuel-anomalies, tire-movements : 36 passés ; tsc : 0 erreur.
