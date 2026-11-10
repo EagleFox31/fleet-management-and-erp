@@ -1,4 +1,3 @@
-import type { Request } from "express";
 import { AppError } from "./app-error";
 import { OFFLINE_OWNER_HEADER } from "./idempotency-config";
 
@@ -12,7 +11,10 @@ import { OFFLINE_OWNER_HEADER } from "./idempotency-config";
  * par une virgule) ou un `userId` absent donnent faux. L'absence d'en-tête se teste avant, chez
  * l'appelant : chaque garde décide s'il laisse passer une requête sans propriétaire déclaré.
  */
-export function ownerHeaderMatches(req: Pick<Request, "get">, userId: number | null | undefined): boolean {
+/** Lecture d'en-tête minimale : `Request` d'Express la satisfait, un test peut la simuler. */
+export type HeaderReader = { get(name: string): string | undefined };
+
+export function ownerHeaderMatches(req: HeaderReader, userId: number | null | undefined): boolean {
   const owner = req.get(OFFLINE_OWNER_HEADER)?.trim();
   if (owner === undefined || !/^\d{1,9}$/.test(owner) || userId == null) return false;
   return Number(owner) === userId;
