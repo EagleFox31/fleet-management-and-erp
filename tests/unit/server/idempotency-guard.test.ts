@@ -1,9 +1,10 @@
 import { EventEmitter } from "events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "../../../server/lib/app-error";
-import { isPreWriteRefusal, isReplayableStatus } from "../../../server/lib/idempotency-config";
+import { IDEMPOTENCY_ROUTES, isPreWriteRefusal, isReplayableStatus } from "../../../server/lib/idempotency-config";
+import { FEATURE_FLAGS } from "../../../shared/feature-flags";
 import { hashRequest, type IdempotencyStore, type ReserveOutcome } from "../../../server/lib/idempotency-store";
-import { idempotencyGuard } from "../../../server/middleware/idempotency-guard";
+import { findIdempotentRoute, idempotencyGuard } from "../../../server/middleware/idempotency-guard";
 
 /**
  * Niveau A, garde d'idempotence (lot #10b) avec un stockage factice : décisions du garde
@@ -135,6 +136,34 @@ describe("garde d'idempotence : décisions", () => {
     const next = vi.fn();
     await guard(fakeStore({ kind }).store)(fakeReq(), fakeRes() as never, next);
     expect((next.mock.calls[0][0] as AppError).status).toBe(status);
+  });
+
+  it("409 « en cours » : code IDEMPOTENCY_IN_PROGRESS et message lisible, propre à la route si défini", async () => {
+    const next = vi.fn();
+    await guard(fakeStore({ kind: "in_progress" }).store)(fakeReq(), fakeRes() as never, next);
+    const err = next.mock.calls[0][0] as AppError;
+    expect(err.status).toBe(409);
+    expect(err.code).toBe("IDEMPOTENCY_IN_PROGRESS");
+    expect(err.message).toMatch(/en cours/);
+
+    const custom = idempotencyGuard(
+      [{ method: "PUT", pattern: /^\/missions\/\d+\/status$/, inProgressMessage: "Message propre à la route." }],
+      fakeStore({ kind: "in_progress" }).store,
+      async (id) => ({ id }),
+    );
+    const next2 = vi.fn();
+    await custom(fakeReq(), fakeRes() as never, next2);
+    expect((next2.mock.calls[0][0] as AppError).code).toBe("IDEMPOTENCY_IN_PROGRESS");
+    expect((next2.mock.calls[0][0] as AppError).message).toBe("Message propre à la route.");
+  });
+
+  it("la panne du chauffeur est une route rejouable dont la clé n'est ni reprise ni libérée", () => {
+    const route = findIdempotentRoute(IDEMPOTENCY_ROUTES, "POST", "/driver/breakdowns");
+    expect(route).toBeDefined();
+    expect(route?.staleSeconds).toBeNull();
+    expect(route?.keepKeyOnUncertainOutcome).toBe(true);
+    expect(findIdempotentRoute(IDEMPOTENCY_ROUTES, "GET", "/driver/breakdowns")).toBeUndefined();
+    expect(FEATURE_FLAGS["driver-offline"].defaultEnabled).toBe(false);
   });
 
   it("stockage indisponible : 503, la route ne s'exécute pas", async () => {

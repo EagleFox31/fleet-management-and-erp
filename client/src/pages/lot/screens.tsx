@@ -10,6 +10,7 @@ import { IncidentForm } from "@/components/incidents/incident-form";
 import { IncidentList } from "@/components/incidents/incident-list";
 import { TireMovementsTable } from "@/components/inventory/tire-movements-table";
 import { TimeGrid } from "@/components/time-tracking/time-grid";
+import { WorkOrderHistory } from "@/components/work-orders/work-order-history";
 import { Input } from "@/components/ui/input";
 import { LoadingError } from "@/components/ui/loading-error";
 import { TariffGridTable } from "@/components/operations/tariff-grid-table";
@@ -27,6 +28,15 @@ export function BackupsScreen() {
 
 export function IncidentsListScreen() {
   return <IncidentList />;
+}
+
+/** Identifiant d'URL non numérique ou hors plage : message lisible plutôt qu'un appel qui répondrait 400. */
+export function WorkOrderHistoryScreen({ params }: { params: Record<string, string | undefined> }) {
+  const id = Number(params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return <p className="p-6 text-center text-sm text-muted-foreground" data-testid="work-order-history-invalid">Ordre de travail introuvable.</p>;
+  }
+  return <WorkOrderHistory workOrderId={id} />;
 }
 
 export function TireMovementsScreen() {

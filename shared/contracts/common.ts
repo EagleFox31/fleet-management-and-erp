@@ -24,6 +24,13 @@ export const MAX_DB_INTEGER_ID = 2147483647;
 /** Identifiant numérique venant d'une query string ou d'un paramètre de route. */
 export const idSchema = z.coerce.number().int().positive().max(MAX_DB_INTEGER_ID);
 
+/**
+ * Identifiant lu dans l'URL (`req.params`) : chiffres seuls, même règle que `parseRouteId`
+ * (`server/lib/route-id.ts`). `idSchema` convertirait `0x3e`, ` 62` ou `6.2e1` en 62 : la route
+ * s'exécuterait sur l'objet 62 sans que le journal d'audit, qui lit `\d+` dans le chemin, la voie.
+ */
+export const routeIdSchema = z.string().regex(/^\d+$/, "Identifiant invalide.").pipe(idSchema);
+
 /** Identifiant numérique lu dans un corps JSON (nombre, pas de conversion depuis une chaîne). */
 export const bodyIdSchema = z.number().int().positive().max(MAX_DB_INTEGER_ID);
 

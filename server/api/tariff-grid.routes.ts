@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { idSchema } from "@shared/contracts/common";
+import { parseRouteId } from "../lib/route-id";
 import { TARIFF_GRID_READ_ROLES, TARIFF_GRID_WRITE_ROLES } from "@shared/constants/roles";
 import { tariffBodyShape, tariffListQuerySchema, tariffSuggestQuerySchema } from "@shared/contracts/tariff-grid";
 import { AppError } from "../lib/app-error";
@@ -53,10 +53,10 @@ router.post("/tariff-grid", requireFeature("pricing"), authorize([...TARIFF_GRID
 
 router.put("/tariff-grid/:id", requireFeature("pricing"), authorize([...TARIFF_GRID_WRITE_ROLES]), async (req, res, next) => {
   try {
-    const id = idSchema.safeParse(req.params.id);
+    const id = parseRouteId(req.params.id, "Données de tarif invalides.");
     const body = bodySchema.safeParse(req.body);
-    if (!id.success || !body.success) throw new AppError(400, "Données de tarif invalides.");
-    res.json(await updateTariff(id.data, body.data, userIdOf(req)));
+    if (!body.success) throw new AppError(400, "Données de tarif invalides.");
+    res.json(await updateTariff(id, body.data, userIdOf(req)));
   } catch (err) {
     next(err);
   }
@@ -65,9 +65,8 @@ router.put("/tariff-grid/:id", requireFeature("pricing"), authorize([...TARIFF_G
 /** Désactive le tarif (historique conservé). */
 router.delete("/tariff-grid/:id", requireFeature("pricing"), authorize([...TARIFF_GRID_WRITE_ROLES]), async (req, res, next) => {
   try {
-    const id = idSchema.safeParse(req.params.id);
-    if (!id.success) throw new AppError(400, "Tarif invalide.");
-    res.json(await deactivateTariff(id.data, userIdOf(req)));
+    const id = parseRouteId(req.params.id, "Tarif invalide.");
+    res.json(await deactivateTariff(id, userIdOf(req)));
   } catch (err) {
     next(err);
   }

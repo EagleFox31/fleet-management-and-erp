@@ -19,6 +19,7 @@ import {
   validateFuelVoucherPath,
   type FuelValidationStatus,
   type FuelVoucher,
+  type FuelVoucherValidateBody,
   type FuelVouchersQuery,
 } from "@shared/contracts/fuel-vouchers";
 
@@ -44,8 +45,11 @@ export function FuelVouchersTable({ readOnly = false }: { readOnly?: boolean }) 
   const vouchers = useContractQuery(FUEL_VOUCHERS_PATH, fuelVouchersResponseSchema, { status });
 
   const mutation = useMutation({
-    mutationFn: async ({ id }: { id: number }) =>
-      fuelVoucherValidationResponseSchema.parse(await (await apiRequest("POST", validateFuelVoucherPath(id))).json()),
+    // La version affichée part avec la validation : un bon modifié depuis son affichage répond 409.
+    mutationFn: async ({ id, version }: { id: number; version: string }) =>
+      fuelVoucherValidationResponseSchema.parse(
+        await (await apiRequest("POST", validateFuelVoucherPath(id), { version } satisfies FuelVoucherValidateBody)).json(),
+      ),
     onSuccess: () => {
       // Couche 3 : liste des bons et écrans carburant qui affichent les pleins.
       for (const key of [FUEL_VOUCHERS_PATH, "/api/fuel-records", "/api/fuel-card"]) {
@@ -53,7 +57,11 @@ export function FuelVouchersTable({ readOnly = false }: { readOnly?: boolean }) 
       }
       toast({ title: "Bon validé" });
     },
-    onError: (error) => toast({ title: "Bon non validé", description: userMessageOf(error), variant: "destructive" }),
+    onError: (error) => {
+      // 409 (bon changé ou déjà validé) : la liste est périmée, on la recharge.
+      void queryClient.invalidateQueries({ queryKey: [FUEL_VOUCHERS_PATH] });
+      toast({ title: "Bon non validé", description: userMessageOf(error), variant: "destructive" });
+    },
   });
   const validate = useSingleFlightMutate(mutation.mutate);
 
@@ -81,7 +89,7 @@ export function FuelVouchersTable({ readOnly = false }: { readOnly?: boolean }) 
       align: "right",
       cell: (v) =>
         v.validationStatus === "pending" ? (
-          <Button size="sm" variant="outline" onClick={() => validate({ id: v.id })} data-testid={`fuel-voucher-validate-${v.id}`}>
+          <Button size="sm" variant="outline" onClick={() => validate({ id: v.id, version: v.version })} data-testid={`fuel-voucher-validate-${v.id}`}>
             <CheckCircle2 className="mr-1 h-4 w-4" aria-hidden="true" />
             Valider
           </Button>

@@ -295,6 +295,15 @@ describe("POD : corps multipart refusé sans résidu", { timeout: 180000 }, () =
     expect(await rowsOf(mission.id)).toHaveLength(0);
   });
 
+  it("multipart tronqué répété 40 fois : jamais de fichier résiduel (course entre fermeture et suppression)", async () => {
+    const mission = await newMission();
+    for (let i = 0; i < 40; i += 1) {
+      const res = await rawPost(mission.id, filePart(`bon-${i}.pdf`, tinyPdf()).subarray(0, -40));
+      expectClean(res, mission.id);
+    }
+    expect(await rowsOf(mission.id)).toHaveLength(0);
+  });
+
   it("sixième champ texte : 400 lisible, aucun fichier résiduel", async () => {
     const mission = await newMission();
     const fields = Array.from({ length: 6 }, (_, i) => Buffer.from(`--${BOUNDARY}\r\nContent-Disposition: form-data; name="f${i}"\r\n\r\nx\r\n`));
