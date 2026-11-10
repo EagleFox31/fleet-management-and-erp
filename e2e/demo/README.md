@@ -18,6 +18,8 @@ Vidéos : `test-results/recordings/<test>/video.webm`.
 
 Résidu connu : le justificatif téléversé par la démo du secrétariat reste dans `uploads/` (hors base).
 
+Parcours chauffeur (spec 10) : trois rôles dans trois contextes. Le logisticien programme la mission (camion, remorque `DEMO-REM-001`, chauffeur) et fixe les budgets ; le chauffeur se connecte avec son PIN (`1234`, posé par le seed), confirme le départ et déclare une panne ; le chef d'atelier, connecté d'avance, reçoit la trame `incident_reported` puis voit la panne dans « Pannes déclarées ». La spec vérifie en base l'affectation, les budgets, le statut `in_progress` et la panne.
+
 Parcours comptable (spec 11, compte `compta1`, mot de passe de démo du seed) : le serveur doit tourner avec `FEATURE_FLAGS=finance=on,pending-invoices=on`, sinon les tuiles « À encaisser » et « À facturer » du tableau de bord comptable restent indisponibles. Contre un serveur déjà lancé : `E2E_BASE_URL=http://127.0.0.1:<port> E2E_SKIP_ACCOUNT_CHECK=1`. La spec vérifie aussi que la comptable reçoit un 403 sur la création d'un ordre de travail, d'une fiche pièce, d'une mission et d'un plein.
 
 Parcours magasinier : pas de lien « Ordres de travail » dans son menu ; l'OT s'ouvre depuis la carte « en attente de pièces » de Demandes de pièces (repli par URL directe dans la spec 06).
