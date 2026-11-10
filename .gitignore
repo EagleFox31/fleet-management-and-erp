@@ -52,3 +52,8 @@ uploads/**
 
 # Fichier temporaire de loadConfigFromFile (vite 5), supprimé aussitôt (server/vite.ts)
 *.timestamp-*.mjs
+
+# Signature Android : jamais dans le dépôt (docs/deploiement/android-apk.md)
+*.keystore
+*.jks
+*.keystore.b64
