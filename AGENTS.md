@@ -412,6 +412,11 @@ Notes :
 - Montants en texte libre dans l'audit d'OT : `/api/work-orders/:id/audit-trail` est exempté de `tests/unit/server/work-order-cost-mask-coverage.test.ts` (l. 27). Le masquage par clé ne couvre pas les libellés. Ne pas étendre cette exemption sans son lot dédié.
 - Tests contrat intermittents `tests/contract/finance-withholdings.contract.test.ts` et `tests/contract/qhse-inspections.contract.test.ts` : non reproduits, instrumentés (corps de réponse). Ne pas relever le timeout ni les marquer `skip` sans diagnostic du corps de réponse.
 - Garde de réservation avant les droits : `server/middleware/booking-guard.ts` (monté dans `server/api/index.ts`) tourne avant `PATCH /api/work-orders/:id`. Un rôle que la liste blanche refuserait (403) peut donc recevoir d'abord un 409 de créneau, qui révèle le numéro de l'OT en conflit. Ne pas ajouter d'autre middleware métier qui précède le contrôle de rôle.
+- Avoirs clients (lot V1, PR5) : `client_credit_notes`, numéro `AV-AAAAMMJJ-NNN`, seule correction d'une facture émise. Immuable (trigger `client_credit_notes_immutable` : ni UPDATE, ni DELETE, ni TRUNCATE hors `withMoneyOverride`). Créé par `createCreditNote` (`server/services/client-credit-note-service.ts`) en une transaction : facture verrouillée `FOR UPDATE`, rejeu par `request_key`, plafonné au solde (remboursement hors v1), refusé sur facture annulée ou soldée ; il baisse `balance`, monte `credited_amount_ttc` et recalcule le statut (solde nul = payée).
+  - **Payé** = `amount_ttc - credited_amount_ttc - balance`, toujours par `paidTtcOf` (`shared/constants/client-invoices.ts`) : `amount_ttc - balance` ferait passer un avoir pour un encaissement. **CA net** = facturé HT moins le HT des avoirs, à la date de l'avoir.
+  - Numérotation journalière partagée : `nextDailyNumber` (`server/lib/daily-document-number.ts`, `INVOICE_NUMBER_SPEC`, `CREDIT_NOTE_NUMBER_SPEC`).
+  - Le trigger des factures impose aussi la cohérence statut / solde (une facture payée ne se rouvre pas ; payée = solde nul). Toute colonne ajoutée à `client_invoices` reste gelée tant qu'elle n'entre pas dans `free_cols`.
+  - Routes : `server/api/billing.routes.ts` (`POST` et `GET /api/billing/invoices/:id/credit-notes`, `GET /api/billing/credit-notes/:id/pdf`) ; écriture admin et comptable (`CREDIT_NOTE_WRITER_ROLES`).
 
 ---
 

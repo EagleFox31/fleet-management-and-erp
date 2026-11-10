@@ -115,4 +115,29 @@ describe("portée des événements : ni broadcast, ni client hors périmètre", 
     expect(flat).not.toContain("clientB");
     expect(flat).not.toContain("driver");
   });
+
+  it("client_credit_note_created : rôles de facturation seuls, aucun compte client ni chauffeur", async () => {
+    const client = await createTestClient();
+    ids.clientIds.push(client.id);
+    const invoice = await createTestClientInvoice({ clientId: client.id, amountHT: "100.00", vatAmount: "0.00", amountTTC: "100.00" });
+    ids.clientInvoiceIds.push(invoice.id);
+    const res = await session.call("POST", `/api/billing/invoices/${invoice.id}/credit-notes`, {
+      actor: "admin",
+      body: { amountHt: 10, reason: "TEST avoir scope", requestKey: token + "-av" },
+    });
+    expect(res.status).toBe(201);
+    const flat = receivers("client_credit_note_created").actors.flat();
+    expect(flat).toEqual(expect.arrayContaining(["admin", "secretary", "logistics"]));
+    expect(flat).not.toContain("clientA");
+    expect(flat).not.toContain("clientB");
+    expect(flat).not.toContain("driver");
+    // Le rejeu de la même clé n'émet rien de plus.
+    spy.mockClear();
+    const replay = await session.call("POST", `/api/billing/invoices/${invoice.id}/credit-notes`, {
+      actor: "admin",
+      body: { amountHt: 10, reason: "TEST avoir scope", requestKey: token + "-av" },
+    });
+    expect(replay.status).toBe(200);
+    expect(receivers("client_credit_note_created").actors).toHaveLength(0);
+  });
 });

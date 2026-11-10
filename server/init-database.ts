@@ -864,9 +864,82 @@ EXCEPTION WHEN lock_not_available THEN
 END $$;`;
 
 /**
+ * Avoirs clients (lot V1, PR5) : colonne client_invoices.credited_amount_ttc, table client_credit_notes et son
+ * trigger d'immuabilité. Doit rester identique à server/db/migrations/20261110_client_credit_notes.sql
+ * (AGENTS.md §5), comparé par tests/unit/server/client-credit-notes-schema.test.ts. Un seul envoi = une transaction.
+ */
+export const CLIENT_CREDIT_NOTES_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+DO $do$
+BEGIN
+  -- ALTER TABLE prend un verrou exclusif même quand la colonne existe : on ne le demande que si elle manque.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = 'client_invoices' AND column_name = 'credited_amount_ttc'
+  ) THEN
+    ALTER TABLE client_invoices ADD COLUMN credited_amount_ttc numeric(15,2) NOT NULL DEFAULT 0;
+  END IF;
+END $do$;
+
+CREATE TABLE IF NOT EXISTS client_credit_notes (
+  id serial PRIMARY KEY,
+  credit_note_number text NOT NULL UNIQUE,
+  invoice_id integer NOT NULL REFERENCES client_invoices(id) ON DELETE RESTRICT,
+  reason text NOT NULL,
+  amount_ht numeric(15,2) NOT NULL,
+  vat_rate numeric(5,2) NOT NULL DEFAULT 0,
+  vat_amount numeric(15,2) NOT NULL DEFAULT 0,
+  amount_ttc numeric(15,2) NOT NULL,
+  request_key text NOT NULL UNIQUE,
+  created_by integer REFERENCES users(id),
+  created_at timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT client_credit_notes_amount_ht_positive CHECK (amount_ht > 0),
+  CONSTRAINT client_credit_notes_ttc_sum CHECK (amount_ttc = amount_ht + vat_amount),
+  CONSTRAINT client_credit_notes_reason_not_blank CHECK (length(btrim(reason)) > 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_client_credit_notes_invoice_id ON client_credit_notes (invoice_id);
+
+CREATE OR REPLACE FUNCTION fn_client_credit_notes_immutable()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  -- Levée explicite pour la transaction en cours : restauration de sauvegarde, nettoyage de test, reset de recette.
+  IF current_setting('fleetos.allow_money_override', true) = 'on' THEN
+    IF TG_OP = 'DELETE' THEN
+      RETURN OLD;
+    ELSIF TG_OP = 'TRUNCATE' THEN
+      RETURN NULL;
+    END IF;
+    RETURN NEW;
+  END IF;
+  RAISE EXCEPTION 'Avoir émis : il ne se modifie, ni ne se supprime.'
+    USING ERRCODE = 'check_violation', CONSTRAINT = 'client_credit_notes_immutable';
+END;
+$$;
+
+DO $do$
+BEGIN
+  CREATE OR REPLACE TRIGGER trg_client_credit_notes_immutable
+  BEFORE UPDATE OR DELETE ON client_credit_notes
+  FOR EACH ROW
+  EXECUTE FUNCTION fn_client_credit_notes_immutable();
+
+  CREATE OR REPLACE TRIGGER trg_client_credit_notes_truncate_lock
+  BEFORE TRUNCATE ON client_credit_notes
+  FOR EACH STATEMENT
+  EXECUTE FUNCTION fn_client_credit_notes_immutable();
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'triggers d''immuabilité des avoirs non posés : verrou de table indisponible, nouvel essai au démarrage suivant';
+END $do$;`;
+
+/**
  * Verrou d'argent en base sur les factures clients émises (lot V1, D2). Doit rester identique à
- * server/db/migrations/20261110_money_lock_invoices.sql (AGENTS.md §5), comparé par
- * tests/unit/server/client-invoices-lock-schema.test.ts. Un seul envoi = une transaction (SET LOCAL
+ * server/db/migrations/20261110_money_lock_invoices_credits.sql (AGENTS.md §5), comparé par
+ * tests/unit/server/client-invoices-lock-schema.test.ts. Cette version remplace celle de 20261110_money_lock_invoices.sql
+ * (PR4), rejouée avant elle au démarrage : la règle de credited_amount_ttc y est ajoutée. Un seul envoi = une transaction (SET LOCAL
  * lock_timeout borne l'attente du verrou de table ; un échec est toléré et relu après l'appel).
  */
 export const CLIENT_INVOICES_ISSUED_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
@@ -879,9 +952,8 @@ AS $$
 DECLARE
   -- Liste blanche : toute autre colonne (montants, TVA, lignes, client, mission, numéro, dates, notes, auteur...)
   -- est gelée, y compris une colonne ajoutée plus tard, qui naît gelée.
-  -- Avoirs (lot V1, PR5) : ajouter 'credited_amount_ttc' à ce tableau, et sa règle (à la hausse seulement, au plus
-  -- le TTC) à l'emplacement marqué plus bas ; le reste de la logique ne change pas.
-  free_cols text[] := ARRAY['status', 'balance', 'updated_at',
+  -- credited_amount_ttc (avoirs, PR5) : libre ici, bornée par sa règle plus bas.
+  free_cols text[] := ARRAY['status', 'balance', 'updated_at', 'credited_amount_ttc',
     'deposited_at', 'withholding_vat_amount', 'withholding_is_amount', 'net_payable', 'deposited_by'];
 BEGIN
   -- Levée explicite pour la transaction en cours : rien à garder.
@@ -904,7 +976,8 @@ BEGIN
 
   -- Annulée : statut terminal, aucune sortie et aucun mouvement de solde (décision e de 0a).
   IF OLD.status = 'cancelled'
-     AND (NEW.status IS DISTINCT FROM OLD.status OR NEW.balance IS DISTINCT FROM OLD.balance) THEN
+     AND (NEW.status IS DISTINCT FROM OLD.status OR NEW.balance IS DISTINCT FROM OLD.balance
+          OR NEW.credited_amount_ttc IS DISTINCT FROM OLD.credited_amount_ttc) THEN
     RAISE EXCEPTION 'Facture annulée : statut terminal, ni sortie ni modification de montant.'
       USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
   END IF;
@@ -916,7 +989,29 @@ BEGIN
       USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
   END IF;
 
-  -- Avoirs (PR5) : règle de credited_amount_ttc ici.
+  -- Cohérence statut et solde (décision de 0a) : payée = solde nul. Une facture payée ne se rouvre pas ; on ne passe
+  -- à payée qu'à solde zéro ; un solde zéro impose payée (sauf annulée). Contrôlé quand le statut ou le solde bouge.
+  IF NEW.status IS DISTINCT FROM OLD.status OR NEW.balance IS DISTINCT FROM OLD.balance THEN
+    IF OLD.status = 'paid' AND NEW.status IN ('pending', 'partial', 'overdue') THEN
+      RAISE EXCEPTION 'Facture payée : elle ne repasse pas en attente, partielle ou en retard.'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
+    END IF;
+    IF NEW.status = 'paid' AND NEW.balance <> 0 THEN
+      RAISE EXCEPTION 'Facture émise : le statut payée exige un solde nul.'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
+    END IF;
+    IF NEW.balance = 0 AND NEW.status NOT IN ('paid', 'cancelled') THEN
+      RAISE EXCEPTION 'Facture émise : un solde nul impose le statut payée.'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
+    END IF;
+  END IF;
+
+  -- Avoirs (PR5) : le cumul crédité ne fait que monter, et ne dépasse jamais le TTC (un avoir ne rend pas d'argent).
+  IF NEW.credited_amount_ttc IS DISTINCT FROM OLD.credited_amount_ttc
+     AND (NEW.credited_amount_ttc < OLD.credited_amount_ttc OR NEW.credited_amount_ttc > NEW.amount_ttc) THEN
+    RAISE EXCEPTION 'Facture émise : le cumul des avoirs ne fait que monter, sans dépasser le TTC.'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
+  END IF;
 
   -- Dépôt. Seul détachement permis après coup : deposited_by vers NULL par l'action de clé étrangère (suppression de
   -- l'utilisateur ; UPDATE lancé par un trigger, profondeur > 1). pg_trigger_depth() > 1 couvre tout UPDATE émis
@@ -2506,7 +2601,11 @@ export async function initializeDatabase() {
     await pool.query(FUEL_RECORDS_REQUEST_KEY_SQL);
     // Retenues à la source (F1) — jumelle de server/db/migrations/20261105_finance_withholding.sql.
     await pool.query(FINANCE_WITHHOLDING_SQL);
-    // Facture émise verrouillée en base (lot V1) — jumelle de server/db/migrations/20261110_money_lock_invoices.sql.
+    // Avoirs clients (lot V1, PR5) — jumelle de server/db/migrations/20261110_client_credit_notes.sql. Avant le verrou des
+    // factures : sa règle lit credited_amount_ttc.
+    await pool.query(CLIENT_CREDIT_NOTES_SQL);
+    // Facture émise verrouillée en base (lot V1) — jumelle de server/db/migrations/20261110_money_lock_invoices_credits.sql
+    // (version avec avoirs, qui remplace la fonction de 20261110_money_lock_invoices.sql).
     await pool.query(CLIENT_INVOICES_ISSUED_LOCK_SQL);
     // Verrou de table indisponible (lock_timeout) : le RAISE WARNING n'atteint pas les logs applicatifs, relire pg_trigger.
     const { rows: invoiceLockTriggers } = await pool.query(
@@ -2517,6 +2616,16 @@ export async function initializeDatabase() {
       initLog.warn(
         { present: invoiceLockTriggers.map((r: { tgname: string }) => r.tgname) },
         "Triggers de verrou des factures émises non posés (verrou de table indisponible) : nouvel essai au démarrage suivant.",
+      );
+    }
+    const { rows: creditNoteTriggers } = await pool.query(
+      `SELECT tgname FROM pg_trigger WHERE tgrelid = 'client_credit_notes'::regclass
+          AND tgname IN ('trg_client_credit_notes_immutable', 'trg_client_credit_notes_truncate_lock')`,
+    );
+    if (creditNoteTriggers.length < 2) {
+      initLog.warn(
+        { present: creditNoteTriggers.map((r: { tgname: string }) => r.tgname) },
+        "Triggers d'immuabilité des avoirs non posés (verrou de table indisponible) : nouvel essai au démarrage suivant.",
       );
     }
     // Suppression douce des pleins qui ont mouvementé la carte — jumelle de server/db/migrations/20261103_fuel_records_soft_delete.sql.

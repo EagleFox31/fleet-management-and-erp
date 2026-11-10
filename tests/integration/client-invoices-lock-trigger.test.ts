@@ -19,7 +19,7 @@ import { uniqueTestToken } from "../support/ids";
  * clé étrangère) et la levée explicite par transaction (withMoneyOverride). Annulée = terminal.
  * La traduction HTTP (409 lisible) est couverte par tests/unit/server/money-lock-error.test.ts.
  */
-const MIGRATION = "server/db/migrations/20261110_money_lock_invoices.sql";
+const MIGRATION = "server/db/migrations/20261110_money_lock_invoices_credits.sql";
 const CONSTRAINT = "client_invoices_issued_locked";
 const ids = createIdBag();
 const missionIds: number[] = [];
@@ -113,7 +113,8 @@ describe("trigger client_invoices_issued_locked", { timeout: 60_000 }, () => {
       ["created_at", sql`UPDATE client_invoices SET created_at = now() - interval '1 day' WHERE id = ${id}`],
       ["id", sql`UPDATE client_invoices SET id = id + 1000000000 WHERE id = ${id}`],
     ];
-    for (const [label, statement] of frozen) await expectLocked(() => db.execute(statement), label);
+    // Refus indépendants (aucune écriture ne passe) : en parallèle sur le pool, pour ne payer qu'un aller-retour.
+    await Promise.all(frozen.map(([label, statement]) => expectLocked(() => db.execute(statement), label)));
     // Même refus par Drizzle, comme le ferait un service.
     await expectLocked(() => db.update(clientInvoices).set({ amountTTC: "1" }).where(eq(clientInvoices.id, id)), "drizzle amountTTC");
     expect(await invoiceRow(id)).toEqual(invoice);
@@ -341,7 +342,7 @@ describe("trigger client_invoices_issued_locked", { timeout: 60_000 }, () => {
       // ROW EXCLUSIVE (une écriture en cours) bloque CREATE TRIGGER (SHARE ROW EXCLUSIVE).
       await holder.query("BEGIN");
       await holder.query("LOCK TABLE client_invoices IN ROW EXCLUSIVE MODE");
-      migration = pool.query(readFileSync(MIGRATION, "utf8"));
+      migration = pool.query(readFileSync(MIGRATION, "utf8").replace(/\r\n/g, "\n"));
       outcome = await Promise.race([
         migration.then(() => "terminée", () => "en erreur"),
         new Promise<string>((resolve) => setTimeout(() => resolve("bloquée"), 15_000)),
@@ -356,7 +357,7 @@ describe("trigger client_invoices_issued_locked", { timeout: 60_000 }, () => {
   });
 
   it("idempotent : migration et SQL d'init rejoués deux fois, même définition, un seul trigger, aucune donnée touchée", async () => {
-    const migration = readFileSync(MIGRATION, "utf8");
+    const migration = readFileSync(MIGRATION, "utf8").replace(/\r\n/g, "\n");
     // Base partagée : le décompte porte sur toute la table, l'empreinte sur les seules factures de ce fichier.
     const mine = sql.raw(ids.clientInvoiceIds.join(","));
     const snapshot = sql`SELECT count(*)::int AS n,
