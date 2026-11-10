@@ -10,6 +10,7 @@ import { createTestFuelRecord, createTestVehicle } from "../support/factories";
 import type { DbExecutor } from "../../server/lib/fuel-card-lock";
 import { expectWaitsForLock, expectWaitsForMissionRowLock } from "../support/fuel-card-lock";
 import { uniqueTestToken } from "../support/ids";
+import { deleteFuelRecordsWhere } from "../support/money-override";
 
 /**
  * Régularisation d'un plein de mission (POST /api/missions/:id/fuel-records/regularize) :
@@ -80,7 +81,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (ids.vehicleIds.length > 0) {
-    await db.delete(fuelRecords).where(inArray(fuelRecords.vehicleId, ids.vehicleIds));
+    await deleteFuelRecordsWhere(inArray(fuelRecords.vehicleId, ids.vehicleIds));
   }
   if (missionIds.length > 0) {
     await deleteTreasuryEntriesOfMissions(missionIds);

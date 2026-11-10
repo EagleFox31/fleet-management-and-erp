@@ -8,6 +8,7 @@ import { startContractSession } from "../support/contract-session";
 import { createTestVehicle } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
 import { leakText } from "../support/api-error";
+import { deleteFuelRecordsWhere } from "../support/money-override";
 
 /**
  * Prix d'achat d'un véhicule (`vehicles.purchasePrice`), décision du 3 novembre 2026 :
@@ -223,7 +224,7 @@ describe("tableau de bord Direction : acquisitionHT reste visible pour managemen
     fuelRecordId = record.id;
   }, 60000);
   afterAll(async () => {
-    await db.delete(fuelRecords).where(inArray(fuelRecords.id, [fuelRecordId]));
+    await deleteFuelRecordsWhere(inArray(fuelRecords.id, [fuelRecordId]));
   });
 
   it("management reçoit la valeur d'acquisition du véhicule", async () => {

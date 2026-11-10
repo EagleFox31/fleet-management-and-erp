@@ -1,10 +1,11 @@
 import { db } from "../db";
 import { maintenanceSchedules, workOrderPlanning, workOrders, vehicles, type MaintenanceSchedule, type WorkOrder } from "@shared/schema";
-import { eq, and, gte, lte, lt, ne, isNotNull, desc, asc } from "drizzle-orm";
+import { VEHICLE_OUT_OF_SERVICE_STATUSES, type VehicleStatusKey } from "@shared/constants/vehicle-status";
+import { eq, and, gte, lte, lt, ne, isNotNull, desc, asc, sql } from "drizzle-orm";
 import { moduleLogger } from "../lib/logger";
 import { preventiveDueDay } from "../lib/kpi-rules";
 import { maintenancePriorityOf } from "../lib/maintenance-priority";
-import { stampPreventiveDue } from "../lib/preventive-due";
+import { isDateBasedDueAlreadyHandled, stampPreventiveDue } from "../lib/preventive-due";
 import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 
 const log = moduleLogger("preventive-maintenance");
@@ -168,6 +169,10 @@ export class PreventiveMaintenanceService {
       const generatedWorkOrders: WorkOrder[] = [];
 
       for (const vehicle of vehiclesToCheck) {
+        // Véhicule retiré de l'exploitation (vendu, réformé) : pas d'OT pour une échéance qui
+        // n'a plus d'atelier à planifier (rattrapage du premier passage en production).
+        if (VEHICLE_OUT_OF_SERVICE_STATUSES.includes(vehicle.status as VehicleStatusKey)) continue;
+
         // Vérifier nextMaintenanceDate (seulement si alertType absent ou === 'maintenance')
         if (!alertType || alertType === 'maintenance') {
           if (vehicle.nextMaintenanceDate) {
@@ -243,18 +248,20 @@ export class PreventiveMaintenanceService {
     dueOn?: Date
   ): Promise<WorkOrder | null> {
     try {
-      // Vérifier s'il n'y a pas déjà un ordre de travail similaire en cours
-      const existingWorkOrder = await db
-        .select()
+      // Idempotence : ce contrôle tourne en tâche de fond. Un OT de même titre ouvert (en
+      // attente, démarré, en attente de pièces) bloque ; un OT clos bloque tant que
+      // l'échéance du véhicule n'a pas avancé au-delà de celle qu'il a traitée.
+      const existingWorkOrders = await db
+        // `work_orders` est déclarée deux fois (workOrders, workOrderPlanning) : une jointure sur soi-même
+        // échoue, la colonne d'échéance se lit donc en SQL sur la même table.
+        .select({ status: workOrders.status, dueDate: sql<string | null>`"work_orders"."due_date"` })
         .from(workOrders)
         .where(and(
           eq(workOrders.vehicleId, vehicle.id),
           eq(workOrders.title, title),
-          eq(workOrders.status, 'pending')
-        ))
-        .limit(1);
+        ));
 
-      if (existingWorkOrder.length > 0) {
+      if (isDateBasedDueAlreadyHandled(existingWorkOrders, preventiveDueDay(dueOn, new Date()))) {
         log.info(`Ordre de travail déjà existant pour ${title} du véhicule ${vehicle.registrationNumber}`);
         return null;
       }

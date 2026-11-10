@@ -18,6 +18,7 @@ import {
 } from "./helpers/mission-journey";
 import { createE2EUser } from "./helpers/test-data";
 import { newE2EContext } from "./helpers/contexts";
+import { deleteClientInvoicesWhere } from "../tests/support/money-override";
 
 /**
  * MIS1 et P2, niveau E : une mission créée par la logistique est facturée depuis
@@ -69,7 +70,7 @@ test.beforeAll(async () => {
 
 test.afterAll(async () => {
   if (missionIds.length > 0) {
-    await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, missionIds));
+    await deleteClientInvoicesWhere(inArray(clientInvoices.missionId, missionIds));
   }
   await deleteJourneyRows(missionIds, driverIds);
   await cleanupCreated(ids);

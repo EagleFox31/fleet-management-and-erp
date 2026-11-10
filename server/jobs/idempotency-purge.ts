@@ -46,7 +46,7 @@ export async function runIdempotencyPurge(deps: IdempotencyPurgeDeps): Promise<I
 export async function createProductionIdempotencyPurgeDeps(): Promise<IdempotencyPurgeDeps> {
   const { db, listenerPool } = await import("../db");
   const { sql } = await import("drizzle-orm");
-  type LockClient = { query: (text: string, params?: unknown[]) => Promise<{ rows: Array<{ ok?: boolean }> }>; release: () => void };
+  type LockClient = { query: (text: string, params?: unknown[]) => Promise<{ rows: Array<{ ok?: boolean }> }>; release: (destroy?: boolean) => void };
   let client: LockClient | null = null;
   return {
     isEnabled: () => isFeatureEnabled(IDEMPOTENCY_FLAG),
@@ -69,10 +69,13 @@ export async function createProductionIdempotencyPurgeDeps(): Promise<Idempotenc
       if (!client) return;
       const c = client;
       client = null;
+      let unlocked = false;
       try {
         await c.query("SELECT pg_advisory_unlock(hashtext($1))", [IDEMPOTENCY_PURGE_LOCK_KEY]);
+        unlocked = true;
       } finally {
-        c.release();
+        // Déverrouillage en échec : on détruit la connexion plutôt que de la rendre au pool avec un verrou peut-être pris.
+        c.release(unlocked ? undefined : true);
       }
     },
     async tableExists() {

@@ -6,6 +6,7 @@ import { toIsoDateOnly } from "@shared/constants/management-dashboard";
 import { createTestSupplier, createTestVehicle } from "../support/factories";
 import { startContractSession } from "../support/contract-session";
 import { uniqueTestToken } from "../support/ids";
+import { deleteFuelRecordsWhere, deleteClientInvoicesWhere } from "../support/money-override";
 
 /**
  * DIR1 : les KPI de `GET /api/management/dashboard` sont recalculés à chaque lecture.
@@ -43,7 +44,7 @@ beforeAll(async () => {
 }, 60000);
 
 afterAll(async () => {
-  if (fuelRecordIds.length > 0) await db.delete(fuelRecords).where(inArray(fuelRecords.id, fuelRecordIds));
+  if (fuelRecordIds.length > 0) await deleteFuelRecordsWhere(inArray(fuelRecords.id, fuelRecordIds));
   if (workOrderIds.length > 0) await db.delete(workOrders).where(inArray(workOrders.id, workOrderIds));
   await session.stop();
 });
@@ -230,7 +231,7 @@ describe("DIR1 : partage du CA d'une mission à plusieurs affectations (#227)", 
       expect(itemOf(cancelled.id)).toBeUndefined();
       expect(itemOf(rejected.id)).toBeUndefined();
     } finally {
-      await db.delete(clientInvoices).where(eq(clientInvoices.id, invoice.id));
+      await deleteClientInvoicesWhere(eq(clientInvoices.id, invoice.id));
       await db.delete(assignments).where(inArray(assignments.id, rows.map((r) => r.id)));
       await db.delete(missions).where(eq(missions.id, mission.id));
     }
