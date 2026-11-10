@@ -7,7 +7,15 @@ import { clientLogger } from "@/lib/logger";
  * `/api/auth/me` avant rejeu reste la protection de fond).
  */
 
-export type SessionChannelMessage = { type: "logout" } | { type: "queue-changed" };
+/**
+ * `session-changed` : un compte vient de se connecter dans un onglet. Les autres onglets, qui
+ * partagent le même cookie, doivent cesser tout rejeu au nom de l'ancien compte (l'identifiant
+ * n'est jamais journalisé).
+ */
+export type SessionChannelMessage =
+  | { type: "logout" }
+  | { type: "queue-changed" }
+  | { type: "session-changed"; userId: number };
 
 export const SESSION_CHANNEL_NAME = "fleetos-offline-session";
 
@@ -31,11 +39,15 @@ export function createSessionChannel(
     try {
       channel = factory(SESSION_CHANNEL_NAME);
       channel.onmessage = (event: MessageEvent) => {
-        const data = event.data as { type?: unknown } | null;
-        if (data?.type !== "logout" && data?.type !== "queue-changed") return;
+        const data = event.data as { type?: unknown; userId?: unknown } | null;
+        let message: SessionChannelMessage;
+        if (data?.type === "logout" || data?.type === "queue-changed") message = { type: data.type };
+        else if (data?.type === "session-changed" && typeof data.userId === "number") {
+          message = { type: "session-changed", userId: data.userId };
+        } else return;
         for (const handler of Array.from(handlers)) {
           try {
-            handler({ type: data.type });
+            handler(message);
           } catch (err) {
             clientLogger.warn("Écouteur de session entre onglets en échec", { err });
           }

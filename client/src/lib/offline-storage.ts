@@ -54,10 +54,16 @@ export interface OfflineAction {
  * change, le cache TanStack du précédent est vidé, ses copies hors ligne et
  * l'ancien format global (propriétaire inconnu) sont détruits.
  */
-export function activateOfflineUser(queryClient: QueryClient, userId: number): void {
+export function activateOfflineUser(
+  queryClient: QueryClient,
+  userId: number,
+  options: { broadcast?: boolean } = {},
+): void {
   if (getActiveOfflineUserId() === userId) return;
   queryClient.clear();
   setActiveOfflineUserId(userId);
+  // Cookie partagé : les autres onglets cessent de rejouer au nom de l'ancien compte.
+  if (options.broadcast !== false) sessionChannel.post({ type: "session-changed", userId });
   void offlineScope.purgeLegacy();
   cancelScheduledReplay();
   // Changement de compte : les copies et les envois en attente de l'autre compte sont détruits (S1).
@@ -210,6 +216,11 @@ export function setupOfflinePersistence(queryClient: QueryClient): () => void {
   // Un autre onglet s'est déconnecté : cet onglet se purge aussi, sans réémettre.
   const unsubscribeChannel = sessionChannel.subscribe((message) => {
     if (message.type === "logout") void purgeOfflineSession(queryClient, { broadcast: false });
+    // Un autre compte s'est connecté dans un autre onglet : cet onglet adopte ce compte, ce qui
+    // arrête tout rejeu en cours pour l'ancien (garde `aborted` de la file).
+    if (message.type === "session-changed" && getActiveOfflineUserId() !== message.userId) {
+      activateOfflineUser(queryClient, message.userId, { broadcast: false });
+    }
   });
 
   // Sauvegarde debounced lors des modifications de cache
