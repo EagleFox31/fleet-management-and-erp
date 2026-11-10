@@ -32,3 +32,11 @@
 - Quoi : dans le premier cas du spec 21, un écouteur `page.on('request')` posé après `setOffline(true)` relève toute requête dont la méthode n'est ni GET, ni HEAD, ni OPTIONS, et le cas exige une liste vide, en plus de l'absence de boutons d'écriture.
 - Pourquoi : l'absence de boutons ne prouve pas qu'aucune écriture ne part (rejeu de file, minuterie).
 - Tester : spec 21 (base locale et serveur complet requis). Non rejoué ici faute de base ; typé seulement.
+
+## Audit de #682, mineur 1 : énumération des magasins impossible, on conclut « inconnu »
+
+- Quoi : `kv.listDbs` (`offline-kv.ts`) ne rend plus une liste partielle quand `indexedDB.databases()` échoue : il relève l'erreur. `cacheOwnership` renvoie alors `"unknown"` (et plus `"ok"`) et `resumeOfflineRead` refuse la reprise sans rien rouvrir. `purgeAll` vide le compte sortant et l'ancien format, puis lève : `purgeOfflineSession` renvoie `false` (purge incomplète, le repère de déconnexion est gardé).
+- Pourquoi : avec une liste vide faute de pouvoir énumérer, la copie de lecture d'un autre compte restait invisible : reprise accordée sur un appareil partagé, purge déclarée complète.
+- Preuve du rouge : 2 des 3 nouveaux cas échouaient avant le correctif (« expected { userId: 7 ... } to be null », « expected true to be false »), puis vert.
+- Tester : `node node_modules/vitest/vitest.mjs run tests/unit/client/offline-resume-storage.test.ts` (bloc « énumération des magasins impossible »).
+- Non traité : `purgeOthers` garde `?? []` (changement de compte en ligne, hors du périmètre du mineur).
