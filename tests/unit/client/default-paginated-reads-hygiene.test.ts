@@ -39,12 +39,6 @@ const DEFAULT_LIMITS: Record<string, number> = {
 };
 
 const FROZEN: Record<string, number> = {
-  // Lot 2, sélecteurs de véhicule (10 premiers proposés) : formulaires plein, plan de maintenance, OT.
-  "client/src/components/fuel/fuel-record-form.tsx": 1,
-  "client/src/components/maintenance/maintenance-schedule-form.tsx": 1,
-  "client/src/components/maintenance/work-order-form.tsx": 1,
-  "client/src/pages/maintenance-schedules.tsx": 1,
-  "client/src/pages/maintenance-simple-new.tsx": 1,
   // Lot 2 : sélecteur de véhicule des rotations (sa requête écrit un tableau sous `["/api/vehicles"]`,
   // clé que d'autres écrans lisent comme `{ vehicles, total }`), inspections récentes et rotations.
   "client/src/pages/inventory/tires/index.tsx": 4,
