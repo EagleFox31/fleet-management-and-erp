@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
-import { IDEMPOTENCY_HEADER, OFFLINE_OWNER_HEADER } from "../../shared/idempotency-routes";
+import { IDEMPOTENCY_HEADER, IDEMPOTENCY_REPLAYED_HEADER, OFFLINE_OWNER_HEADER } from "../../shared/idempotency-routes";
 import { idempotencyKeys } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
@@ -85,5 +85,24 @@ describe("V5b-2b : propriétaire de la file contre session", { timeout: 120000 }
   it("propriétaire sans clé d'idempotence : le garde ne s'applique qu'aux envois différés", async () => {
     const sent = await put("driverA", { [OFFLINE_OWNER_HEADER]: String(session.userIdOf("driverB")) });
     expect(sent.body?.code).not.toBe("OFFLINE_OWNER_MISMATCH");
+  });
+});
+
+describe("V5b-2b : CORS de l'application mobile", { timeout: 120000 }, () => {
+  it("le preflight depuis https://localhost autorise Idempotency-Key et X-Offline-Owner, la réponse expose Idempotent-Replayed", async () => {
+    const res = await fetch(session.baseUrl + PATH, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://localhost",
+        "Access-Control-Request-Method": "PUT",
+        "Access-Control-Request-Headers": "idempotency-key,x-offline-owner,content-type",
+      },
+    });
+    expect(res.status).toBe(204);
+    const allowed = (res.headers.get("access-control-allow-headers") ?? "").toLowerCase().split(/\s*,\s*/);
+    expect(allowed).toEqual(expect.arrayContaining([IDEMPOTENCY_HEADER.toLowerCase(), OFFLINE_OWNER_HEADER.toLowerCase()]));
+    const exposed = (res.headers.get("access-control-expose-headers") ?? "").toLowerCase().split(/\s*,\s*/);
+    expect(exposed).toContain(IDEMPOTENCY_REPLAYED_HEADER.toLowerCase());
+    expect(res.headers.get("access-control-allow-origin")).toBe("https://localhost");
   });
 });

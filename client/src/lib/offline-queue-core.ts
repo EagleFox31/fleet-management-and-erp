@@ -136,7 +136,10 @@ export function normalizeEntry(
     lastError: typeof r.lastError === "string" ? r.lastError : undefined,
     nextAttemptAt: typeof r.nextAttemptAt === "number" ? r.nextAttemptAt : undefined,
     inProgressHits: typeof r.inProgressHits === "number" ? r.inProgressHits : undefined,
-    createdAt: typeof r.createdAt === "number" ? r.createdAt : take(undefined, deps.now()),
+    createdAt:
+      typeof r.createdAt === "number" && Number.isFinite(r.createdAt) && r.createdAt > 0
+        ? r.createdAt
+        : take(undefined, deps.now()),
     ownerUserId: typeof r.ownerUserId === "number" ? r.ownerUserId : take(undefined, ownerUserId),
     label: typeof r.label === "string" ? r.label : take(undefined, type),
   };

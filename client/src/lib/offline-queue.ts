@@ -1,5 +1,5 @@
 import { FEATURE_FLAGS_PATH, type FeatureKey } from "@shared/feature-flags";
-import { OFFLINE_OWNER_HEADER, isAutoReplayable } from "@shared/idempotency-routes";
+import { OFFLINE_OWNER_HEADER, isAutoReplayable, sameProtectedRoute } from "@shared/idempotency-routes";
 import { NETWORK_ERROR_MESSAGE } from "@shared/errors";
 import { ApiError, userMessageOf } from "@/lib/api-error";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -148,6 +148,26 @@ function newUuid(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+/**
+ * Vrai si la file peut rejouer cet envoi : route protégée par la clé d'idempotence ET route de son type
+ * (la route protégée d'un autre type ne convient pas).
+ */
+export function isEntryAutoReplayable(
+  entry: Pick<QueueEntry, "type" | "method" | "endpoint" | "idempotencyKey" | "payload">,
+): boolean {
+  const definition = getOfflineAction(entry.type);
+  return (
+    isAutoReplayable({
+      method: entry.method,
+      endpoint: entry.endpoint,
+      idempotencyKey: entry.idempotencyKey,
+      payload: entry.payload,
+    }) &&
+    (definition === undefined ||
+      sameProtectedRoute(entry, { method: definition.method, endpoint: definition.routeExample }))
+  );
+}
+
 export const offlineQueue = createOfflineQueue({
   store: {
     read: (userId) => offlineScope.readQueue<unknown>(userId),
@@ -160,13 +180,7 @@ export const offlineQueue = createOfflineQueue({
   withMutationLock: (userId, fn) => lockProvider.run(`queue-u${userId}`, fn),
   tryReplayLock: (userId, fn) => lockProvider.tryRun(`replay-u${userId}`, fn),
   getDefinition: getOfflineAction,
-  isAutoReplayable: (entry) =>
-    isAutoReplayable({
-      method: entry.method,
-      endpoint: entry.endpoint,
-      idempotencyKey: entry.idempotencyKey,
-      payload: entry.payload,
-    }),
+  isAutoReplayable: isEntryAutoReplayable,
   invalidateFor: (entry) => {
     const definition = getOfflineAction(entry.type);
     if (!definition?.invalidations || !queryClient) return;

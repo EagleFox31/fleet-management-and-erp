@@ -47,7 +47,9 @@ export const IDEMPOTENCY_KEY_PATTERN = /^[\x21-\x7e]{1,255}$/;
 /**
  * Durée de conservation d'une clé côté serveur (jours) : `idempotency_keys.expires_at`. Au-delà, un
  * rejeu avec la même clé s'exécuterait une seconde fois. Le client s'en sert pour ne plus rejouer
- * un envoi trop ancien ; le schéma et le bootstrap SQL lisent la même valeur.
+ * un envoi trop ancien. Le SQL (`shared/schema.ts`, `server/init-database.ts`, migration
+ * `20261101_cdc_ecarts.sql`) écrit `interval '7 days'` en dur : un test unitaire compare ces trois
+ * endroits à cette constante, il échoue si l'un diverge.
  */
 export const IDEMPOTENCY_RETENTION_DAYS = 7;
 
@@ -136,4 +138,22 @@ export function isAutoReplayable(input: {
     body !== null &&
     (body as { requestKey?: unknown }).requestKey === input.idempotencyKey
   );
+}
+
+/**
+ * Vrai si (méthode, endpoint) de l'envoi relève du même motif protégé que l'exemple de route de son
+ * type. Empêche un type A d'envoyer vers la route protégée d'un type B.
+ */
+export function sameProtectedRoute(
+  send: { method: string; endpoint: string },
+  example: { method: string; endpoint: string },
+): boolean {
+  const sendPath = normalizeIdempotencyPath(stripApiPrefix(send.endpoint));
+  const examplePath = normalizeIdempotencyPath(stripApiPrefix(example.endpoint));
+  const sendMethod = send.method.toUpperCase();
+  if (sendMethod !== example.method.toUpperCase()) return false;
+  const pattern = [...IDEMPOTENCY_ROUTES, ...REQUEST_KEY_ROUTES].find(
+    (r) => r.method === sendMethod && r.pattern.test(examplePath),
+  )?.pattern;
+  return pattern !== undefined && pattern.test(sendPath);
 }

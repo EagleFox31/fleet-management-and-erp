@@ -67,9 +67,10 @@ describe("purge : base vidée supprimée", () => {
 });
 
 describe("rétention des clés : une seule valeur", () => {
-  it("le schéma et le bootstrap SQL lisent la même durée que la constante partagée", () => {
+  it("le schéma, le bootstrap SQL et la migration lisent la même durée que la constante partagée", () => {
     const expected = `interval '${IDEMPOTENCY_RETENTION_DAYS} days'`;
-    expect(readFileSync("shared/schema.ts", "utf8")).toContain(expected);
-    expect(readFileSync("server/init-database.ts", "utf8")).toContain(expected);
+    for (const file of ["shared/schema.ts", "server/init-database.ts", "server/db/migrations/20261101_cdc_ecarts.sql"]) {
+      expect(readFileSync(file, "utf8"), file).toContain(expected);
+    }
   });
 });

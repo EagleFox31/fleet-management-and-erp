@@ -75,6 +75,9 @@ function harness(options: { active?: number | null; owner?: OwnerCheck; initial?
     onDrained,
     onAuthStopped,
     invalidateFor,
+    advance: (ms: number) => {
+      clock += ms;
+    },
     setActive: (id: number | null) => {
       active = id;
     },
@@ -194,7 +197,8 @@ describe("file d'écritures différées", () => {
   it("envoi plus vieux que la rétention serveur moins une marge : À revoir sans envoi", async () => {
     const h = harness();
     const old = await h.queue.enqueue({ type: "fuel_entry", payload: {} });
-    h.disk.set(7, [{ ...old, createdAt: old.createdAt - MAX_ENTRY_AGE_MS - 1_000 }]);
+    h.advance(MAX_ENTRY_AGE_MS + 1_000);
+    expect(old.createdAt).toBeGreaterThan(0);
     const result = await h.queue.replay();
     expect(result).toMatchObject({ rejected: 1, sent: 0 });
     expect(h.sent).toHaveLength(0);
@@ -323,6 +327,16 @@ describe("file d'écritures différées", () => {
     const [a, b] = await Promise.all([h.queue.replay(), h.queue.replay()]);
     expect([a.status, b.status].sort()).toEqual(["drained", "skipped"]);
     expect(h.sent).toHaveLength(1);
+  });
+
+  it("un envoi sans date de création reçoit la date du jour et n'est pas mis À revoir", async () => {
+    const base = { type: "fuel_entry", endpoint: "/api/x", method: "POST", payload: {}, idempotencyKey: "k-sans-date", label: "Plein", state: "pending", attempts: 0, ownerUserId: 7 };
+    const h = harness({ initial: [{ ...base, id: "a" }, { ...base, id: "b", idempotencyKey: "k-zero", createdAt: 0 }, { ...base, id: "c", idempotencyKey: "k-nan", createdAt: Number.NaN }] });
+    const list = await h.queue.list(7);
+    expect(list.map((e) => e.createdAt)).toEqual([expect.any(Number), expect.any(Number), expect.any(Number)]);
+    for (const e of list) expect(e.createdAt).toBeGreaterThan(0);
+    const result = await h.queue.replay();
+    expect(result).toMatchObject({ sent: 3, rejected: 0 });
   });
 
   it("migre sans perte l'ancienne file et crée une clé stable", async () => {

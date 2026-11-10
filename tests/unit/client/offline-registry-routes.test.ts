@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { getOfflineAction, listOfflineActions } from "@/lib/offline-action-registry";
 import { isAutoReplayable } from "@shared/idempotency-routes";
 
@@ -42,5 +42,21 @@ describe("registre des écritures hors ligne et routes protégées (V5b-2b)", ()
   it("work_order_note n'est plus enregistré, odometer_reading est un PUT", () => {
     expect(getOfflineAction("work_order_note")).toBeUndefined();
     expect(getOfflineAction("odometer_reading")?.method).toBe("PUT");
+  });
+});
+
+describe("l'envoi doit suivre la route de son type (V5b-2b)", () => {
+  it("un type qui vise la route protégée d'un autre type n'est pas rejoué", async () => {
+    vi.doMock("@/lib/queryClient", () => ({ apiRequest: vi.fn(), queryClient: undefined }));
+    vi.doMock("@/hooks/use-toast", () => ({ toast: vi.fn() }));
+    const { isEntryAutoReplayable } = await import("@/lib/offline-queue");
+    const base = { idempotencyKey: KEY, payload: { requestKey: KEY } };
+    // odometer_reading (PUT /vehicles/:id/mileage) : sa propre route passe.
+    expect(isEntryAutoReplayable({ ...base, type: "odometer_reading", method: "PUT", endpoint: "/api/vehicles/3/mileage" })).toBe(true);
+    // Même type, route protégée d'un autre type (statut de mission) : refusé.
+    expect(isEntryAutoReplayable({ ...base, type: "odometer_reading", method: "PUT", endpoint: "/api/missions/3/status" })).toBe(false);
+    // fuel_entry vers la route du kilométrage : refusé.
+    expect(isEntryAutoReplayable({ ...base, type: "fuel_entry", method: "PUT", endpoint: "/api/vehicles/3/mileage" })).toBe(false);
+    expect(isEntryAutoReplayable({ ...base, type: "fuel_entry", method: "POST", endpoint: "/api/missions/3/fuel-records" })).toBe(true);
   });
 });
