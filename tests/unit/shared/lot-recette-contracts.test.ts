@@ -26,7 +26,7 @@ import { updateNotificationSettingsRequestSchema } from "@shared/contracts/notif
  * SHOULD allumés par défaut après recette (lot V3). Chaque entrée est une décision versionnée :
  * l'ajouter ici dans la PR qui passe `defaultEnabled` à true, avec son e2e.
  */
-const SHOULD_ACTIVATED_AFTER_RECETTE: ReadonlySet<string> = new Set(["tire-movements", "fuel-anomalies", "work-order-audit-trail"]);
+const SHOULD_ACTIVATED_AFTER_RECETTE: ReadonlySet<string> = new Set(["tire-movements", "fuel-anomalies", "work-order-audit-trail", "fuel-vouchers"]);
 
 describe("drapeaux de fonctionnalité", () => {
   it("clés en kebab-case, MUST et SHOULD recettés allumés par défaut, les autres coupés", () => {

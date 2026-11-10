@@ -26,7 +26,7 @@ export const FEATURE_FLAGS = {
   "vehicle-cost-summary": { level: "should", defaultEnabled: false, label: "Coût d'un véhicule" },
   "tire-movements": { level: "should", defaultEnabled: true, label: "Mouvements de pneus" },
   "part-requirement-receive": { level: "should", defaultEnabled: false, label: "Réception signée des pièces" },
-  "fuel-vouchers": { level: "should", defaultEnabled: false, label: "Validation des bons de carburant" },
+  "fuel-vouchers": { level: "should", defaultEnabled: true, label: "Validation des bons de carburant" },
   "fuel-anomalies": { level: "should", defaultEnabled: true, label: "Traitement des anomalies carburant" },
   "fuel-prices": { level: "should", defaultEnabled: false, label: "Prix du carburant daté" },
   "time-tracking": { level: "should", defaultEnabled: false, label: "Pointage" },
