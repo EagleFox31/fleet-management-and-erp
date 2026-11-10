@@ -717,10 +717,13 @@ export default function FuelPage() {
                   Recharger la carte
                 </Button>
               )}
-              <Button onClick={() => setIsFormOpen(true)}>
-                <Plus className="h-4 w-4 mr-2" />
-                Enregistrer un plein
-              </Button>
+              {/* Même garde que POST /api/fuel-card/consumption (isFuelCardManager) : pas de bouton qui finit en 403. */}
+              {canManageFuelCard && (
+                <Button onClick={() => setIsFormOpen(true)} data-testid="button-open-fuel-form">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Enregistrer un plein
+                </Button>
+              )}
             </div>
           }
         >
