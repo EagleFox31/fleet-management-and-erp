@@ -32,13 +32,15 @@ export async function emitMissionEvent(
   missionId: number | null,
   staffData: Record<string, unknown>,
   requestId?: string,
+  /** Rôles qui reçoivent la trame complète (défaut : tout `MISSION_EVENT_ROLES`). */
+  staffRoles: readonly string[] = MISSION_EVENT_ROLES,
 ): Promise<void> {
   const broadcastUpdate = (global as any).broadcastUpdate;
   if (typeof broadcastUpdate !== "function") {
     return;
   }
   try {
-    broadcastUpdate(eventType, { ...staffData, scope: { type: "roles", roles: [...MISSION_EVENT_ROLES] } });
+    broadcastUpdate(eventType, { ...staffData, scope: { type: "roles", roles: [...staffRoles] } });
     if (!missionId) return;
     const driverUserIds = await assignedDriverUserIds(missionId);
     if (driverUserIds.length === 0) return;

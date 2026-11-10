@@ -98,3 +98,5 @@ Statut V5b-3 (2026-11-10) : livré en PR brouillon `feat/v5b-3-offline-read` (li
 ## Prérequis d'allumage de `offline-writes` (V5b-2b)
 
 Allumer `offline-writes` seulement après le déploiement de V5b-2b ET une période de mise à jour du service worker : un ancien bundle encore en cache dans un appareil rejoue sans `X-Offline-Owner`, donc sans la vérification du propriétaire à chaque envoi (le garde serveur laisse passer l'absence de l'en-tête pour rester compatible). Attendre que les appareils aient pris le nouveau bundle (cycle de mise à jour du service worker, plusieurs jours d'usage) avant de couper la compatibilité ou d'allumer le drapeau, et ne l'allumer qu'après la revue sécurité.
+
+Statut V5b-3b (2026-11-10) : livré en PR brouillon `feat/v5b-3b-restauration-demarrage` (marqueur `offline-resume` 72 h après le dernier contact, restauration de la copie de lecture du chauffeur au démarrage sans réseau, bandeau avec échéance). Audit sécurité de la cloison #56 à faire avant fusion.

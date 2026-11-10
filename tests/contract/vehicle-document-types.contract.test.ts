@@ -41,7 +41,7 @@ async function login(role: TestUserRole) {
 async function call(method: string, path: string, role?: string, body?: unknown) {
   const res = await fetch(baseUrl + path, {
     method,
-    headers: { ...(role ? { Cookie: cookies.get(role)! } : {}), ...(body ? { "Content-Type": "application/json" } : {}) },
+    headers: { ...(role ? { Cookie: cookies.get(role)! } : {}), "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
   return { status: res.status, body: await res.json().catch(() => null) };
