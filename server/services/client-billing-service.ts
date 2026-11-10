@@ -4,6 +4,7 @@ import {
   clientInvoices,
   clientPayments,
   missions,
+  missionPodFiles,
   clients,
   type ClientInvoice,
   type ClientPayment
@@ -120,6 +121,19 @@ export class ClientBillingService {
       }
 
       const { mission, client } = result;
+
+      // Pas de facture sans preuve de livraison : mission livrée ou clôturée, et au moins un fichier POD.
+      if (mission.status !== "delivered" && mission.status !== "completed") {
+        throw new AppError(409, "La mission n'est pas livrée : elle se facture une fois livrée ou clôturée.");
+      }
+      const [pod] = await tx
+        .select({ id: missionPodFiles.id })
+        .from(missionPodFiles)
+        .where(eq(missionPodFiles.missionId, missionId))
+        .limit(1);
+      if (!pod) {
+        throw new AppError(409, "Preuve de livraison manquante : déposez le POD de la mission avant de la facturer.");
+      }
       const effectiveMissionDate =
         this.resolveMissionActualDeliveryDate(mission) ??
         this.toDateIfValid(mission.deliveryDate) ??
