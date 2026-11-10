@@ -47,3 +47,10 @@
 - Pourquoi : `GET /api/auth/me` répond 404 quand le compte de la session n'existe plus. C'était classé « serveur injoignable avec code HTTP » : ni purge, ni arrêt de la lecture hors ligne d'un compte supprimé.
 - Preuve du rouge : 2 échecs avant le correctif (`session-check.test.ts` : 404 attendu `anonymous`, reçu `unreachable`; `auth-bootstrap.test.ts` : grant non effacé après le 404), puis vert.
 - Tester : `node node_modules/vitest/vitest.mjs run tests/unit/client/session-check.test.ts tests/unit/client/auth-bootstrap.test.ts`.
+
+## Audit de #682, mineur 3, et relecture, mineur 3 : profil sans accueil, voile au lieu d'un écran blanc
+
+- Quoi : `OfflineShellGate` rend le voile d'attente (`SessionUnreachableNotice`, exporté de `useAuth.tsx`, bouton « Réessayer » seulement si `onRetry` est fourni) quand le profil de lecture n'a pas d'accueil restreint, au lieu de `null`.
+- Pourquoi : avec une reprise accordée (`isLoading` faux), le voile habituel ne s'affiche pas, et la garde rendait `null` : écran blanc pour un profil ajouté au marqueur sans accueil.
+- Preuve du rouge : le cas « profil sans accueil restreint » échouait (« expected '' not to be '' »), puis vert. Les trois autres cas de la garde (routes, accueil chauffeur, renvoi vers l'accueil) sont figés aussi : c'est le test unitaire du voile du mineur 3 de la relecture (un seul commit pour les deux).
+- Tester : `node node_modules/vitest/vitest.mjs run tests/unit/client/offline-shell-gate.test.ts`.
