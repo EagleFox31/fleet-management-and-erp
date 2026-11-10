@@ -21,6 +21,12 @@ export interface OfflineActionDefinition {
   /** Libellé affiché dans le badge et l'écran « Envois ». */
   label: string;
   method: "POST" | "PUT" | "PATCH" | "DELETE";
+  /**
+   * Exemple réel de route de ce type. Un test vérifie que (méthode, exemple) correspond à un motif
+   * protégé de `shared/idempotency-routes.ts` : un type dont la route n'est pas protégée contre le
+   * doublon ne s'ajoute pas au registre (la file ne le rejouerait pas).
+   */
+  routeExample: string;
   /** Route par défaut ; une mise en file peut fournir la sienne. */
   endpoint?: (context: OfflineActionContext) => string;
   /** Drapeaux exigés pour mettre ce type en file. `offline-writes` est toujours exigé. */
@@ -35,6 +41,10 @@ const definitions = new Map<string, OfflineActionDefinition>();
 
 export function registerOfflineAction(definition: OfflineActionDefinition): void {
   definitions.set(definition.type, definition);
+}
+
+export function listOfflineActions(): OfflineActionDefinition[] {
+  return Array.from(definitions.values());
 }
 
 export function getOfflineAction(type: string): OfflineActionDefinition | undefined {
@@ -56,6 +66,8 @@ registerOfflineAction({
   type: "fuel_entry",
   label: "Plein de carburant",
   method: "POST",
+  // Dédoublonné par la `requestKey` du corps (égale à la clé de l'envoi), pas par l'en-tête.
+  routeExample: "/api/missions/1/fuel-records",
   requiredFlags: ["driver-offline"],
   invalidations: ({ missionId }) => [
     ...missionQueries(missionId),
@@ -63,16 +75,12 @@ registerOfflineAction({
     byPath("/api/fuel-card/balance"),
   ],
 });
-registerOfflineAction({
-  type: "work_order_note",
-  label: "Note d'ordre de travail",
-  method: "POST",
-  requiredFlags: ["technician-offline"],
-  invalidations: () => [byPath("/api/technician/my-work-orders"), byPath("/api/work-orders")],
-});
+// `work_order_note` retiré (V5b-2b) : sa route POST n'est pas protégée par la clé d'idempotence, une
+// réponse perdue produirait une note en double. Il reviendra avec sa route protégée (lot #10c).
 registerOfflineAction({
   type: "odometer_reading",
   label: "Relevé kilométrique",
-  method: "POST",
+  method: "PUT",
+  routeExample: "/api/vehicles/1/mileage",
   invalidations: () => [byPath("/api/vehicles")],
 });

@@ -10,6 +10,7 @@ import { AppError } from "../lib/app-error";
 import { gpsCheckAppError, missionGeoColumnsFromBody } from "../lib/gps-points";
 import { isCheckViolation, pgConstraintOf } from "../lib/pg-errors";
 import { authorize } from "../middleware/auth";
+import { emitMissionEvent } from "../lib/mission-events";
 import { missionTrack } from "../services/vehicle-positions-service";
 
 /**
@@ -74,6 +75,14 @@ router.patch("/:id/geo", requireFeature("gps"), authorize([...MISSION_GEO_WRITE_
       const mapped = isCheckViolation(error) ? gpsCheckAppError(pgConstraintOf(error), error) : null;
       throw mapped ?? error;
     }
+    // Couche 2 : le personnel (trame complète) et le chauffeur affecté (trame réduite) rechargent la mission
+    // et sa trace ; les points A/B changent le fond de carte. Au mieux : l'écriture est faite.
+    await emitMissionEvent(
+      "mission_updated",
+      missionId,
+      { entity: "mission", entityId: missionId, payload: { missionId, geo: true } },
+      req.requestId,
+    );
     res.json({ missionId, ...columns });
   } catch (error) {
     next(error);

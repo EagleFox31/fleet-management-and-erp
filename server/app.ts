@@ -1,4 +1,5 @@
 import express, { type Express } from "express";
+import { IDEMPOTENCY_HEADER, IDEMPOTENCY_REPLAYED_HEADER, OFFLINE_OWNER_HEADER } from "@shared/idempotency-routes";
 import compression from "compression";
 import path from "path";
 import type { Server } from "http";
@@ -80,7 +81,8 @@ export async function createApp(
         res.setHeader("Access-Control-Allow-Origin", origin);
         res.setHeader("Access-Control-Allow-Credentials", "true");
         res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
-        res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Cookie");
+        res.setHeader("Access-Control-Allow-Headers", ["Content-Type", "Authorization", "X-Requested-With", "Cookie", IDEMPOTENCY_HEADER, OFFLINE_OWNER_HEADER].join(", "));
+        res.setHeader("Access-Control-Expose-Headers", IDEMPOTENCY_REPLAYED_HEADER);
         res.setHeader("Vary", "Origin");
       }
     }

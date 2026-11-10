@@ -1,6 +1,7 @@
 import { userMessageOf } from "@/lib/api-error";
 import React, { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useAllWorkOrders } from "@/hooks/use-all-work-orders";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
@@ -120,10 +121,7 @@ export default function TechniciansIndex() {
   });
 
   // Fetch work orders for KPI calculations with detailed data
-  const { data: workOrdersData } = useQuery<any>({
-    queryKey: ["/api/work-orders"],
-  });
-  const workOrders = workOrdersData?.workOrders || [];
+  const { data: workOrders = [] } = useAllWorkOrders();
 
   // Fetch fuel records for technician performance
   const { data: fuelRecords = [] } = useQuery<any>({
