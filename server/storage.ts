@@ -917,9 +917,8 @@ export class DatabaseStorage implements IStorage {
       // Effectuer la mise à jour du véhicule
       // Le type est écrit sous les verrous de l'attelage : pas de course avec une affectation.
       const [updatedVehicle] = await db.transaction(async (tx) => {
-        if (vehicle.vehicleType && vehicle.vehicleType !== currentVehicle.vehicleType) {
-          await assertVehicleTypeChangeAllowed(tx, id, vehicle.vehicleType);
-        }
+        // Comparé au type relu sous verrou dans le contrôle, pas à `currentVehicle` lu hors transaction.
+        if (vehicle.vehicleType) await assertVehicleTypeChangeAllowed(tx, id, vehicle.vehicleType);
         return tx.update(vehicles).set(vehicle).where(eq(vehicles.id, id)).returning();
       });
       

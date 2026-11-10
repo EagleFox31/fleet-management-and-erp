@@ -298,13 +298,14 @@ describe("remorque d'affectation", { timeout: 180000 }, () => {
     expect(apiErrorProblems(asTruck.status, asTruck.body, 409, undefined, asTruck.headers.get("x-request-id"))).toEqual([]);
     expect([await typeOf(truck), await typeOf(trailerId)]).toEqual(["porteur", "remorque"]);
 
-    // Affectation terminée : le véhicule n'est plus attelé, le type se change.
+    // Type inchangé (autre champ) sur un véhicule encore attelé : jamais bloqué.
+    const same = await session.call("PATCH", `/api/vehicles/${truck}`, { actor: "admin", body: { vehicleType: "porteur", color: "Bleu" } });
+    expect(same.status, JSON.stringify(same.body)).toBe(200);
+
+    // Affectation annulée : le véhicule n'est plus attelé, le type se change.
     await db.update(assignments).set({ status: "cancelled" } as any).where(eq(assignments.missionId, missionId));
     const free = await session.call("PATCH", `/api/vehicles/${trailerId}`, { actor: "admin", body: { vehicleType: "porteur" } });
     expect(free.status, JSON.stringify(free.body)).toBe(200);
-    // Type inchangé (autre champ) sur un véhicule attelé : jamais bloqué.
-    const same = await session.call("PATCH", `/api/vehicles/${truck}`, { actor: "admin", body: { vehicleType: "porteur", color: "Bleu" } });
-    expect(same.status, JSON.stringify(same.body)).toBe(200);
   });
 
   it("PATCH sans trailerId conserve la remorque ; null la retire", async () => {

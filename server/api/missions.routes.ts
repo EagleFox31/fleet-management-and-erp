@@ -27,7 +27,7 @@ import { MISSION_ID_INVALID_MESSAGE, parseRouteId } from "../lib/route-id";
 import { assertValidDbId } from "../lib/work-order-scope";
 import { assertPlanningStateUnchanged, findPlanningClash, launchRefusalMessage, lockPlanningPairs, lockPlanningResources, planningClashMessage, planningStateKey } from "../services/mission-planning";
 import { ACTIVE_ASSIGNMENT_STATUSES, VOID_ASSIGNMENT_STATUSES, isActiveAssignmentStatus, isVoidAssignmentStatus } from "@shared/constants/assignments";
-import { assertTrailerAssignable, assertTruckIsNotTrailer, trailerConflictToAppError } from "../services/trailer-assignment";
+import { assertTrailerAssignable, assertTruckIsNotTrailer, assertTruckTypeUnderLock, trailerConflictToAppError } from "../services/trailer-assignment";
 
 // Remorque attelée à l'affectation : second alias de vehicles, le premier étant le camion.
 const trailerVehicles = alias(vehicles, "assignment_trailer");
@@ -2207,6 +2207,7 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
       if (withAssignment) {
         // Ordre des verrous identique sur les trois routes : camion (1), chauffeur (2), puis remorque (3).
         await lockPlanningResources(tx, assignmentVehicleId!, assignmentDriverId!);
+        await assertTruckTypeUnderLock(tx, assignmentVehicleId!);
         const clash = await findPlanningClash(tx, {
           missionId: null,
           pickupDate: validatedData.pickupDate,
@@ -2635,6 +2636,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
         if (existingAssignment?.id) {
           const current = existingAssignment;
           writeAssignment = async (tx) => {
+            await assertTruckTypeUnderLock(tx, vehicleId);
             if (trailerId) await assertTrailerAssignable(tx, { loadReceipts: (id) => loadOpenRenewalReceipts(id, tx), trailerId, vehicleId, excludeAssignmentId: current.id });
             await tx
               .update(assignments)
@@ -2649,6 +2651,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
           };
         } else {
           writeAssignment = async (tx) => {
+            await assertTruckTypeUnderLock(tx, vehicleId);
             if (trailerId) await assertTrailerAssignable(tx, { loadReceipts: (id) => loadOpenRenewalReceipts(id, tx), trailerId, vehicleId });
             await tx.insert(assignments).values({ missionId, vehicleId, driverId, trailerId, status: "pending" });
           };
@@ -2794,6 +2797,7 @@ router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), validateB
 
       // Conflit de planning (même règle que le lancement) : chaque chauffeur et chaque véhicule ajouté.
       await lockPlanningResources(tx, vehicleId, driverId);
+      await assertTruckTypeUnderLock(tx, vehicleId);
       const clash = await findPlanningClash(tx, {
         missionId,
         pickupDate: mission.pickupDate,
