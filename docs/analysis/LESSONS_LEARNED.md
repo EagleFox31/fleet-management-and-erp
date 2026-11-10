@@ -3669,3 +3669,17 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
 - **Résolution** : remplacement par fonction (`content.replace(ancre, () => ancre + sql)`), qui insère le texte tel quel ; constante corrigée.
 - **Prévention vérifiée** : le test des jumelles (`tests/unit/server/vehicle-positions-gps-schema.test.ts`, premier cas, et ses équivalents pour chaque migration) compare la migration et la constante d'`init-database.ts` ; il est rouge sur ce défaut.
 - **Leçon généralisée** : pour insérer du code ou du SQL par script, toujours passer une fonction de remplacement (ou `split`/`join`), jamais une chaîne qui contient `$`. Une migration a toujours sa jumelle testée.
+## 2026-11-10 — Carte Direction : des positions et des statuts fabriqués à partir du rang de la ligne
+
+- **Contexte** : `aggregateCorridorFleet` (`server/services/management-dashboard-service.ts`), qui alimente `corridorFleet` dans `GET /api/management/dashboard`, produisait des coordonnées par `interpolateCorridorPosition` sur un `progressPercent` calculé depuis l'indice de la ligne (`index * 17 % 85`), et marquait « en transit » un véhicule sans mission une fois sur trois (`index % 3`). Vitesse (65 km/h), consommation (34,5 L/100 km), origine (« Douala (Port) ») et destination (« Garoua ») avaient aussi des valeurs de repli inventées. La carte n'est pas montée aujourd'hui ; elle devait l'être avec le suivi GPS.
+- **Cause racine** : maquette de démonstration branchée sur l'API réelle sans que la réponse distingue le mesuré de l'inventé. Le contrat (`currentLat`, `currentLng`, `progressPercent` obligatoires) obligeait à remplir un champ même sans donnée.
+- **Classification** : intégrité des données présentées à la direction, risque de mauvaise décision. Préexistant, sans exposition tant que l'écran n'est pas monté.
+- **Résolution** :
+  - Dérivation extraite dans `server/services/corridor-fleet.ts` (fonction pure) : statut déduit de la mission réelle seule (`in_progress` donne en transit, `assigned`/`planned` en préparation, sinon arrêté, véhicule en panne ou en maintenance en alerte).
+  - Contrat `LiveCorridorVehicle` : `currentLat`, `currentLng`, `progressPercent`, `origin`, `destination` optionnels ; `positionSource: "none" | "phone" | "tracker"` obligatoire ; `speedKmh` retiré ; consommation seulement si litres et distance réels existent.
+  - Affectations annulées, refusées ou terminées et missions livrées n'établissent plus de statut ; la mission la plus avancée est retenue quand un véhicule en a plusieurs.
+  - `executive-corridor-map.tsx` n'affiche un marqueur que pour une position réelle et compte les véhicules « non suivis ».
+- **Prévention vérifiable** :
+  - `tests/unit/server/corridor-fleet.test.ts` : aucun véhicule sans mission en transit sur 30 rangs, aucune coordonnée ni progression sans source, aucune valeur de repli.
+  - `tests/contract/management-dashboard-kpis.contract.test.ts` (GPS-FE-4) : sur `GET /api/management/dashboard`, véhicule sans mission en `stopped`, aucun véhicule avec coordonnée tant qu'aucune source n'existe. Rouge sur l'ancien service (1 échec), vert après.
+- **Leçon généralisée** : un champ de contrat obligatoire pousse à fabriquer une valeur quand la donnée manque. Toute donnée dont la source n'existe pas encore est optionnelle et accompagnée d'un champ qui dit d'où elle vient (ici `positionSource`) ; un repli « plausible » n'est jamais acceptable dans une réponse que lit la direction.

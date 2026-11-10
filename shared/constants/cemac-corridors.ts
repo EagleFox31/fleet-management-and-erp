@@ -25,6 +25,13 @@ export type CemacCorridor = {
 
 export type TransitStatus = "in_transit" | "returning" | "loading" | "stopped" | "alert";
 
+/**
+ * Source de la position d'un véhicule. "none" : aucune source réelle, le véhicule n'a alors
+ * ni `currentLat` ni `currentLng` (jamais de coordonnée déduite d'un rang ou d'un statut).
+ * Les sources réelles ("phone", "tracker") s'ajoutent avec la remontée GPS (GPS-API-1).
+ */
+export type VehiclePositionSource = "none" | "phone" | "tracker";
+
 export type LiveCorridorVehicle = {
   vehicleId: number;
   registrationNumber: string;
@@ -35,18 +42,22 @@ export type LiveCorridorVehicle = {
   orderNumber?: string;
   clientName?: string;
   driverName?: string;
-  origin: string;
-  destination: string;
+  origin?: string;
+  destination?: string;
   cargoLabel?: string;
   weightTonnes?: number;
-  currentLat: number;
-  currentLng: number;
+  /** Présentes seulement si `positionSource !== "none"`. */
+  currentLat?: number;
+  currentLng?: number;
+  positionSource: VehiclePositionSource;
+  /** Horodatage ISO du dernier point réel, si une source existe. */
+  positionAt?: string;
   corridorId?: string;
   transitStatus: TransitStatus;
-  progressPercent: number;
+  /** Absent tant qu'aucune position réelle ne permet de le calculer. */
+  progressPercent?: number;
   estimatedArrival?: string;
-  fuelConsumptionAvg?: number; // L/100 km
-  speedKmh?: number;
+  fuelConsumptionAvg?: number; // L/100 km, seulement si litres et distance réels de la mission
   notes?: string;
 };
 

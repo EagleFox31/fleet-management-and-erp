@@ -13,6 +13,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import { CardShell } from "@/components/design-system";
+import { escapeHtml } from "@/lib/escape-html";
 import {
   CEMAC_CORRIDORS,
   LOGISTICS_HUBS,
@@ -99,7 +100,7 @@ export function ExecutiveCorridorMap({ fleet, isLoading }: ExecutiveCorridorMapP
         const matchReg = v.registrationNumber.toLowerCase().includes(q);
         const matchDriver = v.driverName?.toLowerCase().includes(q);
         const matchClient = v.clientName?.toLowerCase().includes(q);
-        const matchDest = v.destination.toLowerCase().includes(q);
+        const matchDest = v.destination?.toLowerCase().includes(q);
         if (!matchReg && !matchDriver && !matchClient && !matchDest) return false;
       }
       return true;
@@ -113,7 +114,8 @@ export function ExecutiveCorridorMap({ fleet, isLoading }: ExecutiveCorridorMapP
     const returning = fleet.filter((v) => v.transitStatus === "returning").length;
     const loading = fleet.filter((v) => v.transitStatus === "loading" || v.transitStatus === "stopped").length;
     const alert = fleet.filter((v) => v.transitStatus === "alert").length;
-    return { total, inTransit, returning, loading, alert };
+    const untracked = fleet.filter((v) => v.currentLat === undefined).length;
+    return { total, inTransit, returning, loading, alert, untracked };
   }, [fleet]);
 
   // Initialisation de la carte Leaflet
@@ -185,6 +187,8 @@ export function ExecutiveCorridorMap({ fleet, isLoading }: ExecutiveCorridorMapP
 
     // 3. Camions filtrés
     filteredFleet.forEach((vehicle) => {
+      // Aucune position réelle : pas de marqueur (jamais de point déduit).
+      if (vehicle.currentLat === undefined || vehicle.currentLng === undefined) return;
       const icon = createTruckDivIcon(vehicle.transitStatus, vehicle.registrationNumber);
       const marker = L.marker([vehicle.currentLat, vehicle.currentLng], { icon });
 
@@ -195,19 +199,17 @@ export function ExecutiveCorridorMap({ fleet, isLoading }: ExecutiveCorridorMapP
       const popupContent = `
         <div style="font-family: sans-serif; min-width: 210px; padding: 4px;">
           <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:4px; margin-bottom:6px;">
-            <strong style="color:#059669; font-size:12px;">${vehicle.registrationNumber}</strong>
+            <strong style="color:#059669; font-size:12px;">${escapeHtml(vehicle.registrationNumber)}</strong>
             <span style="background:#f1f5f9; color:#475569; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:600;">
-              ${vehicle.brand} ${vehicle.model}
+              ${escapeHtml(vehicle.brand)} ${escapeHtml(vehicle.model)}
             </span>
           </div>
           <div style="font-size:11px; color:#334155; line-height:1.5;">
-            <div><strong>Chauffeur:</strong> ${vehicle.driverName || "Non assigné"}</div>
-            ${vehicle.clientName ? `<div><strong>Client:</strong> ${vehicle.clientName}</div>` : ""}
-            <div><strong>Trajet:</strong> ${vehicle.origin} → <span style="color:#047857; font-weight:bold;">${vehicle.destination}</span></div>
-            ${vehicle.cargoLabel ? `<div><strong>Fret:</strong> ${vehicle.cargoLabel}</div>` : ""}
-            <div style="margin-top:4px; padding-top:4px; border-top:1px solid #f1f5f9; font-weight:bold; color:#0f172a;">
-              Conso: ${vehicle.fuelConsumptionAvg} L/100 km
-            </div>
+            <div><strong>Chauffeur:</strong> ${escapeHtml(vehicle.driverName || "Non assigné")}</div>
+            ${vehicle.clientName ? `<div><strong>Client:</strong> ${escapeHtml(vehicle.clientName)}</div>` : ""}
+            <div><strong>Trajet:</strong> ${escapeHtml(vehicle.origin ?? "—")} → <span style="color:#047857; font-weight:bold;">${escapeHtml(vehicle.destination ?? "—")}</span></div>
+            ${vehicle.cargoLabel ? `<div><strong>Fret:</strong> ${escapeHtml(vehicle.cargoLabel)}</div>` : ""}
+            ${vehicle.fuelConsumptionAvg !== undefined ? `<div style="margin-top:4px; padding-top:4px; border-top:1px solid #f1f5f9; font-weight:bold; color:#0f172a;">Conso: ${vehicle.fuelConsumptionAvg} L/100 km</div>` : ""}
           </div>
         </div>
       `;
@@ -276,6 +278,9 @@ export function ExecutiveCorridorMap({ fleet, isLoading }: ExecutiveCorridorMapP
           >
             <div className="text-[10px] font-medium text-slate-400">Total Flotte</div>
             <div className="text-base font-bold text-white">{stats.total} camions</div>
+            {stats.untracked > 0 && (
+              <div className="text-[10px] text-slate-400">{stats.untracked} non suivi(s) : aucune position réelle</div>
+            )}
           </button>
 
           <button
@@ -418,11 +423,12 @@ export function ExecutiveCorridorMap({ fleet, isLoading }: ExecutiveCorridorMapP
               <div>
                 <span className="text-slate-400 block text-[10px]">Trajet Corridor</span>
                 <span className="font-semibold text-white flex items-center gap-1.5 mt-0.5">
-                  {selectedVehicle.origin} <ChevronRight className="h-3 w-3 text-emerald-400 shrink-0" /> {selectedVehicle.destination}
+                  {selectedVehicle.origin ?? "—"} <ChevronRight className="h-3 w-3 text-emerald-400 shrink-0" /> {selectedVehicle.destination ?? "—"}
                 </span>
               </div>
 
               {/* Barre de progression du trajet */}
+              {selectedVehicle.progressPercent !== undefined && (
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px] text-slate-400">
                   <span>Progression mission</span>
@@ -435,6 +441,7 @@ export function ExecutiveCorridorMap({ fleet, isLoading }: ExecutiveCorridorMapP
                   />
                 </div>
               </div>
+              )}
 
               <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800 text-[11px]">
                 <div>
@@ -451,7 +458,7 @@ export function ExecutiveCorridorMap({ fleet, isLoading }: ExecutiveCorridorMapP
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[10px]">Conso Moy.</span>
-                  <span className="font-bold text-emerald-400">{selectedVehicle.fuelConsumptionAvg} L/100km</span>
+                  <span className="font-bold text-emerald-400">{selectedVehicle.fuelConsumptionAvg !== undefined ? `${selectedVehicle.fuelConsumptionAvg} L/100km` : "—"}</span>
                 </div>
               </div>
             </div>
