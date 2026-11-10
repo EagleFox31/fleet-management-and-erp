@@ -17,6 +17,7 @@ import { aggregateReadsService } from "../../server/services/aggregate-reads-ser
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestClient, createTestPart, createTestVehicle } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { deleteClientInvoicesWhere } from "../support/money-override";
 
 const ids = createIdBag();
 const cleanups: Array<() => Promise<unknown>> = [];
@@ -145,7 +146,7 @@ describe("aggregateReadsService.pendingInvoices", () => {
       })
       .returning();
     cleanups.push(async () => {
-      await db.delete(clientInvoices).where(eq(clientInvoices.id, inv.id));
+      await deleteClientInvoicesWhere(eq(clientInvoices.id, inv.id));
       await db.delete(missions).where(inArray(missions.id, ms.map((m) => m.id)));
     });
 
