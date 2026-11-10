@@ -1255,6 +1255,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (isCheckViolation(error) && pgConstraintOf(error) === "vehicles_tank_capacity_l_positive") {
         return next(new AppError(400, VEHICLE_TANK_CAPACITY_MESSAGE, { cause: error }));
       }
+      if (isAppError(error)) return next(error);
       log.error({ err: error, requestId: req.requestId }, "Update vehicle error");
       return res.status(500).json({ message: "Erreur serveur" });
     }

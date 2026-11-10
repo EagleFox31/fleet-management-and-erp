@@ -8,11 +8,11 @@ describe("getFeatureFlags", () => {
     const flags = getFeatureFlags("");
     expect(Object.keys(flags).sort()).toEqual([...FEATURE_KEYS].sort());
     expect(flags.exports).toBe(true);
-    expect(flags["fuel-vouchers"]).toBe(false);
+    expect(flags["vehicle-cost-summary"]).toBe(false);
   });
   it("applique les surcharges et ignore les entrées illisibles sans lever", () => {
-    const flags = getFeatureFlags("fuel-vouchers=on,exports=off,inconnu=on,fuel-prices=peutetre");
-    expect(flags["fuel-vouchers"]).toBe(true);
+    const flags = getFeatureFlags("vehicle-cost-summary=on,exports=off,inconnu=on,fuel-prices=peutetre");
+    expect(flags["vehicle-cost-summary"]).toBe(true);
     expect(flags.exports).toBe(false);
     expect(flags["fuel-prices"]).toBe(false);
   });
@@ -21,15 +21,15 @@ describe("getFeatureFlags", () => {
 describe("requireFeature", () => {
   it("laisse passer un drapeau allumé", () => {
     const next = vi.fn();
-    process.env.FEATURE_FLAGS = "fuel-vouchers=on";
-    requireFeature("fuel-vouchers")({} as never, {} as never, next);
+    process.env.FEATURE_FLAGS = "vehicle-cost-summary=on";
+    requireFeature("vehicle-cost-summary")({} as never, {} as never, next);
     delete process.env.FEATURE_FLAGS;
     expect(next).toHaveBeenCalledWith();
   });
   it("transmet une AppError 404 quand le drapeau est coupé", () => {
     const next = vi.fn();
-    expect(isFeatureEnabled("fuel-vouchers", "")).toBe(false);
-    requireFeature("fuel-vouchers")({} as never, {} as never, next);
+    expect(isFeatureEnabled("vehicle-cost-summary", "")).toBe(false);
+    requireFeature("vehicle-cost-summary")({} as never, {} as never, next);
     const err = next.mock.calls[0][0];
     expect(err).toBeInstanceOf(AppError);
     expect(err.status).toBe(404);
