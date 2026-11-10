@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canReadFuelCardAmounts, presentFuelCardBalance } from "../../../server/lib/fuel-balance-scope";
+import { canReadFuelCardAmounts, omitFuelCardRunningBalance, presentFuelCardBalance, withoutFuelCardBalance } from "../../../server/lib/fuel-balance-scope";
 import { redactMissionClientContact } from "../../../server/lib/mission-client-contact-scope";
 
 const balance = { balance: 5, totalCredits: 9, priceSource: "real", averagePricePerLiter: 800, extra: 1 };
@@ -28,5 +28,30 @@ describe("coordonnées du client d'une mission", () => {
     expect(redactMissionClientContact({ role: "logistics" }, mission)).toBe(mission);
     const none = { id: 1, client: null };
     expect(redactMissionClientContact({ role: "driver" }, none)).toBe(none);
+  });
+});
+
+describe("solde courant sur les lignes de plein", () => {
+  const line = { id: 1, quantity: 40, balance: "9", fuelBalance: "8" };
+  it("retire balance et fuelBalance hors lecteurs, y compris sans rôle, sur une ligne ou une liste", () => {
+    for (const role of ["driver", "technician", "warehouse", "", null, undefined]) {
+      expect(withoutFuelCardBalance({ role }, line)).toEqual({ id: 1, quantity: 40 });
+      expect(withoutFuelCardBalance({ role }, [line, line])).toEqual([{ id: 1, quantity: 40 }, { id: 1, quantity: 40 }]);
+    }
+    expect(withoutFuelCardBalance(undefined, line)).toEqual({ id: 1, quantity: 40 });
+  });
+  it("lecteurs de la carte : inchangé ; l'entrée n'est jamais modifiée", () => {
+    expect(withoutFuelCardBalance({ role: "accountant" }, line)).toBe(line);
+    withoutFuelCardBalance({ role: "driver" }, line);
+    expect(line.balance).toBe("9");
+    expect(omitFuelCardRunningBalance(null)).toBeNull();
+  });
+});
+
+describe("coordonnées client : liste blanche de rôles", () => {
+  it("un rôle inconnu, vide ou client ne reçoit que id et nom", () => {
+    for (const role of ["client", "unknown", "", null, undefined]) {
+      expect(redactMissionClientContact({ role }, mission).client).toEqual({ id: 2, name: "X" });
+    }
   });
 });

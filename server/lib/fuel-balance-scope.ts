@@ -28,3 +28,23 @@ export function presentFuelCardBalance<T extends Record<string, unknown>>(
   for (const key of PRICE_ONLY_KEYS) if (key in balance) kept[key] = balance[key];
   return kept as Pick<T, Extract<(typeof PRICE_ONLY_KEYS)[number], keyof T>>;
 }
+
+const RUNNING_BALANCE_KEYS = ["balance", "fuelBalance"] as const;
+
+/** Solde courant de la carte écrit sur une ligne de plein (`fuel_records.balance`, `fuel_balance`). */
+export function omitFuelCardRunningBalance<T>(record: T): T {
+  if (record === null || typeof record !== "object" || Array.isArray(record)) return record;
+  const next: Record<string, unknown> = { ...(record as Record<string, unknown>) };
+  for (const key of RUNNING_BALANCE_KEYS) delete next[key];
+  return next as T;
+}
+
+/**
+ * Pleins renvoyés à un lecteur : le solde courant de la carte n'est lisible que par
+ * `TREASURY_FUEL_CARD_READ_ROLES`. Accepte une ligne ou une liste ; les autres rôles perdent `balance` et
+ * `fuelBalance`, tout le reste est conservé (quantité, coût, prix au litre).
+ */
+export function withoutFuelCardBalance<T>(reader: { role?: string | null } | null | undefined, value: T): T {
+  if (canReadFuelCardAmounts(reader?.role)) return value;
+  return Array.isArray(value) ? (value.map((item) => omitFuelCardRunningBalance(item)) as unknown as T) : omitFuelCardRunningBalance(value);
+}

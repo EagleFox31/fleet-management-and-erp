@@ -1,8 +1,11 @@
-import { inArray } from "drizzle-orm";
+import { inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
 import { FuelCardService } from "../../server/services/fuel-card-service";
-import { assignments, clients, drivers, missions } from "../../shared/schema";
+import { MISSION_EVENT_ROLES, TREASURY_FUEL_CARD_READ_ROLES } from "../../shared/constants/roles";
+import { broadcastMissionFuelRecorded } from "../../server/api/missions.routes";
+import { assignments, clients, drivers, fuelRecords, missions } from "../../shared/schema";
+import { deleteFuelRecordsWhere } from "../support/money-override";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestVehicle } from "../support/factories";
@@ -45,6 +48,14 @@ const PRICE_KEYS = ["averagePricePerLiter", "averagePricePerLiterUsed", "average
 const ids = createIdBag();
 let session: Awaited<ReturnType<typeof startContractActors<Actor>>>;
 const call = (...args: Parameters<typeof session.call>) => session.call(...args);
+const FRAME_DATE = "2037-02-02";
+const previousBroadcast = (global as any).broadcastUpdate;
+type Frame = { eventType: string; scope?: { type: string; roles?: string[] }; payload?: any };
+const frames: Frame[] = [];
+const reachesRole = (frame: Frame, role: string) =>
+  frame.scope?.type === "broadcast" || (frame.scope?.type === "roles" && (frame.scope.roles ?? []).includes(role));
+let fuelRecordId = 0;
+let vehicleIdOfRecord = 0;
 let clientId = 0;
 let missionId = 0;
 const driverIds: number[] = [];
@@ -67,11 +78,22 @@ beforeAll(async () => {
     .returning();
   missionId = m.id;
   await db.insert(assignments).values({ missionId, vehicleId: vehicle.id, driverId: d.id, status: "accepted" } as any);
+  const [fr] = await db
+    .insert(fuelRecords)
+    .values({ vehicleId: vehicle.id, missionId, quantity: 40, cost: "34000", debitAmount: "34000", date: "2037-01-01", balance: "73519481", fuelBalance: "88142", createdBy: session.userIdOf("logistics") } as any)
+    .returning();
+  fuelRecordId = fr.id;
+  vehicleIdOfRecord = vehicle.id;
+  (global as any).broadcastUpdate = vi.fn((eventType: string, data: any) => {
+    frames.push({ eventType, scope: data?.scope, payload: data?.payload });
+  });
   vi.spyOn(FuelCardService.prototype, "getCurrentBalance").mockResolvedValue(MOCK_BALANCE as any);
 }, 120000);
 
 afterAll(async () => {
   vi.restoreAllMocks();
+  (global as any).broadcastUpdate = previousBroadcast;
+  await deleteFuelRecordsWhere(sql`${fuelRecords.date} = ${FRAME_DATE} OR ${fuelRecords.id} = ${fuelRecordId || 0}`);
   if (missionId) {
     await db.delete(assignments).where(inArray(assignments.missionId, [missionId]));
     await db.delete(missions).where(inArray(missions.id, [missionId]));
@@ -98,6 +120,23 @@ describe("GET /api/missions/:id, coordonnées du client", { timeout: 120000 }, (
   });
 });
 
+describe("GET /api/operations/missions, coordonnées du client", { timeout: 120000 }, () => {
+  it("le chauffeur reçoit id et nom du client, jamais contact, e-mail ni téléphone", async () => {
+    const res = await call("GET", "/api/operations/missions", { actor: "driver" });
+    expect(res.status).toBe(200);
+    const mine = (res.body as any[]).find((m) => m.id === missionId || m.mission?.id === missionId);
+    expect(mine).toBeTruthy();
+    const sent = JSON.stringify(res.body);
+    for (const value of Object.values(CONTACT)) expect(sent).not.toContain(value);
+  });
+
+  it("la logistique reçoit les coordonnées", async () => {
+    const res = await call("GET", "/api/operations/missions", { actor: "logistics" });
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(res.body)).toContain(CONTACT.email);
+  });
+});
+
 describe("GET /api/fuel-card/balance, montants", { timeout: 120000 }, () => {
   it.each(["driver", "technician", "warehouse"] as const)("%s ne reçoit aucun montant, seulement le prix au litre", async (actor) => {
     const res = await call("GET", "/api/fuel-card/balance", { actor });
@@ -120,5 +159,142 @@ describe("GET /api/fuel-card/balance, montants", { timeout: 120000 }, () => {
   it("sans session : 401", async () => {
     const res = await call("GET", "/api/fuel-card/balance", {});
     expect(res.status).toBe(401);
+  });
+});
+
+const NO_DRIVER_NOTE = "le chauffeur n'a aucun écran sur ces routes";
+
+describe("/api/clients : fiches client fermées au chauffeur", { timeout: 120000 }, () => {
+  it(`le chauffeur reçoit 403 sur la liste, la fiche et /all (${NO_DRIVER_NOTE})`, async () => {
+    for (const path of ["/api/clients", `/api/clients/${clientId}`, "/api/clients/all"]) {
+      const res = await call("GET", path, { actor: "driver" });
+      expect(res.status, path).toBe(403);
+      const sent = JSON.stringify(res.body);
+      for (const value of Object.values(CONTACT)) expect(sent).not.toContain(value);
+    }
+  });
+
+  it.each(["admin", "logistics", "secretary", "technician"] as const)("%s lit la fiche avec les coordonnées", async (actor) => {
+    const res = await call("GET", `/api/clients/${clientId}`, { actor });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject(CONTACT);
+  });
+
+  it("la trame client_created ne vise aucun chauffeur", async () => {
+    frames.length = 0;
+    const res = await call("POST", "/api/clients", {
+      actor: "admin",
+      body: { name: `TEST ${uniqueTestToken("LDF")}`, email: `${uniqueTestToken("ldf").toLowerCase()}@example.test` },
+    });
+    expect(res.status).toBe(201);
+    ids.clientIds.push(res.body.id);
+    const sent = frames.filter((f) => f.eventType === "client_created");
+    expect(sent.length).toBeGreaterThan(0);
+    for (const frame of sent) {
+      expect(reachesRole(frame, "driver")).toBe(false);
+      expect(reachesRole(frame, "logistics")).toBe(true);
+    }
+  });
+});
+
+describe("/api/fuel-card : historique et statistiques réservés aux lecteurs de la carte", { timeout: 120000 }, () => {
+  const PATHS = [
+    "/api/fuel-card/history",
+    "/api/fuel-card/monthly-stats",
+    "/api/fuel-card/stats-by-client",
+    "/api/fuel-card/vehicle/1/stats",
+    "/api/fuel-card/vehicle/1/anomalies",
+  ];
+
+  it.each(PATHS)("%s : refusé au chauffeur, au technicien et au magasinier", async (path) => {
+    for (const actor of ["driver", "technician", "warehouse"] as const) {
+      const res = await call("GET", path, { actor });
+      expect(res.status, `${actor} ${path}`).toBe(403);
+    }
+  });
+
+  it.each(PATHS)("%s : pas refusé aux lecteurs de la carte", async (path) => {
+    for (const actor of ["admin", "logistics", "accountant"] as const) {
+      const res = await call("GET", path, { actor });
+      expect(res.status, `${actor} ${path}`).not.toBe(403);
+      expect(res.status, `${actor} ${path}`).not.toBe(401);
+    }
+  });
+
+  it("fuel_card_recharged : la trame ne vise que les lecteurs de la carte", async () => {
+    frames.length = 0;
+    const res = await call("POST", "/api/fuel-card/recharge", {
+      actor: "admin",
+      body: { amount: 1000, unitPrice: 800, date: FRAME_DATE, paymentMode: "virement", orderNumber: uniqueTestToken("ldr") },
+    });
+    expect(res.status).toBe(201);
+    const sent = frames.filter((f) => f.eventType === "fuel_card_recharged");
+    expect(sent.length).toBeGreaterThan(0);
+    for (const frame of sent) {
+      for (const role of ["driver", "technician", "warehouse", "workshop_manager"]) expect(reachesRole(frame, role), role).toBe(false);
+      for (const role of ["admin", "logistics", "accountant", "management", "secretary"]) expect(reachesRole(frame, role), role).toBe(true);
+    }
+  });
+});
+
+describe("pleins de mission : solde courant de la carte", { timeout: 120000 }, () => {
+  const hasBalance = (body: unknown) => /"(balance|fuelBalance)"/.test(JSON.stringify(body));
+
+  it("le chauffeur affecté lit les pleins de sa mission sans solde ni débit de carte", async () => {
+    const res = await call("GET", `/api/missions/${missionId}/fuel-records`, { actor: "driver" });
+    expect(res.status).toBe(200);
+    expect(res.body.records.length).toBeGreaterThan(0);
+    expect(hasBalance(res.body.records)).toBe(false);
+    for (const s of ["73519481", "88142"]) expect(JSON.stringify(res.body)).not.toContain(s);
+  });
+
+  it.each(["technician", "warehouse"] as const)("GET /api/missions/:id/fuel-records : %s refusé (aucun écran)", async (actor) => {
+    if (!(actor in ACTORS)) return;
+    const res = await call("GET", `/api/missions/${missionId}/fuel-records`, { actor });
+    expect(res.status).toBe(403);
+    for (const s of ["73519481", "88142"]) expect(JSON.stringify(res.body)).not.toContain(s);
+  });
+
+  it.each(["admin", "logistics", "accountant"] as const)("GET /api/missions/:id/fuel-records : %s garde le solde", async (actor) => {
+    const res = await call("GET", `/api/missions/${missionId}/fuel-records`, { actor });
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(res.body.records)).toContain("73519481");
+  });
+
+  it("GET /api/fuel-records/vehicle/:id : le chauffeur ne reçoit pas le solde, la logistique oui", async () => {
+    const res = await call("GET", `/api/fuel-records/vehicle/${vehicleIdOfRecord}`, { actor: "driver" });
+    expect(res.status).toBe(200);
+    expect(res.body.length).toBeGreaterThan(0);
+    expect(hasBalance(res.body)).toBe(false);
+    const staff = await call("GET", `/api/fuel-records/vehicle/${vehicleIdOfRecord}`, { actor: "logistics" });
+    expect(staff.status).toBe(200);
+    expect(JSON.stringify(staff.body)).toContain("73519481");
+  });
+
+  it("mission_fuel_recorded : la trame n'emporte ni balance ni fuelBalance", async () => {
+    frames.length = 0;
+    await broadcastMissionFuelRecorded({
+      missionId,
+      fuelRecord: { id: fuelRecordId, vehicleId: vehicleIdOfRecord, quantity: 40, totalCost: 34000, unitPrice: "801", debitAmount: "34000", balance: "73519481", fuelBalance: "88142" },
+      actorUserId: session.userIdOf("logistics"),
+    } as any);
+    const sent = frames.filter((f) => f.eventType === "mission_fuel_recorded");
+    expect(sent.length).toBeGreaterThan(0);
+    for (const frame of sent) {
+      expect(JSON.stringify(frame.payload)).not.toContain("73519481");
+      expect(JSON.stringify(frame.payload)).not.toContain("88142");
+    }
+    // Hors lecteurs de la carte : identifiants seulement, ni prix, ni débit, ni crédit.
+    const others = (MISSION_EVENT_ROLES as readonly string[]).filter((r) => !(TREASURY_FUEL_CARD_READ_ROLES as readonly string[]).includes(r));
+    expect(others.length).toBeGreaterThanOrEqual(0);
+    for (const role of others) {
+      const forRole = sent.filter((f) => reachesRole(f, role));
+      expect(forRole, role).toHaveLength(1);
+      expect(Object.keys(forRole[0].payload).sort(), role).toEqual(["fuelRecordId", "missionId"]);
+    }
+    const forLogistics = sent.filter((f) => reachesRole(f, "logistics"));
+    expect(forLogistics).toHaveLength(1);
+    expect(forLogistics[0].payload).toHaveProperty("record");
+    expect(sent.filter((f) => reachesRole(f, "client"))).toEqual([]);
   });
 });

@@ -13,7 +13,7 @@ import { parseQueryId, parseRouteId } from "../lib/route-id";
 import { toFieldErrors } from "@shared/errors";
 import { z } from "zod";
 import { MAX_DB_INTEGER_ID } from "@shared/contracts/common";
-import { FUEL_RECHARGE_SOURCE_ROLES, STAFF_ROLES } from "@shared/constants/roles";
+import { FUEL_RECHARGE_SOURCE_ROLES, TREASURY_FUEL_CARD_READ_ROLES } from "@shared/constants/roles";
 
 const log = moduleLogger("fuel-card");
 
@@ -66,7 +66,8 @@ const broadcastFuelCardUpdate = (
     entity: "fuel_card",
     entityId: options?.entityId ?? null,
     payload,
-    scope: { type: "roles", roles: [...STAFF_ROLES] },
+    // Montants et soldes avant/après : les lecteurs de la carte seulement, pas le personnel entier.
+    scope: { type: "roles", roles: [...TREASURY_FUEL_CARD_READ_ROLES] },
     actor: {
       userId: options?.actorUserId ?? null,
       role: options?.actorRole ?? null,
@@ -82,6 +83,10 @@ const broadcastFuelCardUpdate = (
 
 // Apply authentication middleware to ALL routes in this router
 router.use(authenticate);
+
+// Montants de la carte (historique, statistiques) : lecteurs de la carte. Le solde (`/balance`) reste ouvert au
+// personnel mais ses montants sont retirés hors de cette liste ; le chauffeur y lit le prix au litre.
+const isFuelCardAmountReader = authorize([...TREASURY_FUEL_CARD_READ_ROLES]);
 
 // Comptes qui peuvent payer une recharge (banque, caisse), sans solde : la logistique choisit le compte
 // sans lire la trésorerie. Drapeau `finance` coupé : liste vide, le champ disparaît de l'écran.
@@ -99,10 +104,12 @@ router.get("/balance", async (req, res, next) => {
     const balance = await fuelCardService.getCurrentBalance();
     return res.status(200).json(presentFuelCardBalance(req.user, balance));
   } catch (error) {
-    next(withLogContext(error, { event: "lecture du solde de la carte carburant en échec" }));
+    next(withLogContext(error, { event: "Get fuel card balance error:" }));
   }
 });
 
+// Recharger la carte carburant (crédit)
+// Rôles autorisés: admin, logistics, secretary
 router.post("/recharge", isFuelCardManager, async (req, res, next) => {
   try {
     const body = rechargeBodySchema.safeParse(req.body ?? {});
@@ -224,7 +231,7 @@ router.post("/consumption", isFuelCardManager, async (req, res, next) => {
 });
 
 // Historique carburant avec filtres
-router.get("/history", async (req, res, next) => {
+router.get("/history", isFuelCardAmountReader, async (req, res, next) => {
   try {
     const { year, month, vehicleId, type } = req.query;
     
@@ -241,14 +248,12 @@ router.get("/history", async (req, res, next) => {
     
     return res.status(200).json(history);
   } catch (error) {
-    if (error instanceof AppError) return next(error);
-    log.error({ err: error, requestId: req.requestId }, "Get fuel history error");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(withLogContext(toFuelCardAppError(error), { event: "Get fuel history error" }));
   }
 });
 
 // Statistiques de consommation par véhicule
-router.get("/vehicle/:vehicleId/stats", async (req, res, next) => {
+router.get("/vehicle/:vehicleId/stats", isFuelCardAmountReader, async (req, res, next) => {
   try {
     const vehicleId = parseRouteId(req.params.vehicleId, "ID de véhicule invalide");
     
@@ -261,7 +266,7 @@ router.get("/vehicle/:vehicleId/stats", async (req, res, next) => {
 });
 
 // Détection d'anomalies de consommation
-router.get("/vehicle/:vehicleId/anomalies", async (req, res, next) => {
+router.get("/vehicle/:vehicleId/anomalies", isFuelCardAmountReader, async (req, res, next) => {
   try {
     const vehicleId = parseRouteId(req.params.vehicleId, "ID de véhicule invalide");
     
@@ -274,7 +279,7 @@ router.get("/vehicle/:vehicleId/anomalies", async (req, res, next) => {
 });
 
 // Statistiques par client (MAERSK, CNPCC, etc.)
-router.get("/stats-by-client", async (req, res, next) => {
+router.get("/stats-by-client", isFuelCardAmountReader, async (req, res, next) => {
   try {
     // Cloison client : un client ne voit que les pleins de ses véhicules (null = personnel).
     const stats = await fuelCardService.getStatsByClient(ownerScopeOf(req.user));
@@ -286,7 +291,7 @@ router.get("/stats-by-client", async (req, res, next) => {
 });
 
 // Statistiques mensuelles
-router.get("/monthly-stats", async (req, res, next) => {
+router.get("/monthly-stats", isFuelCardAmountReader, async (req, res, next) => {
   try {
     const year = parseInt(req.query.year as string) || new Date().getFullYear();
     const month = parseInt(req.query.month as string) || new Date().getMonth() + 1;
@@ -295,7 +300,7 @@ router.get("/monthly-stats", async (req, res, next) => {
     
     return res.status(200).json(stats);
   } catch (error) {
-    next(withLogContext(error, { event: "statistiques mensuelles carburant en échec" }));
+    next(withLogContext(error, { event: "Get monthly fuel stats error:" }));
   }
 });
 
