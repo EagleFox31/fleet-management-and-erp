@@ -1,10 +1,8 @@
-import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { assignments, vehicles } from "@shared/schema";
 import { ACTIVE_ASSIGNMENT_STATUSES, isTrailerVehicleType } from "@shared/constants/assignments";
-import { formatEligibilityRefusal, getMissionEligibility } from "@shared/constants/vehicle-eligibility";
+import { formatEligibilityRefusal, getMissionEligibility, type VehicleEligibilityInput } from "@shared/constants/vehicle-eligibility";
 import { AppError } from "../lib/app-error";
-import { loadOpenRenewalReceipts } from "../lib/renewal-receipts";
-import type { DbExecutor } from "../lib/fuel-card-lock";
 import { isUniqueViolation, pgConstraintOf } from "../lib/pg-errors";
 import type { db } from "../db";
 
@@ -26,6 +24,11 @@ export type TrailerCheck = {
   vehicleId: number;
   /** Affectation en cours de modification : son propre attelage ne compte pas comme conflit. */
   excludeAssignmentId?: number | null;
+  /**
+   * Récépissés ouverts de la remorque, lus dans la transaction (`loadOpenRenewalReceipts(id, tx)`).
+   * Injecté : ce module ne charge pas `server/db`, il reste importable par un test unitaire.
+   */
+  loadReceipts: (vehicleId: number) => Promise<NonNullable<VehicleEligibilityInput["receipts"]>>;
 };
 
 /**
@@ -37,7 +40,7 @@ export type TrailerCheck = {
  * trailerConflictToAppError, jamais un 500).
  */
 export async function assertTrailerAssignable(tx: Executor, check: TrailerCheck): Promise<void> {
-  const { trailerId, vehicleId, excludeAssignmentId } = check;
+  const { trailerId, vehicleId, excludeAssignmentId, loadReceipts } = check;
   if (trailerId === vehicleId) throw new AppError(400, TRAILER_IS_TRUCK_MESSAGE);
   const [trailer] = await tx
     .select({
@@ -55,13 +58,13 @@ export async function assertTrailerAssignable(tx: Executor, check: TrailerCheck)
   if (!trailer) throw new AppError(400, "Remorque introuvable.");
   if (!isTrailerVehicleType(trailer.vehicleType)) throw new AppError(400, TRAILER_WRONG_TYPE_MESSAGE);
   // Même éligibilité que le camion (décision 0a) : atelier, hors service, papiers expirés sans récépissé.
-  const eligibility = getMissionEligibility({ ...trailer, receipts: await loadOpenRenewalReceipts(trailer.id, tx as unknown as DbExecutor) });
+  const eligibility = getMissionEligibility({ ...trailer, receipts: await loadReceipts(trailer.id) });
   if (!eligibility.eligible) throw new AppError(400, formatEligibilityRefusal(trailer.registrationNumber, eligibility.blockers));
 
   await tx.execute(sql`SELECT pg_advisory_xact_lock(3, ${trailerId})`);
   // Conflit : attelée ailleurs, ou (affectation ancienne) prise comme camion d'une affectation active.
-  const conditions = [
-    or(eq(assignments.trailerId, trailerId), eq(assignments.vehicleId, trailerId))!,
+  const conditions: (SQL | undefined)[] = [
+    or(eq(assignments.trailerId, trailerId), eq(assignments.vehicleId, trailerId)),
     inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES]),
   ];
   if (excludeAssignmentId) conditions.push(ne(assignments.id, excludeAssignmentId));

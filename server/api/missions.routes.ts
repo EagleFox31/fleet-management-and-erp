@@ -2216,7 +2216,7 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
         });
         if (clash) throw new AppError(409, planningClashMessage(clash));
         if (assignmentTrailerId) {
-          await assertTrailerAssignable(tx, { trailerId: assignmentTrailerId, vehicleId: assignmentVehicleId! });
+          await assertTrailerAssignable(tx, { loadReceipts: (id) => loadOpenRenewalReceipts(id, tx), trailerId: assignmentTrailerId, vehicleId: assignmentVehicleId! });
         }
       }
       const [created] = await tx
@@ -2635,7 +2635,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
         if (existingAssignment?.id) {
           const current = existingAssignment;
           writeAssignment = async (tx) => {
-            if (trailerId) await assertTrailerAssignable(tx, { trailerId, vehicleId, excludeAssignmentId: current.id });
+            if (trailerId) await assertTrailerAssignable(tx, { loadReceipts: (id) => loadOpenRenewalReceipts(id, tx), trailerId, vehicleId, excludeAssignmentId: current.id });
             await tx
               .update(assignments)
               .set({
@@ -2649,7 +2649,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
           };
         } else {
           writeAssignment = async (tx) => {
-            if (trailerId) await assertTrailerAssignable(tx, { trailerId, vehicleId });
+            if (trailerId) await assertTrailerAssignable(tx, { loadReceipts: (id) => loadOpenRenewalReceipts(id, tx), trailerId, vehicleId });
             await tx.insert(assignments).values({ missionId, vehicleId, driverId, trailerId, status: "pending" });
           };
         }
@@ -2802,7 +2802,7 @@ router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), validateB
         driverId,
       });
       if (clash) throw new AppError(409, planningClashMessage(clash));
-      if (trailerId) await assertTrailerAssignable(tx, { trailerId, vehicleId });
+      if (trailerId) await assertTrailerAssignable(tx, { loadReceipts: (id) => loadOpenRenewalReceipts(id, tx), trailerId, vehicleId });
 
       const [assignment] = await tx.insert(assignments).values({ missionId, vehicleId, driverId, trailerId, status: "pending" }).returning();
       const [updatedMission] =
@@ -2936,6 +2936,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
         id: assignments.id,
         vehicleId: assignments.vehicleId,
         driverId: assignments.driverId,
+        trailerId: assignments.trailerId,
         status: assignments.status,
         acceptedAt: assignments.acceptedAt,
         startedAt: assignments.startedAt,

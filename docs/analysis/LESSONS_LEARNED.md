@@ -3595,3 +3595,14 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/contract/mission-trailer-assignment.contract.test.ts`, cas « trailerId "abc", 1.5, 2147483648, true : 400, jamais 500 » et « création et ajout simultanés : un 201, un 409, jamais d'interblocage » ;
   - `tests/unit/server/vehicle-activity-sources.test.ts` échoue sur toute clé étrangère vers `vehicles.id` non classée.
 - **Leçon généralisée** : un objet imbriqué lu par une route est toujours déclaré dans son schéma Zod, sinon il n'est pas validé du tout. L'ordre des verrous consultatifs est fixé en un seul endroit et chaque route l'emprunte. Toute clé étrangère vers `vehicles.id` est classée dans `vehicle-lifecycle-sources.ts` dans la même PR.
+
+## 2026-11-10 — Service importé par un test unitaire qui charge server/db : job unit rouge (#642)
+
+- **Contexte** : les suites de #635 ajoutent l'éligibilité de la remorque dans `server/services/trailer-assignment.ts`, qui importe alors `loadOpenRenewalReceipts` (`server/lib/renewal-receipts.ts`, qui importe `server/db`). `tests/unit/server/assignments-trailer-schema.test.ts` importe ce service. Le job unit de la CI n'a pas `DATABASE_URL` : `server/db.ts` lève une exception au chargement et le fichier tombe sans assertion. Trouvé en relecture, avant la fusion.
+- **Cause racine** : un import ajouté dans un module de règles pur l'a relié à la base. Localement, l'erreur « DATABASE_URL must be set » a été prise pour un défaut d'environnement et le fichier relancé avec une base, ce qui a masqué le défaut.
+- **Classification** : dépendance de chargement non voulue ; erreur locale mal classée comme environnementale ; near miss.
+- **Résolution** : le chargeur de récépissés est injecté (`TrailerCheck.loadReceipts`, appelé par les routes avec `loadOpenRenewalReceipts(id, tx)`) ; le service n'importe plus `server/db`, et le cast `tx as unknown as DbExecutor` disparaît.
+- **Prévention vérifiée** :
+  - `tests/unit/server/assignments-trailer-schema.test.ts` lancé sans `DATABASE_URL` : vert ; il échoue au chargement si le service réimporte `server/db` ;
+  - la suite unitaire complète lancée sans `DATABASE_URL`, comme en CI : verte hors `db-pool-options` (version du driver locale).
+- **Leçon généralisée** : un module importé par un test unitaire ne charge pas `server/db` ; il reçoit ses lectures en paramètre. Un test unitaire se lance localement sans `DATABASE_URL`, comme en CI ; une erreur « DATABASE_URL must be set » dans un test unitaire est un défaut du code, jamais de l'environnement.
