@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { type ClientPayment } from '@shared/schema';
+import { type ClientPayment, type ClientCreditNote } from '@shared/schema';
 import { type PublicClientInvoice } from '../lib/client-public-columns';
 import { readTayHeaderImage } from '../lib/tay-header-asset';
 
@@ -184,6 +184,112 @@ export class PDFGenerationService {
     return Buffer.from(doc.output('arraybuffer'));
   }
   
+  /**
+   * Générer un avoir client PDF (lot V1, PR5).
+   * Cite la facture d'origine et, si elle est déposée chez le client, sa date de dépôt : le net à payer
+   * figé au dépôt ne change pas, l'avoir s'impute sur le solde.
+   */
+  async generateCreditNotePDF(data: {
+    creditNote: ClientCreditNote;
+    invoice: PublicClientInvoice;
+    client: { name: string; address?: string; email?: string; phone?: string };
+  }): Promise<Buffer> {
+    const { creditNote, invoice, client } = data;
+
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 15;
+    const contentWidth = pageWidth - margin * 2;
+    let currentY = await this.addOfficialHeader(doc);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(17);
+    doc.setTextColor(15, 23, 42);
+    doc.text('Avoir client', margin, currentY);
+    doc.setFontSize(12);
+    doc.text(`N° ${creditNote.creditNoteNumber}`, pageWidth - margin, currentY, { align: 'right' });
+
+    currentY += 6;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Émis le ${this.formatDate(creditNote.createdAt)}`, margin, currentY);
+    currentY += 6;
+
+    const cardGap = 5;
+    const cardWidth = (contentWidth - cardGap) / 2;
+    const cardHeight = 36;
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(margin, currentY, cardWidth, cardHeight, 2.5, 2.5, 'FD');
+    doc.roundedRect(margin + cardWidth + cardGap, currentY, cardWidth, cardHeight, 2.5, 2.5, 'FD');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(30, 41, 59);
+    doc.text('Avoir établi pour', margin + 3, currentY + 5.5);
+    doc.text("Facture d'origine", margin + cardWidth + cardGap + 3, currentY + 5.5);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    doc.setTextColor(15, 23, 42);
+    let leftY = currentY + 11;
+    doc.text(client.name, margin + 3, leftY);
+    leftY += 5;
+    if (client.address) {
+      doc.text(doc.splitTextToSize(client.address, cardWidth - 6), margin + 3, leftY);
+      leftY += 5;
+    }
+    if (client.email) doc.text(client.email, margin + 3, leftY);
+
+    const rightX = margin + cardWidth + cardGap + 3;
+    let rightY = currentY + 11;
+    doc.text(`Facture: ${invoice.invoiceNumber}`, rightX, rightY);
+    rightY += 5;
+    doc.text(`Date facture: ${this.formatDate(invoice.invoiceDate)}`, rightX, rightY);
+    if (invoice.depositedAt) {
+      rightY += 5;
+      doc.text(`Déposée chez le client le ${this.formatDate(invoice.depositedAt)}`, rightX, rightY);
+    }
+    currentY += cardHeight + 7;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9.5);
+    doc.text('Motif', margin, currentY);
+    doc.setFont('helvetica', 'normal');
+    const reasonLines = doc.splitTextToSize(creditNote.reason, contentWidth);
+    doc.text(reasonLines, margin, currentY + 5);
+    currentY += 5 + reasonLines.length * 5 + 6;
+
+    const boxW = 90;
+    const boxX = pageWidth - margin - boxW;
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(boxX, currentY, boxW, 33, 2.5, 2.5, 'FD');
+    const right = boxX + boxW - 4;
+    doc.setFontSize(9.5);
+    doc.setTextColor(51, 65, 85);
+    doc.text('Montant HT:', boxX + 4, currentY + 6);
+    doc.text(this.formatCurrency(creditNote.amountHT), right, currentY + 6, { align: 'right' });
+    doc.text(`TVA (${creditNote.vatRate}%):`, boxX + 4, currentY + 12);
+    doc.text(this.formatCurrency(creditNote.vatAmount), right, currentY + 12, { align: 'right' });
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(15, 23, 42);
+    doc.text('Avoir TTC:', boxX + 4, currentY + 19);
+    doc.text(this.formatCurrency(creditNote.amountTTC), right, currentY + 19, { align: 'right' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    doc.text('Solde restant de la facture:', boxX + 4, currentY + 27);
+    doc.text(this.formatCurrency(invoice.balance), right, currentY + 27, { align: 'right' });
+
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'italic');
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Document généré le ${new Date().toLocaleString('fr-FR')}`, pageWidth / 2, 292, { align: 'center' });
+
+    return Buffer.from(doc.output('arraybuffer'));
+  }
+
   /**
    * Générer un reçu de paiement PDF
    */

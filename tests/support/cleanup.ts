@@ -3,6 +3,7 @@ import { db } from "../../server/db";
 import {
   activityLogs,
   alerts,
+  clientCreditNotes,
   clientInvoices,
   clients,
   documentRenewalCenters,
@@ -40,7 +41,7 @@ import {
   workOrders,
 } from "../../shared/schema";
 import { TEST_PREFIX } from "./ids";
-import { deleteFuelRecordsWhere, deleteClientInvoicesWhere } from "./money-override";
+import { deleteFuelRecordsWhere, deleteClientInvoicesWhere, deleteClientCreditNotesWhere } from "./money-override";
 
 export type CreatedIds = {
   userIds: number[];
@@ -262,6 +263,8 @@ async function deleteOrphanTestRows(): Promise<void> {
   const testUsers = db.select({ id: users.id }).from(users).where(orphan(users.username, users.createdAt));
   await db.delete(alerts).where(inArray(alerts.userId, testUsers));
   await db.delete(activityLogs).where(inArray(activityLogs.userId, testUsers));
+  // Avoir émis par un compte de test sur une facture hors préfixe : immuable, levée explicite (trigger).
+  await deleteClientCreditNotesWhere(inArray(clientCreditNotes.createdBy, testUsers));
   // Brouillons d'acquisition d'un compte de test : bloquaient la suppression du compte (FK).
   await db.delete(vehicleAcquisitionWorkflows).where(inArray(vehicleAcquisitionWorkflows.userId, testUsers));
   // Centre de renouvellement créé par un compte de test (renouvellement rapide) : bloquait la

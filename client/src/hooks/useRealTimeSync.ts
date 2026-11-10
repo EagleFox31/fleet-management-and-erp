@@ -1246,6 +1246,7 @@ export function handleDomainUpdate(update: RealTimeUpdate): void {
 
     case "client_invoice_created":
     case "client_invoice_payment_recorded":
+    case "client_credit_note_created":
     case "client_invoices_overdue":
       {
         const invoiceFromResult =

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const norm = (s: string) => s.replace(/\r\n/g, "\n").trim();
-const MIGRATION = "server/db/migrations/20261110_money_lock_invoices.sql";
+const MIGRATION = "server/db/migrations/20261110_money_lock_invoices_credits.sql";
 
 function fromMigration(): string {
   return norm(
@@ -51,18 +51,21 @@ describe("factures émises verrouillées : init-database et migration jumelle", 
     expect(sql).not.toMatch(/\bUPDATE client_invoices|\bDELETE FROM|\bINSERT |\bALTER TABLE/);
   });
 
-  it("liste blanche D2 : statut, solde, horodatage et dépôt ; avoirs (PR5) non encore ouverts", () => {
+  it("liste blanche D2 : statut, solde, horodatage, dépôt et cumul des avoirs", () => {
     const sql = fromMigration();
     expect(sql).toContain(
-      "free_cols text[] := ARRAY['status', 'balance', 'updated_at',\n" +
+      "free_cols text[] := ARRAY['status', 'balance', 'updated_at', 'credited_amount_ttc',\n" +
         "    'deposited_at', 'withholding_vat_amount', 'withholding_is_amount', 'net_payable', 'deposited_by'];",
     );
-    // La colonne des avoirs n'existe pas encore : elle naîtra gelée tant que PR5 ne l'ajoute pas ici.
-    expect(sql).not.toMatch(/free_cols text\[\] := ARRAY\[[^\]]*credited_amount_ttc/);
-    expect(sql).not.toMatch(/(NEW|OLD)\.credited_amount_ttc/);
+    // Avoirs (PR5) : cumul à la hausse seulement, au plus le TTC ; figé sur une facture annulée.
+    expect(sql).toContain(
+      "IF NEW.credited_amount_ttc IS DISTINCT FROM OLD.credited_amount_ttc\n" +
+        "     AND (NEW.credited_amount_ttc < OLD.credited_amount_ttc OR NEW.credited_amount_ttc > NEW.amount_ttc) THEN",
+    );
+    expect(sql).toContain("OR NEW.credited_amount_ttc IS DISTINCT FROM OLD.credited_amount_ttc) THEN");
     expect(sql).toContain("current_setting('fleetos.allow_money_override', true) = 'on'");
     // Annulée : terminal.
-    expect(sql).toContain("IF OLD.status = 'cancelled'\n     AND (NEW.status IS DISTINCT FROM OLD.status OR NEW.balance IS DISTINCT FROM OLD.balance) THEN");
+    expect(sql).toContain("IF OLD.status = 'cancelled'\n     AND (NEW.status IS DISTINCT FROM OLD.status OR NEW.balance IS DISTINCT FROM OLD.balance\n          OR NEW.credited_amount_ttc IS DISTINCT FROM OLD.credited_amount_ttc) THEN");
     // deposited_by vers NULL : seulement par l'action de clé étrangère (UPDATE lancé depuis un trigger).
     expect(sql).toContain("IF NEW.deposited_by IS NULL AND OLD.deposited_by IS NOT NULL AND pg_trigger_depth() > 1");
     // Dépôt : ni sur une facture annulée ou payée, même dans le même UPDATE.
