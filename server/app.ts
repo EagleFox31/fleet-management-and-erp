@@ -6,10 +6,12 @@ import { registerRoutes } from "./routes";
 import apiRouter from "./api";
 import { initializeDatabase } from "./init-database";
 import { moduleLogger } from "./lib/logger";
+import { isApiPath } from "./lib/routed-path";
 import { migrateLoginIdentifiers, pendingLoginIdentifiers } from "./services/login-identifier-migration";
 import { createIpFailureLimiter } from "./middleware/auth-ip-limit";
 import { trustProxyFromEnv } from "./lib/trust-proxy";
 import { accessLog, apiNotFound, errorHandler, errorResponseGuard, requestContext } from "./middleware/error-handler";
+import { rejectNonCanonicalTarget } from "./middleware/reject-non-canonical-target";
 
 export type CreateAppOptions = {
   /**
@@ -37,6 +39,8 @@ export async function createApp(
   app.use(requestContext);
   app.use(accessLog);
   app.use(errorResponseGuard);
+  // Avant tout routage : une cible avec `\` serait lue differemment par l'app et par apiRouter.
+  app.use(rejectNonCanonicalTarget);
 
   // Compression avant tout le reste: le JSON des listes se réduit de 80 à 90 %,
   // et la liaison vers ce déploiement est lente (≈475 ms d'aller-retour Neon
@@ -45,7 +49,7 @@ export async function createApp(
   app.disable("etag");
 
   app.use((req, res, next) => {
-    if (req.path.startsWith("/api")) {
+    if (isApiPath(req.path)) {
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       res.setHeader("Pragma", "no-cache");
       res.setHeader("Expires", "0");

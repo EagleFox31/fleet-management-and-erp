@@ -1448,9 +1448,10 @@ BEGIN
       USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
   END IF;
 
-  -- La mission ne se change pas ; elle ne se détache que vers NULL, et seulement par l'action de clé étrangère
-  -- (suppression de la mission : UPDATE lancé par un trigger, profondeur > 1). En direct, le plein sortirait du
-  -- budget de sa mission sans annulation tracée.
+  -- La mission ne se change pas ; elle ne se détache que vers NULL, et seulement depuis un trigger imbriqué
+  -- (pg_trigger_depth() > 1). C'est le cas de l'ON DELETE SET NULL d'une mission supprimée, mais l'exemption
+  -- couvre tout trigger imbriqué, pas la seule clé étrangère. En direct, le plein sortirait du budget de sa
+  -- mission sans annulation tracée.
   IF NEW.mission_id IS DISTINCT FROM OLD.mission_id AND (NEW.mission_id IS NOT NULL OR pg_trigger_depth() <= 1) THEN
     RAISE EXCEPTION 'Plein validé : la mission ne se change pas.'
       USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';

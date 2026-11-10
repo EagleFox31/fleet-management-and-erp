@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { REALTIME_EVENTS } from "@shared/contracts/realtime-events";
 import {
   INCIDENT_FORBIDDEN_MESSAGE,
   INCIDENT_OUT_OF_SCOPE_MESSAGE,
+  INCIDENT_READ_FORBIDDEN_MESSAGE,
   createIncident,
   incidentScopeError,
+  listIncidents,
   type IncidentDeps,
 } from "../../../server/services/incident-service";
 
@@ -28,7 +31,7 @@ describe("incidentScopeError", () => {
   });
 });
 
-function makeDeps(assigned: number[]) {
+function makeDeps(assigned: number[], vehicles: { registrationNumber: string }[] = [{ registrationNumber: "AB-123-CD" }]) {
   const calls = { inserted: [] as any[], notified: [] as any[], events: [] as any[] };
   const deps: IncidentDeps = {
     now: () => new Date("2026-11-02T08:00:00Z"),
@@ -40,8 +43,10 @@ function makeDeps(assigned: number[]) {
       calls.events.push({ event, data });
     },
     db: {
+      select: () => ({ from: () => ({ where: () => ({ limit: async () => vehicles }) }) }),
       transaction: async (fn: (tx: any) => Promise<any>) =>
         fn({
+          select: () => ({ from: () => ({ where: () => ({ limit: async () => [{ id: 10, registrationNumber: "TEST-1", brand: "B", model: "M", deletedAt: null }] }) }) }),
           insert: () => ({
             values: (v: any) => {
               calls.inserted.push(v);
@@ -58,13 +63,14 @@ describe("createIncident", () => {
   it("chauffeur sur son véhicule : insertion avec audit, alerte puis événement", async () => {
     const { deps, calls } = makeDeps([10]);
     const out = await createIncident({ id: 5, role: "driver" }, { vehicleId: 10, description: "Fuite d'huile", severity: "high" }, deps);
-    expect(out).toMatchObject({ id: 7, vehicleId: 10, reportedBy: 5, status: "open", severity: "high" });
+    expect(out).toMatchObject({ id: 7, vehicleId: 10, vehicleRegistration: "AB-123-CD", reportedBy: 5, status: "open", severity: "high" });
     expect(calls.inserted[0]).toMatchObject({ createdBy: 5, updatedBy: 5, reportedBy: 5 });
     expect(calls.notified[0]).toMatchObject({ roles: ["workshop_manager", "admin"], dedupeKey: "incident_reported:7", priority: "high" });
+    expect(calls.notified[0].message).toBe("Panne grave déclarée sur le véhicule AB-123-CD.");
     expect(calls.events).toEqual([
       {
         event: "incident_reported",
-        data: expect.objectContaining({ payload: { id: 7, vehicleId: 10, severity: "high" }, scope: { type: "roles", roles: ["workshop_manager", "admin"] } }),
+        data: expect.objectContaining({ payload: { id: 7, vehicleId: 10, severity: "high" }, scope: REALTIME_EVENTS.incident_reported.scope }),
       },
     ]);
   });
@@ -78,6 +84,14 @@ describe("createIncident", () => {
     }
   });
 
+  it("véhicule inexistant : 404 avant toute écriture (pas de violation de clé étrangère)", async () => {
+    const { deps, calls } = makeDeps([], []);
+    await expect(createIncident({ id: 1, role: "admin" }, { vehicleId: 404, description: "Panne moteur", severity: "low" }, deps)).rejects.toMatchObject({ status: 404 });
+    expect(calls.inserted).toEqual([]);
+    expect(calls.notified).toEqual([]);
+    expect(calls.events).toEqual([]);
+  });
+
   it("l'échec de l'alerte n'annule pas la déclaration", async () => {
     const { deps, calls } = makeDeps([10]);
     deps.notifyRoles = async () => {
@@ -86,5 +100,14 @@ describe("createIncident", () => {
     const out = await createIncident({ id: 5, role: "driver" }, { vehicleId: 10, description: "Pneu à plat", severity: "low" }, deps);
     expect(out.id).toBe(7);
     expect(calls.events).toHaveLength(1);
+  });
+});
+
+describe("listIncidents", () => {
+  it("hors atelier, logistique et chauffeur : 403 avant toute lecture", async () => {
+    const db = { select: () => { throw new Error("lecture interdite"); } };
+    for (const role of ["accountant", "viewer", "secretary", "warehouse", "technician", "management", "user", "client"]) {
+      await expect(listIncidents({ id: 1, role }, {}, { db })).rejects.toMatchObject({ status: 403, message: INCIDENT_READ_FORBIDDEN_MESSAGE });
+    }
   });
 });

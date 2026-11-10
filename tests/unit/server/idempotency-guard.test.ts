@@ -1,10 +1,14 @@
 import { EventEmitter } from "events";
+import express from "express";
+import http from "http";
+import type { AddressInfo } from "net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppError } from "../../../server/lib/app-error";
 import { IDEMPOTENCY_ROUTES, isPreWriteRefusal, isReplayableStatus } from "../../../server/lib/idempotency-config";
 import { FEATURE_FLAGS } from "../../../shared/feature-flags";
 import { hashRequest, type IdempotencyStore, type ReserveOutcome } from "../../../server/lib/idempotency-store";
 import { findIdempotentRoute, idempotencyGuard } from "../../../server/middleware/idempotency-guard";
+import { BACKSLASH, sendRaw } from "../../support/raw-request";
 
 /**
  * Niveau A, garde d'idempotence (lot #10b) avec un stockage factice : décisions du garde
@@ -29,9 +33,14 @@ function fakeReq(over: Partial<{ method: string; url: string; key: string | unde
   const { method = "PUT", url = "/api/missions/7/status", body = { status: "in_progress" } } = over;
   const key = "key" in over ? over.key : "k-1";
   const userId = "userId" in over ? over.userId : 3;
+  // Comme sous `app.use("/api", apiRouter)` : la garde lit `baseUrl + path` (chemin du routeur).
+  const pathname = url.split(/[?#]/)[0];
+  const mounted = /^\/api(?=\/|$)/i.exec(pathname);
   return {
     method,
     originalUrl: url,
+    baseUrl: mounted ? mounted[0] : "",
+    path: mounted ? pathname.slice(mounted[0].length) || "/" : pathname,
     body,
     session: userId === undefined ? {} : { userId },
     requestId: "req-test",
@@ -398,5 +407,58 @@ describe("garde d'idempotence : route qui garde sa clé (stock)", () => {
     const route = vi.fn();
     await stockGuard(fresh.store)(stockReq({ key: "k-2" }), fakeRes() as never, route);
     expect(route).toHaveBeenCalledWith();
+  });
+});
+
+/**
+ * Vrai routeur, cible envoyee par socket brut : la garde reconnait la route sur le chemin que le
+ * routeur execute (`parseurl` convertit `\` en `/` avec un `#` ou une forme absolue), pas sur
+ * `originalUrl` brut. Sinon la meme cle rejouerait l'ecriture au lieu de la reponse enregistree.
+ */
+describe("garde d'idempotence dans un vrai routeur Express", () => {
+  const B = BACKSLASH;
+  let server: http.Server;
+  let port = 0;
+  let executions = 0;
+  let store: IdempotencyStore;
+
+  beforeEach(async () => {
+    executions = 0;
+    store = memoryStore().store;
+    const app = express();
+    const apiRouter = express.Router();
+    apiRouter.use(express.json());
+    apiRouter.use((req, _res, next) => {
+      (req as { session?: unknown }).session = { userId: 3 };
+      next();
+    });
+    apiRouter.use(idempotencyGuard(ROUTES, store, async (id) => ({ id })));
+    app.use("/api", apiRouter);
+    // Declaree sur l'app apres apiRouter, comme les routes de `server/routes.ts`.
+    app.put("/api/missions/:id/status", (_req, res) => {
+      executions += 1;
+      res.json({ ok: true, executions });
+    });
+    server = app.listen(0);
+    await new Promise<void>((resolve) => server.once("listening", () => resolve()));
+    port = (server.address() as AddressInfo).port;
+  });
+
+  afterEach(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  it.each([
+    ["/api/missions/7/status", `/api${B}missions/7/status#x`],
+    ["/api/missions/7/status", `http://h/api${B}missions/7/status`],
+    ["/api/missions/7/status", `/api/missions${B}7/status#`],
+    ["/api/missions/7/status", "/api/missions/7/status/"],
+  ])("%s puis %s, meme cle : la route ne s'execute qu'une fois", async (first, second) => {
+    const options = { body: { status: "in_progress" }, headers: { "Idempotency-Key": "k-raw" } };
+    expect(await sendRaw(port, "PUT", first, options)).toBe(200);
+    await flush();
+    expect(await sendRaw(port, "PUT", second, options)).toBe(200);
+    expect(executions).toBe(1);
+    expect(store.reserve).toHaveBeenCalledTimes(2);
   });
 });

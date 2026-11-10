@@ -7,6 +7,7 @@ import { appToast, invalidateAlertQueries } from "@/lib/app-toast";
 import { triggerNativeNotification } from "@/lib/native-mobile";
 import { KPI_QUERY_KEYS, REALTIME_EVENTS, type RealtimeEventName } from "@shared/contracts/realtime-events";
 import { satelliteTargetsOf, type SatellitePayload } from "@/lib/realtime-satellites";
+import { setOfflineResyncHandler, whenReplaySettled } from "@/lib/offline-replay-gate";
 
 /** Couche 3, écrans satellites : groupes déclarés pour l'événement (`client/src/lib/realtime-satellites.ts`). */
 function invalidateSatellites(event: string, payload?: SatellitePayload): void {
@@ -615,6 +616,9 @@ function resyncCriticalData(reason: string, force = false): void {
     });
   }
 }
+
+// Un seul resync forcé après vidange de la file hors ligne (offline-queue-core, onDrained).
+setOfflineResyncHandler(() => resyncCriticalData("offline_queue_drained", true));
 
 function parseScope(scopeValue: unknown): RealtimeScope | undefined {
   const scopeRecord = asRecord(scopeValue);
@@ -1882,7 +1886,8 @@ function bindNetworkListeners(): void {
   window.addEventListener("online", () => {
     if (!manualClose && shouldConnect()) {
       connectSocket();
-      resyncCriticalData("network_online");
+      // Le rejeu de la file hors ligne passe d'abord : relire avant l'envoi montrerait l'état d'avant.
+      void whenReplaySettled().then(() => resyncCriticalData("network_online"));
     }
   });
 

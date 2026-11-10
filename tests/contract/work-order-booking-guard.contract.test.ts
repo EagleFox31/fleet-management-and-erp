@@ -7,6 +7,7 @@ import { bookingConflictResponseSchema } from "../../shared/contracts/work-order
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD } from "../support/factories";
+import { sendRawResponse } from "../support/raw-request";
 
 /** Double affectation (T-23b): 409 sans écriture, PATCH sans changement de créneau accepté. */
 
@@ -97,6 +98,17 @@ describe("garde de double affectation des OT", { timeout: 180000 }, () => {
     expect(moved.status).toBe(409);
     const [unchanged] = await db.select().from(workOrders).where(eq(workOrders.id, second.id));
     expect(unchanged.startDate?.toISOString()).toBe("2031-03-02T08:00:00.000Z");
+
+    // Cible brute que la route lit comme `/api/work-orders/:id` : la garde la lit de la même façon.
+    // Avant le matcher Express, une regex sur `req.path` laissait passer `%36%32` (= `62`) sans 409.
+    const encodedId = [...String(second.id)].map((digit) => `%3${digit}`).join("");
+    const port = Number(new URL(baseUrl).port);
+    for (const target of [`/api/work-orders/${encodedId}`, `/api/WORK-ORDERS/${second.id}`, `/api/work-orders/${second.id}/`]) {
+      const raw = await sendRawResponse(port, "PATCH", target, { headers: { Cookie: cookie }, body: { startDate: "2031-03-01T09:00:00Z" } });
+      expect(raw.status, target).toBe(409);
+    }
+    const [stillUnchanged] = await db.select().from(workOrders).where(eq(workOrders.id, second.id));
+    expect(stillUnchanged.startDate?.toISOString()).toBe("2031-03-02T08:00:00.000Z");
 
     // PATCH sans changement de créneau: la garde ne s'en mêle pas.
     const rename = await call("PATCH", `/api/work-orders/${second.id}`, cookie, { description: "note" });

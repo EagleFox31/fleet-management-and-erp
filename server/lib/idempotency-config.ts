@@ -67,7 +67,7 @@ export const IDEMPOTENCY_ROUTES: readonly IdempotencyRoute[] = [
     pattern: /^\/driver\/breakdowns$/,
     staleSeconds: null,
     keepKeyOnUncertainOutcome: true,
-    inProgressMessage: "Cette déclaration est déjà en cours d'envoi. Elle apparaîtra dès que le serveur l'aura enregistrée.",
+    inProgressMessage: "Cette déclaration est déjà en cours d'envoi. Réessayer avec la même clé ne la dupliquera pas ; si elle ne vous est pas confirmée, vérifiez vos déclarations avant d'en refaire une.",
   },
 ];
 
@@ -90,9 +90,10 @@ export const PRE_WRITE_REFUSALS: readonly number[] = [401, 403, 408, 429];
 
 /**
  * Refus métier prononcés avant toute écriture, reconnus au `code` du corps d'erreur : libérés comme
- * `PRE_WRITE_REFUSALS`. `VEHICLE_RETIRED` (L3) : une fois le véhicule restauré, la même clé doit écrire.
+ * `PRE_WRITE_REFUSALS`. `VEHICLE_RETIRED` (L3) : une fois le véhicule restauré, la même clé doit écrire. Déclaration de panne (V5b-1b) :
+ * `INCIDENT_WRITE_FAILED` (transaction échouée, rien de validé) et `INCIDENT_VEHICLE_NOT_FOUND`.
  */
-export const PRE_WRITE_REFUSAL_CODES: readonly ApiErrorCode[] = ["VEHICLE_RETIRED"];
+export const PRE_WRITE_REFUSAL_CODES: readonly ApiErrorCode[] = ["VEHICLE_RETIRED", "INCIDENT_WRITE_FAILED", "INCIDENT_VEHICLE_NOT_FOUND"];
 
 /** Vrai si la réponse est un refus prononcé avant toute écriture : la clé est libérée, jamais rejouée. */
 export function isPreWriteRefusal(status: number, body?: unknown): boolean {

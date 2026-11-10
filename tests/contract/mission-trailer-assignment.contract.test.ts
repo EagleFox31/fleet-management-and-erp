@@ -5,9 +5,10 @@ import {
   TRAILER_ALREADY_HITCHED_MESSAGE,
   TRAILER_IS_TRUCK_MESSAGE,
   TRAILER_WRONG_TYPE_MESSAGE,
+  TRUCK_IS_TRAILER_MESSAGE,
 } from "../../server/services/trailer-assignment";
 import { MISSION_OPERATIONS_PATH } from "../../shared/contracts/mission-operations";
-import { assignments, drivers, missionOperations, missions } from "../../shared/schema";
+import { assignments, drivers, missionOperations, missions, vehicles } from "../../shared/schema";
 import { apiErrorProblems } from "../support/api-error";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
@@ -218,5 +219,74 @@ describe("remorque d'affectation", { timeout: 180000 }, () => {
     expect(again.body.trailerVehicleId).toBe(other);
     const list2 = await session.call("GET", MISSION_OPERATIONS_PATH, { actor: "admin" });
     expect(list2.body.rows.find((r: any) => r.missionId === missionId)).toMatchObject({ trailerVehicleId: other });
+  });
+
+  it("O1 : la remorque reste préremplie une fois l'affectation terminée", async () => {
+    const missionId = await mission();
+    const trailerId = await trailer();
+    expect((await add("admin", missionId, { driverId: await driver(), vehicleId: await vehicle(), trailerId })).status).toBe(201);
+    await db.update(assignments).set({ status: "completed" }).where(eq(assignments.missionId, missionId));
+    await db.update(missions).set({ status: "completed" } as any).where(eq(missions.id, missionId));
+
+    const list = await session.call("GET", MISSION_OPERATIONS_PATH, { actor: "admin" });
+    expect(list.status, JSON.stringify(list.body)).toBe(200);
+    expect(list.body.rows.find((r: any) => r.missionId === missionId)).toMatchObject({ trailerVehicleId: trailerId });
+  });
+
+  it("une remorque comme camion : 400 lisible sur les trois routes, rien d'écrit", async () => {
+    const asTruck = await trailer();
+    const added = await mission();
+    const viaAdd = await add("admin", added, { driverId: await driver(), vehicleId: asTruck });
+    expect(apiErrorProblems(viaAdd.status, viaAdd.body, 400, undefined, viaAdd.headers.get("x-request-id"))).toEqual([]);
+    expect(viaAdd.body.message).toBe(TRUCK_IS_TRAILER_MESSAGE);
+    expect(await rowsOf(added)).toHaveLength(0);
+
+    const viaCreate = await create("admin", { vehicleId: asTruck, driverId: await driver() });
+    expect(viaCreate.status, JSON.stringify(viaCreate.body)).toBe(400);
+    expect(viaCreate.body.message).toBe(TRUCK_IS_TRAILER_MESSAGE);
+
+    const patched = await mission();
+    const viaPatch = await session.call("PATCH", `/api/missions/${patched}`, { actor: "admin", body: { assignment: { vehicleId: asTruck, driverId: await driver() } } });
+    expect(viaPatch.status, JSON.stringify(viaPatch.body)).toBe(400);
+    expect(viaPatch.body.message).toBe(TRUCK_IS_TRAILER_MESSAGE);
+    expect(await rowsOf(patched)).toHaveLength(0);
+  });
+
+  it.each([
+    ["en maintenance", { status: "maintenance" }],
+    ["assurance expirée", { insuranceExpiry: "2020-01-01" }],
+  ])("remorque inéligible (%s) : 400 lisible qui la nomme, rien d'écrit", async (_label, patch) => {
+    const trailerId = await trailer();
+    await db.update(vehicles).set(patch as any).where(eq(vehicles.id, trailerId));
+    const [{ registrationNumber }] = await db.select({ registrationNumber: vehicles.registrationNumber }).from(vehicles).where(eq(vehicles.id, trailerId));
+    const missionId = await mission();
+    const res = await add("admin", missionId, { driverId: await driver(), vehicleId: await vehicle(), trailerId });
+    expect(apiErrorProblems(res.status, res.body, 400, undefined, res.headers.get("x-request-id"))).toEqual([]);
+    expect(res.body.message).toContain(registrationNumber);
+    expect(await rowsOf(missionId)).toHaveLength(0);
+  });
+
+  it("donnée ancienne : une remorque roulant comme camion sur une affectation active ne s'attelle pas ailleurs (409)", async () => {
+    const trailerId = await trailer();
+    const legacy = await mission();
+    await db.insert(assignments).values({ missionId: legacy, vehicleId: trailerId, driverId: await driver(), status: "accepted" } as any);
+    const missionId = await mission();
+    const res = await add("admin", missionId, { driverId: await driver(), vehicleId: await vehicle(), trailerId });
+    expect(apiErrorProblems(res.status, res.body, 409, undefined, res.headers.get("x-request-id"))).toEqual([]);
+    expect(res.body.message).toBe(TRAILER_ALREADY_HITCHED_MESSAGE);
+  });
+
+  it("PATCH sans trailerId conserve la remorque ; null la retire", async () => {
+    const missionId = await mission();
+    const [trailerId, truck, driverId] = [await trailer(), await vehicle(), await driver()];
+    expect((await add("admin", missionId, { driverId, vehicleId: truck, trailerId })).status).toBe(201);
+
+    const keep = await session.call("PATCH", `/api/missions/${missionId}`, { actor: "admin", body: { assignment: { vehicleId: truck, driverId } } });
+    expect(keep.status, JSON.stringify(keep.body)).toBe(200);
+    expect((await rowsOf(missionId)).map((r) => r.trailerId)).toEqual([trailerId]);
+
+    const remove = await session.call("PATCH", `/api/missions/${missionId}`, { actor: "admin", body: { assignment: { vehicleId: truck, driverId, trailerId: null } } });
+    expect(remove.status, JSON.stringify(remove.body)).toBe(200);
+    expect((await rowsOf(missionId)).map((r) => r.trailerId)).toEqual([null]);
   });
 });

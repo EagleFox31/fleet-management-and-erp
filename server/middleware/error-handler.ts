@@ -16,6 +16,7 @@ import { logContextOf } from "../lib/error-log-context";
 import { LAST_ADMIN_MESSAGE } from "../lib/last-admin-rule";
 import { isLastActiveAdminViolation, isTransactionConflict, moneyLockMessageOf, TRANSACTION_CONFLICT_MESSAGE } from "../lib/pg-errors";
 import { moduleLogger } from "../lib/logger";
+import { isApiPath } from "../lib/routed-path";
 
 export { AppError } from "../lib/app-error";
 
@@ -57,7 +58,7 @@ export function requestContext(req: Request, res: Response, next: NextFunction) 
 
 /** Journal d'accès des routes /api : une ligne par requête, sans le corps. */
 export function accessLog(req: Request, res: Response, next: NextFunction) {
-  if (!req.path.startsWith("/api")) return next();
+  if (!isApiPath(req.path)) return next();
   const start = Date.now();
   res.on("finish", () => {
     const entry = {

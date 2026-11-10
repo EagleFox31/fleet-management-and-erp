@@ -3581,3 +3581,69 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/integration/fuel-record-cancel-mission.test.ts`, cas de course solde / annulation : échoue (`deadlock detected`) si le verrou de la mission est retiré ;
   - revue des autres chemins : tous ceux de `mission-budgets-service.ts` (mise à jour, transitions, solde, dépenses) verrouillent la mission (`lockMission`) avant le budget ; aucun chemin inverse trouvé.
 - **Leçon généralisée** : tout service qui touche mission et budget prend les verrous dans le même ordre, mission puis budget, y compris les verrous implicites des triggers. Un verrou conditionnel (requête filtrée) ne verrouille rien quand le filtre est faux : verrouiller d'abord, tester ensuite.
+
+## 2026-11-10 — Remorque d'affectation : trois oublis du même lot, trouvés en revue et en CI (#635)
+
+- **Contexte** : ajout de `assignments.trailer_id` (lot remorque). Trois défauts trouvés avant la fusion, aucune donnée touchée.
+  1. `POST /api/missions` lisait `assignment.trailerId` sans que l'objet imbriqué `assignment` soit déclaré dans le schéma Zod : `"abc"` ou `1.5` atteignaient la base et finissaient en 500.
+  2. La création de mission prenait le verrou de la remorque avant ceux du camion et du chauffeur, à l'inverse de l'ajout d'affectation : création et ajout simultanés pouvaient s'interbloquer.
+  3. La nouvelle clé étrangère vers `vehicles.id` n'était pas classée dans `VEHICLE_ACTIVITY_SOURCES` : CI unitaire rouge, et un véhicule attelé aurait été supprimé physiquement.
+- **Cause racine** : une colonne ajoutée sur une table existante, sans relire tout ce qui la touche : validation d'entrée de chaque route, ordre de verrous partagé, critère d'action du véhicule.
+- **Classification** : contrat d'entrée incomplet, ordre de verrous incohérent, référence non classée ; near miss.
+- **Résolution** : `assignment` déclaré dans `createMissionSchema` (ids passés par `idSchema`, `true` refusé) ; verrous dans un seul ordre, véhicule (1), chauffeur (2), remorque (3), via `lockPlanningResources` puis `assertTrailerAssignable` ; `assignments.trailer_id` classé.
+- **Prévention vérifiée** :
+  - `tests/contract/mission-trailer-assignment.contract.test.ts`, cas « trailerId "abc", 1.5, 2147483648, true : 400, jamais 500 » et « création et ajout simultanés : un 201, un 409, jamais d'interblocage » ;
+  - `tests/unit/server/vehicle-activity-sources.test.ts` échoue sur toute clé étrangère vers `vehicles.id` non classée.
+- **Leçon généralisée** : un objet imbriqué lu par une route est toujours déclaré dans son schéma Zod, sinon il n'est pas validé du tout. L'ordre des verrous consultatifs est fixé en un seul endroit et chaque route l'emprunte. Toute clé étrangère vers `vehicles.id` est classée dans `vehicle-lifecycle-sources.ts` dans la même PR.
+
+## 2026-11-10 — Service importé par un test unitaire qui charge server/db : job unit rouge (#642)
+
+- **Contexte** : les suites de #635 ajoutent l'éligibilité de la remorque dans `server/services/trailer-assignment.ts`, qui importe alors `loadOpenRenewalReceipts` (`server/lib/renewal-receipts.ts`, qui importe `server/db`). `tests/unit/server/assignments-trailer-schema.test.ts` importe ce service. Le job unit de la CI n'a pas `DATABASE_URL` : `server/db.ts` lève une exception au chargement et le fichier tombe sans assertion. Trouvé en relecture, avant la fusion.
+- **Cause racine** : un import ajouté dans un module de règles pur l'a relié à la base. Localement, l'erreur « DATABASE_URL must be set » a été prise pour un défaut d'environnement et le fichier relancé avec une base, ce qui a masqué le défaut.
+- **Classification** : dépendance de chargement non voulue ; erreur locale mal classée comme environnementale ; near miss.
+- **Résolution** : le chargeur de récépissés est injecté (`TrailerCheck.loadReceipts`, appelé par les routes avec `loadOpenRenewalReceipts(id, tx)`) ; le service n'importe plus `server/db`, et le cast `tx as unknown as DbExecutor` disparaît.
+- **Prévention vérifiée** :
+  - `tests/unit/server/assignments-trailer-schema.test.ts` lancé sans `DATABASE_URL` : vert ; il échoue au chargement si le service réimporte `server/db` ;
+  - la suite unitaire complète lancée sans `DATABASE_URL`, comme en CI : verte hors `db-pool-options` (version du driver locale).
+- **Leçon généralisée** : un module importé par un test unitaire ne charge pas `server/db` ; il reçoit ses lectures en paramètre. Un test unitaire se lance localement sans `DATABASE_URL`, comme en CI ; une erreur « DATABASE_URL must be set » dans un test unitaire est un défaut du code, jamais de l'environnement.
+## 2026-11-10 — Clé d'idempotence conservée sur un 500 antérieur à l'écriture (V5b-1)
+
+- **Contexte** : la revue sécurité de V5b-1 (#636) a relevé que `POST /api/driver/breakdowns` garde sa clé 7 jours sur toute issue incertaine (`staleSeconds: null` + `keepKeyOnUncertainOutcome`). Aucun incident en production, trouvé à la relecture.
+- **Cause racine** : « issue incertaine » avait été traduit par « tout 5xx ». Or un 5xx levé avant l'écriture (interblocage, coupure, clé étrangère d'un véhicule inexistant sur un retard ou un autre signalement) n'est pas incertain : rien n'est validé. La clé restait réservée et chaque rejeu recevait le 409 « en cours » alors que la panne n'existait pas.
+- **Classification** : idempotence, garde trop prudente, erreur lisible (500 sur une donnée invalide au lieu d'un 404).
+- **Résolution** : `createIncident` distingue les échecs antérieurs à la validation (503 `INCIDENT_WRITE_FAILED`, 404 `INCIDENT_VEHICLE_NOT_FOUND`), tous deux dans `PRE_WRITE_REFUSAL_CODES` : la clé est libérée. Le message du 409 ne promet plus que la panne apparaîtra.
+- **Prévention vérifiée** : `tests/contract/idempotency-driver-breakdown.contract.test.ts`, bloc V5b-1b. Rouges sans correctif : échec de transaction puis réessai avec la même clé, véhicule inexistant (avec et sans OT), message du 409. Verts avant et après, gardés comme caractérisation : même clé pour deux comptes, lecteur refusé en 403.
+- **Seconde erreur, trouvée à la revue de la correction** : `.catch` sur `db.transaction(...)` englobait aussi le COMMIT (le pilote enchaîne begin, corps et commit dans le même `try`). Un COMMIT validé dont l'accusé se perd donnait un 503, une clé libérée, puis au rejeu une seconde panne et un second OT. Transaction ORM rejetée ≠ annulée : le COMMIT peut échouer après validation. `createIncident` pose `bodyDone` en fin de corps : avant, 503 et clé libérée ; après, l'erreur brute remonte (5xx) et la clé reste gardée, sauf conflit de sérialisation (`40001`, annulation certaine). Contrat : « COMMIT validé mais accusé perdu » (clé `in_progress`, 1 incident, 1 OT, rejeu en 409). Rien de résiduel côté serveur ; le dédoublonnage côté appli hors ligne reste l'affaire de V5b.
+- **Leçon généralisée** : sur une route qui garde sa clé, chaque erreur doit être classée « avant l'écriture » (libérer, code dédié dans `PRE_WRITE_REFUSAL_CODES`) ou « après / inconnue » (garder). Un 500 non classé garde la clé : tout chemin d'erreur antérieur à la transaction a donc son code, et son contrat. Ne jamais classer « avant l'écriture » une erreur qui peut provenir du COMMIT : le drapeau de fin de corps fait la différence.
+
+## 2026-11-10 — Barre oblique inverse : gardes de `server/api/` sautées, route de `routes.ts` exécutée (suite de #631)
+
+- **Contexte** : la revue sécurité de #631 envoie, en socket brut, `PATCH /api\users/62#x`, `PATCH http://h/api\users/62`, `/api/users\62#` et `/api/users/62\#`. Toutes répondent 200 sans entrée d'audit. En reproduisant, on trouve pire : pour `/api\users/62#x`, la garde du dernier administrateur (`last-admin-guard.routes.ts`) ne s'exécute pas, et `POST /api\maintenance-schedules#` crée un plan d'entretien sur un véhicule retiré (201), alors que `retiredVehicleWriteGuard` répond 409 sur la même requête canonique.
+- **Cause racine** : chaque couche normalise le chemin à sa façon. `parseurl` (Express) convertit `\` en `/` quand la cible porte un `#` ou une forme absolue, et l'app lit `/api/users/62`. Mais un montage (`app.use("/api", apiRouter)`) retire son préfixe de la cible **brute** : apiRouter reçoit `\users/62#x` et lit `//users/62`, où aucune de ses routes ne correspond. Les gardes déclarées dans `server/api/` sont sautées, et la route déclarée sur l'app dans `server/routes.ts` s'exécute. De son côté, l'audit et l'idempotence lisaient `req.originalUrl` brut, une troisième lecture.
+- **Classification** : sécurité, contournement de contrôle d'accès et de traçabilité (dernier admin, véhicule retiré, audit, idempotence). Exploitable par tout compte qui a déjà le droit d'appeler la route.
+- **Résolution** :
+  - `rejectNonCanonicalTarget` (`server/middleware/reject-non-canonical-target.ts`) est monté en tête de `server/app.ts`, avant tout routeur et avant les fichiers statiques. Il répond 400 `NON_CANONICAL_TARGET` si la partie chemin de la cible brute (avant `?`) contient `\`, ou si la cible est en forme absolue. Restent acceptés : `\` dans la query et `%5C`, que `parseurl` ne convertit pas.
+  - En défense en profondeur, l'audit et l'idempotence lisent `routedPath(req)` (`server/lib/routed-path.ts`, soit `req.baseUrl + req.path`, le chemin du routeur) au lieu de `req.originalUrl`. `auditedPath` et `ABSOLUTE_FORM` sont supprimés.
+  - Le cliquet `route-id-parse-hygiene` signale aussi `z.coerce.number()` sur `req.params`, et plus seulement `idSchema`.
+- **Prévention vérifiable** :
+  - `tests/contract/non-canonical-target.contract.test.ts` : vraie app, socket brut, garde dernier admin, véhicule retiré, anonyme et cibles légitimes. 7 cas rouges sans le middleware, dont le 201 sur véhicule retiré.
+  - `tests/unit/server/reject-non-canonical-target.test.ts` couvre le constat de contournement, le refus, les cas légitimes et l'ordre de montage dans `server/app.ts`.
+  - `audit-writes-router.test.ts` et `idempotency-guard.test.ts` jouent les cibles avec barre inverse en socket brut contre une route déclarée sur l'app.
+  - Helper commun : `tests/support/raw-request.ts`.
+- **Leçon généralisée** : la normalisation de chemin diffère entre couches (app, routeur monté, middleware qui lit `originalUrl`). Il faut normaliser ou rejeter **une seule fois, à l'entrée**, avant tout routage. Un contrôle transversal dérive ensuite son chemin du parseur du routeur (`req.baseUrl + req.path`), jamais d'`originalUrl` brut. Une garde déclarée en routeur ne protège une route déclarée ailleurs que si les deux lisent la même cible.
+
+## 2026-11-10 — Garde de double affectation contournée par `%36%32` : une garde lit sa route par un matcher Express
+
+- **Contexte** : revue sécurité de #640. `workOrderBookingGuard` (`server/middleware/booking-guard.ts`) lisait l'id de l'ordre de travail par regex sur `req.path` (`/^\/(\d+)\/?$/`). `PATCH /api/work-orders/%36%32` est servi par la route `/:id` (Express décode `62`), mais la regex ne reconnaît pas `%36%32` : la garde laisse passer et la double affectation n'est plus refusée en 409. Même constat, à plus faible enjeu, sur `req.path.startsWith("/api")` dans `server/app.ts` et `accessLog` : `/API/...`, servi par le montage `/api`, n'avait ni `no-store` ni journal d'accès. Enfin, un upgrade WebSocket hors `/ws` restait pendant hors développement (personne d'autre n'écoute).
+- **Cause racine** : la garde lisait le chemin elle-même au lieu de laisser Express le lire. Casse, `%xx` et barre finale ont la même lecture pour la route servie et pour un matcher Express, pas pour une regex écrite à la main.
+- **Classification** : sécurité, contournement d'une règle métier (double affectation) par une forme de cible équivalente. Préexistant.
+- **Résolution** :
+  - La garde reconnaît sa route par un matcher Express : `Router().post("/", ...)` et `Router().patch("/:id", ...)`, exactement comme `retiredVehicleWriteGuard`. L'id vient de `req.params.id`.
+  - `isApiPath` / `API_PREFIX` (`server/lib/routed-path.ts`, `/^\/api(?=\/|$)/i`) remplacent `startsWith("/api")` dans `app.ts`, `error-handler.ts` et `idempotency-guard.ts`.
+  - `server/index.ts` détruit la socket d'un upgrade hors `/ws` hors développement ; en développement, Vite HMR la prend.
+- **Prévention vérifiable** :
+  - `tests/contract/work-order-booking-guard.contract.test.ts` : en socket brut, `%3X` par chiffre, `/API/WORK-ORDERS/:id` et barre finale répondent 409, base inchangée. Rouge sans le correctif.
+  - `tests/unit/server/guard-path-matcher-hygiene.test.ts` : cliquet sur `server/middleware/*guard*`, qui refuse regex, comparaison ou méthode de chaîne sur `req.path`, et toute lecture de `req.originalUrl` / `req.url`. Liste tolérée vide.
+  - `tests/unit/server/upgrade-route.test.ts` : `upgradeRoute` (`server/lib/upgrade-route.ts`) refuse hors `/ws` hors développement, et `server/index.ts` détruit la socket refusée.
+  - `tests/unit/server/routed-path.test.ts` (`isApiPath`) et `GET /API/vehicles` avec `no-store` dans `non-canonical-target.contract.test.ts`.
+- **Leçon généralisée** : une garde reconnaît sa route par un matcher Express, jamais par une regex ou une comparaison sur `req.path`. Seule une lecture qui ne peut que refuser davantage (liste d'autorisation, refus par défaut) peut lire le chemin elle-même.
