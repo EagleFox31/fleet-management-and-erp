@@ -28,6 +28,7 @@ export type TestUserRole =
   | "management"
   | "technician"
   | "secretary"
+  | "accountant"
   | "logistics"
   | "warehouse"
   | "driver"

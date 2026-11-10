@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { moduleLogger } from "../lib/logger";
 import { findActiveSessionUser } from "../services/session-user";
-import { ALL_APP_ROLES, STOCK_ISSUER_ROLES, STOCK_VALUATION_READ_ROLES, STAFF_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES, INVENTORY_REPORT_ROLES, INVENTORY_MANAGER_ROLES, VEHICLE_PATCH_ROLES, DRIVER_MANAGER_ROLES, FUEL_CARD_MANAGER_ROLES, TECHNICIAN_REPORT_ROLES, type AppRole } from "@shared/constants/roles";
+import { VEHICLE_OPERATION_WRITE_ROLES, ALL_APP_ROLES, STOCK_ISSUER_ROLES, STOCK_VALUATION_READ_ROLES, STAFF_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES, INVENTORY_REPORT_ROLES, INVENTORY_MANAGER_ROLES, VEHICLE_PATCH_ROLES, DRIVER_MANAGER_ROLES, FUEL_CARD_MANAGER_ROLES, TECHNICIAN_REPORT_ROLES, type AppRole } from "@shared/constants/roles";
 
 const ALL_ROLES = ALL_APP_ROLES;
 
@@ -16,6 +16,8 @@ const ROLE_ALIASES: Record<string, AppRole> = {
   secretary: "secretary",
   secretaire: "secretary",
   "secrétaire": "secretary",
+  accountant: "accountant",
+  comptable: "accountant",
   logistics: "logistics",
   logisticien: "logistics",
   warehouse: "warehouse",
@@ -218,6 +220,8 @@ export const isAnyUser = authorize([...ALL_ROLES]);
 // Tout le personnel (tout rôle sauf `client`) : écritures faites par l'exploitation
 // sur un véhicule, qu'un client consulte sans les saisir (kilométrage, position).
 export const isStaff = authorize([...STAFF_ROLES]);
+// Saisie d'exploitation véhicule : personnel sans le comptable (VEHICLE_OPERATION_WRITE_ROLES).
+export const isVehicleOperationWriter = authorize([...VEHICLE_OPERATION_WRITE_ROLES]);
 // Valuation du stock (pièces et pneus : valeur d'inventaire, valeur par fournisseur, historique,
 // coût de réapprovisionnement) : personnel hors chauffeur (STOCK_VALUATION_READ_ROLES).
 export const isStockValuationReader = authorize([...STOCK_VALUATION_READ_ROLES]);

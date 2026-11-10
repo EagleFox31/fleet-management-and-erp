@@ -34,6 +34,7 @@ const userRoles = [
   "workshop_manager",
   "technician",
   "secretary",
+  "accountant",
   "logistics",
   "warehouse",
   "client",
@@ -266,6 +267,7 @@ export function UserForm({ initialData, isEdit = false, userId, onSuccess, onCan
                         <SelectItem value="workshop_manager">Gestionnaire atelier</SelectItem>
                         <SelectItem value="technician">Technicien</SelectItem>
                         <SelectItem value="secretary">Secrétaire</SelectItem>
+                        <SelectItem value="accountant">Comptable</SelectItem>
                         <SelectItem value="logistics">Logistique</SelectItem>
                         <SelectItem value="warehouse">Magasinier</SelectItem>
                         <SelectItem value="client">Client</SelectItem>

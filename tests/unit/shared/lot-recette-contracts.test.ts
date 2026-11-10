@@ -22,11 +22,24 @@ import { REALTIME_EVENTS, REALTIME_EVENT_NAMES, REUSED_REALTIME_EVENTS } from "@
 import { TIME_CODES, TIME_CODE_LABELS } from "@shared/contracts/time-tracking";
 import { updateNotificationSettingsRequestSchema } from "@shared/contracts/notification-settings";
 
+/**
+ * SHOULD allumés par défaut après recette (lot V3). Chaque entrée est une décision versionnée :
+ * l'ajouter ici dans la PR qui passe `defaultEnabled` à true, avec son e2e.
+ */
+const SHOULD_ACTIVATED_AFTER_RECETTE: ReadonlySet<string> = new Set(["tire-movements", "fuel-anomalies"]);
+
 describe("drapeaux de fonctionnalité", () => {
-  it("clés en kebab-case, seuls les MUST allumés par défaut", () => {
+  it("clés en kebab-case, MUST et SHOULD recettés allumés par défaut, les autres coupés", () => {
     for (const key of FEATURE_KEYS) {
       expect(key).toMatch(/^[a-z]+(-[a-z]+)*$/);
-      expect(FEATURE_FLAGS[key].defaultEnabled).toBe(FEATURE_FLAGS[key].level === "must");
+      const expected = FEATURE_FLAGS[key].level === "must" || SHOULD_ACTIVATED_AFTER_RECETTE.has(key);
+      expect(FEATURE_FLAGS[key].defaultEnabled, key).toBe(expected);
+    }
+  });
+
+  it("un SHOULD recetté est bien un SHOULD connu", () => {
+    for (const key of SHOULD_ACTIVATED_AFTER_RECETTE) {
+      expect(FEATURE_FLAGS[key as keyof typeof FEATURE_FLAGS]?.level, key).toBe("should");
     }
   });
 

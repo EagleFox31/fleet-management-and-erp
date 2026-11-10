@@ -27,7 +27,7 @@ import { stockAlertsService } from "./services/stock-alerts-service";
 import { preventiveMaintenanceService } from "./services/preventive-maintenance-service";
 import { activityLogger } from "./services/activity-logger";
 import { TechnicianWorkOrdersService } from "./services/technician-work-orders-service";
-import { authenticate, authorize, normalizeRole, isAdmin, isWorkshopManager, isVehiclePatcher, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelRecordWriter, isAnyUser, isStaff, isTireValuationReader, isDocumentRenewalWriter, isWorkflowDocumentWriter, isInventoryReportReader, isTechnicianReportReader } from "./middleware/auth";
+import { isVehicleOperationWriter, authenticate, authorize, normalizeRole, isAdmin, isWorkshopManager, isVehiclePatcher, isTechnician, isInventoryManager, isPartsCatalogManager, isTireCatalogManager, isFuelRecordWriter, isAnyUser, isStaff, isTireValuationReader, isDocumentRenewalWriter, isWorkflowDocumentWriter, isInventoryReportReader, isTechnicianReportReader } from "./middleware/auth";
 import { sessionMiddleware } from "./middleware/session";
 // Note: apiRouter will be imported dynamically AFTER session middleware is configured
 import { 
@@ -2587,7 +2587,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Statistiques de consommation de carburant
   // Routes pour la gestion du kilométrage
-  app.post("/api/vehicles/:id/mileage/sync", isStaff, async (req, res) => {
+  app.post("/api/vehicles/:id/mileage/sync", isVehicleOperationWriter, async (req, res) => {
     try {
       const vehicleId = routeIdOrNaN(req.params.id);
       if (isNaN(vehicleId)) {

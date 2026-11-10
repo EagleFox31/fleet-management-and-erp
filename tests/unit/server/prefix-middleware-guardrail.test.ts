@@ -55,7 +55,6 @@ const MIDDLEWARES_JUSTIFIES: Entree[] = [
   { name: "authorize", type: "garde-role", raison: "liste de roles explicite par montage (403)" },
   { name: "sessionGuard", type: "garde-role", raison: "marque une garde de session ; enveloppe un repartiteur de gardes (/suppliers)" },
   { name: "exportsGuard", type: "garde-role", raison: "tableau [drapeau, isAnyUser, matrice de roles par export] : refus par defaut" },
-  { name: "gardeApprovisionnement", type: "garde-role", raison: "authorize(PROCUREMENT_ROLES) pose en constante locale" },
   { name: "(anonyme)@/check", file: "server/api/vehicle-subresources.routes.ts", type: "sans-base", occurrences: 1, raison: "next('router') seul : rend /vehicles/check/* au controle d'immatriculation de routes.ts, sans rien lire" },
   { name: "(anonyme)@/health/details", file: INDEX, type: "garde-role", occurrences: 1, raison: "gestionnaire final de la route : isAdmin le precede dans la meme chaine, il ne s'execute qu'apres la garde" },
   { name: `(anonyme)@/part-sales`, file: INDEX, type: "garde-role", occurrences: 1, raison: "repartiteur : GET/HEAD passent, toute ecriture est confiee a authorize(PART_SALE_ROLES)" },
