@@ -7,7 +7,7 @@
  * - insertion avec les champs d'audit (`created_by`, `updated_by`) ;
  * - après l'insertion : alerte au chef d'atelier et à l'admin (dédupliquée par
  *   `dedupe_key`, donc un retry est sans doublon) puis événement
- *   `incident_reported` (roles workshop_manager et admin).
+ *   `incident_reported` (atelier et logistique, voir REALTIME_EVENTS).
  *
  * Le routeur (`server/api/incidents.routes.ts`) est à l'API : il appelle
  * `createIncident(user, body)` et `listIncidents(user, query)`.
@@ -20,6 +20,8 @@ import { STATUS_MESSAGES } from "@shared/errors";
 import { AppError } from "../lib/app-error";
 import { isForeignKeyViolation, isTransactionConflict, pgConstraintOf } from "../lib/pg-errors";
 import { moduleLogger } from "../lib/logger";
+import { REALTIME_EVENTS } from "@shared/contracts/realtime-events";
+import { INCIDENT_AUDIENCE_ROLES } from "@shared/constants/roles";
 import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 
 const log = moduleLogger("incidents");
@@ -31,6 +33,7 @@ export type IncidentActor = { id: number; role: string };
 
 export const INCIDENT_OUT_OF_SCOPE_MESSAGE = "Vous ne pouvez déclarer une panne que sur le véhicule qui vous est affecté.";
 export const INCIDENT_FORBIDDEN_MESSAGE = "Votre profil ne permet pas de déclarer une panne.";
+export const INCIDENT_READ_FORBIDDEN_MESSAGE = "Votre profil ne permet pas de consulter les pannes déclarées.";
 
 /**
  * Règle pure. `assignedVehicleIds` n'est lu que pour un chauffeur.
@@ -107,10 +110,11 @@ export async function defaultDeps(): Promise<IncidentDeps> {
   };
 }
 
-function toIncident(row: typeof incidents.$inferSelect, reportedByName: string | null): Incident {
+function toIncident(row: typeof incidents.$inferSelect, reportedByName: string | null, vehicleRegistration: string | null): Incident {
   return {
     id: row.id,
     vehicleId: row.vehicleId,
+    vehicleRegistration,
     reportedBy: row.reportedBy,
     reportedByName,
     description: row.description,
@@ -160,6 +164,15 @@ export async function createIncident(
   const denied = incidentScopeError(actor, input.vehicleId, assigned);
   if (denied) throw denied;
   const user = actor as IncidentActor;
+
+  // Avant la transaction : un véhicule inexistant est un 404, pas une violation de clé étrangère (500).
+  const [vehicleRow] = await d.db
+    .select({ registrationNumber: vehicles.registrationNumber })
+    .from(vehicles)
+    .where(eq(vehicles.id, input.vehicleId))
+    .limit(1);
+  if (!vehicleRow) throw new AppError(404, "Véhicule introuvable.", { code: "INCIDENT_VEHICLE_NOT_FOUND" });
+  const registration: string = vehicleRow.registrationNumber;
 
   const now = (d.now ?? (() => new Date()))();
   let workOrder: WorkOrder | null = null;
@@ -231,7 +244,7 @@ export async function createIncident(
     .notifyRoles({
       roles: ["workshop_manager", "admin"],
       title: input.severity === "high" ? "Panne grave déclarée" : "Panne déclarée",
-      message: `Panne ${input.severity === "high" ? "grave " : ""}déclarée sur le véhicule #${input.vehicleId}.`,
+      message: `Panne ${input.severity === "high" ? "grave " : ""}déclarée sur le véhicule ${registration}.`,
       link: "/incidents",
       dedupeKey: `incident_reported:${row.id}`,
       priority: input.severity === "high" ? "high" : "medium",
@@ -242,7 +255,8 @@ export async function createIncident(
     entity: "incident",
     entityId: row.id,
     payload: { id: row.id, vehicleId: row.vehicleId, severity: row.severity },
-    scope: { type: "roles", roles: ["workshop_manager", "admin"] },
+    // Même portée que la définition partagée : atelier et logistique (avis de maintenance de mission).
+    scope: REALTIME_EVENTS.incident_reported.scope,
   });
 
   if (workOrder) {
@@ -260,7 +274,7 @@ export async function createIncident(
     });
   }
 
-  return toIncident(row, null);
+  return toIncident(row, null, registration);
 }
 
 export async function listIncidents(
@@ -269,7 +283,10 @@ export async function listIncidents(
   deps?: Pick<IncidentDeps, "db">,
 ): Promise<Incident[]> {
   if (!actor) throw new AppError(401, "Non authentifié.");
-  if (actor.role === "client") throw new AppError(403, INCIDENT_FORBIDDEN_MESSAGE);
+  // Atelier et logistique lisent tout, le chauffeur les siennes ; comptable, lecteur, RH, client : 403.
+  if (actor.role !== "driver" && !(INCIDENT_AUDIENCE_ROLES as readonly string[]).includes(actor.role)) {
+    throw new AppError(403, INCIDENT_READ_FORBIDDEN_MESSAGE);
+  }
   const db = (deps ?? (await defaultDeps())).db;
   const filters = [
     query.status ? eq(incidents.status, query.status) : undefined,
@@ -277,10 +294,11 @@ export async function listIncidents(
     actor.role === "driver" ? eq(incidents.reportedBy, actor.id) : undefined,
   ].filter((f) => f !== undefined);
   const rows = await db
-    .select({ incident: incidents, name: users.name })
+    .select({ incident: incidents, name: users.name, plate: vehicles.registrationNumber })
     .from(incidents)
     .leftJoin(users, eq(incidents.reportedBy, users.id))
+    .leftJoin(vehicles, eq(incidents.vehicleId, vehicles.id))
     .where(filters.length ? and(...filters) : undefined)
     .orderBy(desc(incidents.createdAt));
-  return rows.map((r: { incident: typeof incidents.$inferSelect; name: string | null }) => toIncident(r.incident, r.name));
+  return rows.map((r: { incident: typeof incidents.$inferSelect; name: string | null; plate: string | null }) => toIncident(r.incident, r.name, r.plate));
 }

@@ -608,6 +608,9 @@ export function canRoleSetMissionStatus(role: string | null | undefined, targetS
 /** Avis de maintenance rattachés aux missions (`/api/mission-advisories`) : logistique et atelier. */
 export const MISSION_ADVISORY_ROLES = ["admin", "logistics", "workshop_manager"] as const satisfies readonly AppRole[];
 
+/** Pannes déclarées : atelier et logistique reçoivent `incident_reported` et lisent la liste (`GET /api/incidents`). */
+export const INCIDENT_AUDIENCE_ROLES: readonly AppRole[] = [...new Set<AppRole>(["admin", "workshop_manager", ...MISSION_ADVISORY_ROLES])];
+
 /**
  * Gestion des demandes de pièce (`PATCH /api/part-requirements/:id`, `isInventoryManager`).
  * Toute transition de `STATUS_PERMISSIONS` doit rester dans ce jeu, sinon le droit est mort.
