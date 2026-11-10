@@ -3759,7 +3759,7 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
 ## 2026-11-11 — « Clé de requête » affiché à l'utilisateur sur un rejeu refusé (#685, #691)
 
 - **Contexte** : l'idempotence des écritures d'argent (avoirs, échéances, trésorerie, saisies chauffeur) repose sur une `requestKey` générée par le client. Le serveur refuse en 409 une même clé avec un autre contenu.
-- **Symptôme** : relecture de #685 : un comptable qui modifie le montant d'un avoir après une coupure réseau lit « Cette clé de requête est déjà utilisée… », qu'il ne peut ni comprendre ni corriger. Le même terme existait dans 11 chaînes de `server/` et `shared/`.
+- **Symptôme** : relecture de #685 : un comptable qui modifie le montant d'un avoir après une coupure réseau lit « Cette clé de requête est déjà utilisée… », qu'il ne peut ni comprendre ni corriger. Le même terme existait dans 12 chaînes de `server/` et `shared/`.
 - **Cause racine** : le message d'erreur a été écrit du point de vue du mécanisme (la clé) et non de l'action de l'utilisateur (sa saisie) ; chaque service a recopié le message du précédent.
 - **Classification** : near miss UX, règle connue (pas de libellé technique dans l'UI) non outillée, donc répétée.
 - **Résolution** : messages métier autour de « saisie », avec la conduite à tenir (recharger, recommencer) ; constantes partagées pour les avoirs, assertées à l'identique par le contrat.

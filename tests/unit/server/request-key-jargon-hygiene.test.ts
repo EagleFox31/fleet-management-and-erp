@@ -38,8 +38,8 @@ function isLogArgument(node: ts.Node): boolean {
   return LOG_METHODS.has(call.expression.name.text) && /^(log|logger|\w*Log(ger)?)$/.test(owner);
 }
 
-function jargonIn(path: string): string[] {
-  const source = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true);
+function jargonIn(path: string, code = readFileSync(path, "utf8")): string[] {
+  const source = ts.createSourceFile(path, code, ts.ScriptTarget.Latest, true);
   const hits: string[] = [];
   const visit = (node: ts.Node) => {
     const text =
@@ -60,24 +60,19 @@ function jargonIn(path: string): string[] {
 
 describe("messages lisibles : pas de « clé de requête » dans un texte affiché", () => {
   it("aucune chaîne de server/ ni de shared/ ne contient le terme technique", () => {
-    const hits = ["server", "shared"].flatMap((dir) => files(join(repoRoot, dir))).flatMap(jargonIn);
+    const hits = ["server", "shared"].flatMap((dir) => files(join(repoRoot, dir))).flatMap((path) => jargonIn(path));
     expect(hits.filter((hit) => !KNOWN_JARGON.some((known) => hit.startsWith(known)))).toEqual([]);
   });
 
   it("le détecteur voit le terme dans une chaîne, pas dans un commentaire", () => {
-    const probe = (code: string) => {
-      const source = ts.createSourceFile("probe.ts", code, ts.ScriptTarget.Latest, true);
-      let found = false;
-      const visit = (node: ts.Node) => {
-        if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && JARGON.test(node.text)) found = true;
-        ts.forEachChild(node, visit);
-      };
-      visit(source);
-      return found;
-    };
+    // Passe par jargonIn lui-même : un détecteur muet ferait échouer les cas positifs.
+    const probe = (code: string) => jargonIn(join(repoRoot, "probe.ts"), code).length > 0;
     expect(probe('throw new Error("Cette clé de requête est déjà utilisée.");')).toBe(true);
     expect(probe("const m = `Cette clé d'idempotence a déjà servi`;")).toBe(true);
+    expect(probe("const m = `Saisie ${id} : clé de requête refusée`;")).toBe(true);
+    expect(probe('res.status(409).json({ message: "Clé de requête déjà utilisée" });')).toBe(true);
     expect(probe("// Clé de requête d'un plein\nconst x = 1;")).toBe(false);
+    expect(probe('log.warn({ key }, "clé de requête rejouée");')).toBe(false);
     // La garde d'idempotence journalise encore le terme (log.warn / log.error) : ignoré, non affiché.
     expect(readFileSync(join(repoRoot, "server", "middleware", "idempotency-guard.ts"), "utf8")).toMatch(JARGON);
     expect(jargonIn(join(repoRoot, "server", "middleware", "idempotency-guard.ts"))).toEqual([]);

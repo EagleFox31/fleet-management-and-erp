@@ -91,6 +91,7 @@ describe("rejeu d'un avoir", { timeout: 60_000 }, () => {
     expect(otherAmount.status).toBe(409);
     expect(otherReason.status).toBe(409);
     expect(otherAmount.message).toBe(CREDIT_NOTE_KEY_CONFLICT_MESSAGE);
+    expect(otherReason.message).toBe(CREDIT_NOTE_KEY_CONFLICT_MESSAGE);
 
     const same = await createCreditNote(invoice.id, { amountHt: 10000, reason: "TEST motif A", requestKey }, userId);
     expect(same.replayed).toBe(true);
