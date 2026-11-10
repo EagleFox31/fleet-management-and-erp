@@ -20,7 +20,7 @@ describe("enregistrement du service worker PWA", () => {
         if (type === "load") loadHandler = handler;
       },
     });
-    vi.stubGlobal("navigator", { serviceWorker: { register, getRegistrations } });
+    vi.stubGlobal("navigator", { serviceWorker: { register, getRegistrations, controller: null, addEventListener: () => {} } });
     cacheNames = ["fleetos-static-v2", "fleetos-tech-v1.0.0", "workbox-autre-app"];
     deleted.length = 0;
     vi.stubGlobal("caches", {

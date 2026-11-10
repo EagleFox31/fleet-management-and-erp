@@ -13,7 +13,7 @@ export function PwaUpdateBanner() {
       className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md items-center justify-between gap-3 rounded-md border bg-card p-3 text-sm text-card-foreground shadow-lg"
     >
       <span className="flex items-center gap-2">
-        <RefreshCw className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+        <RefreshCw className="h-4 w-4 shrink-0 text-primary-text" aria-hidden="true" />
         Nouvelle version disponible.
       </span>
       <Button size="sm" onClick={() => window.location.reload()}>

@@ -82,3 +82,9 @@
 - Mineur : `scripts/e2e-static-shell.mjs` répond 400 à un pourcentage mal formé au lieu de lever.
 - Accepté : les polices Google (autre origine) ne sont pas en cache, la police système prend le relais hors ligne. Backlog : auto-héberger les polices.
 - Accepté : le précache pèse environ 5,5 Mo (30 fichiers) au premier chargement.
+
+## Correctifs de fin de lot (tests unitaires)
+
+- Quoi : l'icone de la bannière de mise à jour utilise `text-primary-text` (le test `token-pairs-contrast` interdit `text-primary` seul) ; le mock `navigator` de `pwa-register.test.ts` fournit `controller` et `addEventListener`, désormais lus par `pwa-register.ts`.
+- Comment tester : `vitest run tests/unit/client/pwa-register.test.ts tests/unit/client/token-pairs-contrast.test.ts tests/unit/client/pwa-update.test.ts tests/unit/client/offline-sw-cache.test.ts` (45 tests verts).
+- Rejeu navigateur sur build de production avec service worker, base jetable locale : spec 21 4/4, spec 33 4/4.
