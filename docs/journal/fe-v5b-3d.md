@@ -26,3 +26,9 @@
 
 - Quoi : le faux indexedDB de `offline-resume-replay.test.ts` est factorisé dans `tests/support/fake-indexeddb.ts` et repris par `offline-session-subscription.test.ts` et `offline-storage-session.test.ts`. Le faux `createStore` d'idb-keyval renvoie une fonction, comme le vrai.
 - Pourquoi : « indexedDB is not defined » et « store is not a function » polluaient stderr. Il ne reste que les avertissements attendus du `clientLogger`.
+
+## e2e 21 : aucune requête d'écriture hors ligne (mineur 5 de la relecture de #682)
+
+- Quoi : dans le premier cas du spec 21, un écouteur `page.on('request')` posé après `setOffline(true)` relève toute requête dont la méthode n'est ni GET, ni HEAD, ni OPTIONS, et le cas exige une liste vide, en plus de l'absence de boutons d'écriture.
+- Pourquoi : l'absence de boutons ne prouve pas qu'aucune écriture ne part (rejeu de file, minuterie).
+- Tester : spec 21 (base locale et serveur complet requis). Non rejoué ici faute de base ; typé seulement.
