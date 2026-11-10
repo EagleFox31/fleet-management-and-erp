@@ -29,7 +29,8 @@ import {
   Minus,
   KeyRound,
   Lightbulb,
-  PlayCircle
+  PlayCircle,
+  Calculator
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useState, useEffect, useRef, type ElementType } from "react";
@@ -134,7 +135,7 @@ function VideoBackground({ opacity = 0.85 }: { opacity?: number }) {
   );
 }
 
-// Types de profils utilisateurs (9 profils métier)
+// Types de profils utilisateurs (10 profils métier)
 /** Vidéo de démonstration par profil (client/public/demos), données de démonstration uniquement. */
 const PROFILE_DEMO_VIDEOS: Partial<Record<string, string>> = {
   workshop_manager: "/demos/workshop_manager.mp4",
@@ -211,6 +212,15 @@ const userProfiles = [
     permissions: ["CA facturé & encaissé", "Marge brute HT", "Top clients & lignes", "Rapport Direction PDF"],
   },
   {
+    id: "accountant",
+    name: "Comptable",
+    icon: Calculator,
+    color: "text-success",
+    bgColor: "bg-success/10",
+    description: "Règlements, trésorerie et suivi des encaissements",
+    permissions: ["Factures fournisseurs", "Facturation client", "Trésorerie & traites", "Suivi carte carburant"],
+  },
+  {
     id: "client",
     name: "Client",
     icon: Users,
@@ -232,15 +242,15 @@ const userProfiles = [
 
 // Matrice des permissions granulaire par profil
 const permissionsMatrix: Record<string, Record<string, boolean>> = {
-  "Gestion véhicules & flotte": { admin: true, workshop_manager: true, technician: false, secretary: true, logistics: true, warehouse: false, management: true, client: false, driver: false },
-  "Maintenance & Ordres de Travail": { admin: true, workshop_manager: true, technician: true, secretary: false, logistics: false, warehouse: false, management: true, client: false, driver: false },
-  "Stock & Pièces détachées": { admin: true, workshop_manager: true, technician: true, secretary: true, logistics: false, warehouse: true, management: false, client: false, driver: false },
-  "Pneumatiques (Stock & Montage)": { admin: true, workshop_manager: true, technician: true, secretary: false, logistics: false, warehouse: true, management: false, client: false, driver: false },
-  "Commandes & Fournisseurs": { admin: true, workshop_manager: true, technician: false, secretary: true, logistics: true, warehouse: true, management: false, client: false, driver: false },
-  "Facturation & Finances": { admin: true, workshop_manager: false, technician: false, secretary: true, logistics: false, warehouse: false, management: true, client: true, driver: false },
-  "Missions & Carburant": { admin: true, workshop_manager: false, technician: false, secretary: true, logistics: true, warehouse: false, management: true, client: true, driver: true },
-  "Rapports & Analytics": { admin: true, workshop_manager: true, technician: false, secretary: true, logistics: true, warehouse: true, management: true, client: false, driver: false },
-  "Utilisateurs & Sécurité": { admin: true, workshop_manager: false, technician: false, secretary: false, logistics: false, warehouse: false, management: false, client: false, driver: false },
+  "Gestion véhicules & flotte": { admin: true, workshop_manager: true, technician: false, secretary: true, accountant: false, logistics: true, warehouse: false, management: true, client: false, driver: false },
+  "Maintenance & Ordres de Travail": { admin: true, workshop_manager: true, technician: true, secretary: false, accountant: false, logistics: false, warehouse: false, management: true, client: false, driver: false },
+  "Stock & Pièces détachées": { admin: true, workshop_manager: true, technician: true, secretary: true, accountant: false, logistics: false, warehouse: true, management: false, client: false, driver: false },
+  "Pneumatiques (Stock & Montage)": { admin: true, workshop_manager: true, technician: true, secretary: false, accountant: false, logistics: false, warehouse: true, management: false, client: false, driver: false },
+  "Commandes & Fournisseurs": { admin: true, workshop_manager: true, technician: false, secretary: true, accountant: true, logistics: true, warehouse: true, management: false, client: false, driver: false },
+  "Facturation & Finances": { admin: true, workshop_manager: false, technician: false, secretary: true, accountant: true, logistics: false, warehouse: false, management: true, client: true, driver: false },
+  "Missions & Carburant": { admin: true, workshop_manager: false, technician: false, secretary: true, accountant: true, logistics: true, warehouse: false, management: true, client: true, driver: true },
+  "Rapports & Analytics": { admin: true, workshop_manager: true, technician: false, secretary: true, accountant: true, logistics: true, warehouse: true, management: true, client: false, driver: false },
+  "Utilisateurs & Sécurité": { admin: true, workshop_manager: false, technician: false, secretary: false, accountant: false, logistics: false, warehouse: false, management: false, client: false, driver: false },
 };
 
 type FeatureStoryChapter = {

@@ -21,6 +21,7 @@ export const users = pgTable("users", {
       "workshop_manager", // Chef d'atelier - Gestion équipe, planning
       "technician",        // Technicien/Maintenancier - Interventions, pneumatiques
       "secretary",         // Secrétaire - Saisie, documentation, facturation
+      "accountant",        // Comptable - Règlements, trésorerie, encaissements, carte carburant
       "logistics",         // Logisticien - Planification missions, FDR
       "warehouse",         // Magasinier - Stock, alertes CDE
       "management",        // Direction - Vue exécutive lecture seule

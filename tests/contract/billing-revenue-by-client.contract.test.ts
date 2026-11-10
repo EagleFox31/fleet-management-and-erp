@@ -14,7 +14,7 @@ import { createTestClient, createTestClientInvoice, type TestUserRole } from "..
  * client compris, reçoit un 403 sans aucun nom de client. Période invalide : 400 lisible.
  */
 const ROLES: Record<TestUserRole, TestUserRole> = {
-  admin: "admin", secretary: "secretary", logistics: "logistics", management: "management",
+  admin: "admin", secretary: "secretary", accountant: "accountant", logistics: "logistics", management: "management",
   workshop_manager: "workshop_manager", technician: "technician", warehouse: "warehouse",
   driver: "driver", client: "client", user: "user",
 };
@@ -43,8 +43,8 @@ afterAll(async () => {
 });
 
 describe("CA réel par client : rôles", { timeout: 120000 }, () => {
-  it("les quatre lecteurs sont bien admin, secrétaire, logistique, direction", () => {
-    expect([...READERS].sort()).toEqual(["admin", "logistics", "management", "secretary"]);
+  it("les cinq lecteurs sont bien admin, secrétaire, comptable, logistique, direction", () => {
+    expect([...READERS].sort()).toEqual(["accountant", "admin", "logistics", "management", "secretary"]);
   });
 
   it.each(READERS)("%s : 200, CA HT exact en chaîne décimale", async (role) => {

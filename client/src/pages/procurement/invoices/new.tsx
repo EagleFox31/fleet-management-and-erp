@@ -51,7 +51,7 @@ export default function NewSupplierInvoicePage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { user } = useAuth();
-  const canCreateInvoice = ["admin", "secretary"].includes(user?.role || "");
+  const canCreateInvoice = ["admin", "secretary", "accountant"].includes(user?.role || "");
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),

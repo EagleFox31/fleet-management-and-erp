@@ -273,7 +273,7 @@ export default function ClientInvoiceDetailsPage() {
   const balance = Number.parseFloat(invoice.balance || "0");
   const totalTTC = Number.parseFloat(invoice.amountTTC || "0");
   const paidAmount = Math.max(0, totalTTC - balance);
-  const canRecordClientPayment = ["admin", "secretary"].includes(String(user?.role || ""));
+  const canRecordClientPayment = ["admin", "secretary", "accountant"].includes(String(user?.role || ""));
   const hasActualMissionDeliveryDate = Boolean(invoice.mission?.actualDeliveryDate);
   const missionDeliveryDateLabel = hasActualMissionDeliveryDate
     ? "Date livraison réelle"

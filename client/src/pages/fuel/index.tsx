@@ -16,7 +16,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { ALL_VEHICLES_UNREADABLE, useAllVehicles } from "@/hooks/use-all-vehicles";
 import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { canDeleteFuelRecord } from "@shared/constants/fuel-record-delete";
-import { FUEL_RECHARGE_SOURCE_ROLES } from "@shared/constants/roles";
+import { FUEL_CARD_MANAGER_ROLES, FUEL_RECHARGE_SOURCE_ROLES } from "@shared/constants/roles";
 import type { FuelRechargeSourceAccount } from "@shared/contracts/treasury";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { useToast } from "@/hooks/use-toast";
@@ -104,7 +104,7 @@ export default function FuelPage() {
     notes: "",
     sourceAccountId: NO_SOURCE_ACCOUNT,
   });
-  const canManageFuelCard = ["admin", "logistics", "secretary"].includes(String(user?.role || ""));
+  const canManageFuelCard = (FUEL_CARD_MANAGER_ROLES as readonly string[]).includes(String(user?.role || ""));
   // Prix manuel : retiré seulement si le drapeau fuel-prices impose le prix du jour (hors admin et logistique).
   const fuelPricesEnabled = useFeature("fuel-prices");
   const canEditFuelPrice = !isFuelPriceImposed(user?.role, fuelPricesEnabled);

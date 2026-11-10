@@ -222,7 +222,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
     suppliersRoutes,
   );
   apiRouter.use("/purchase-orders", gardeApprovisionnement, purchaseOrdersRoutes);
-  apiRouter.use("/supplier-invoices", gardeApprovisionnement, supplierInvoicesRoutes);
+  // Factures fournisseur : les profils d'approvisionnement plus le comptable (règlements).
+  apiRouter.use("/supplier-invoices", authorize([...SUPPLIER_INVOICE_READ_ROLES]), supplierInvoicesRoutes);
   // Double affectation (T-23b) : avant tout routeur /work-orders, y compris les historiques.
   apiRouter.use("/work-orders", workOrderBookingGuard);
   apiRouter.use("/work-orders", workOrderPartsRoutes);
@@ -368,6 +369,7 @@ import {
   PART_SALE_ROLES,
   PART_SCAN_ROLES,
   PROCUREMENT_ROLES,
+  SUPPLIER_INVOICE_READ_ROLES,
   SUPPLIER_READ_ROLES,
 } from "@shared/constants/roles";
 export default createApiRouter(sessionMiddleware);

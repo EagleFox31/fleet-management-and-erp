@@ -70,6 +70,7 @@ export const ROLE_LABELS: Record<AppRole, string> = {
   workshop_manager: "Chef d'atelier",
   technician: "Technicien",
   secretary: "Secrétaire",
+  accountant: "Comptable",
   logistics: "Logisticien",
   warehouse: "Magasinier",
   management: "Direction",
@@ -101,6 +102,15 @@ export type ProcurementRole = (typeof PROCUREMENT_ROLES)[number];
  * évaluation et désactivation restent à PROCUREMENT_ROLES).
  */
 export const SUPPLIER_READ_ROLES = [...PROCUREMENT_ROLES, "workshop_manager"] as const;
+
+/**
+ * Factures fournisseur (`/api/supplier-invoices`, écrans `/procurement/invoices*`) : les profils
+ * d'approvisionnement, plus le comptable (rôle ajouté le 10 novembre 2026) qui lit, approuve et
+ * règle les factures sans passer de commande (il reste hors PROCUREMENT_ROLES).
+ */
+export const SUPPLIER_INVOICE_READ_ROLES = [...PROCUREMENT_ROLES, "accountant"] as const satisfies readonly AppRole[];
+/** Approbation et règlement d'une facture fournisseur : qui tient la caisse. Additif : la secrétaire garde ses droits. */
+export const SUPPLIER_INVOICE_PAYMENT_ROLES = ["admin", "secretary", "accountant"] as const satisfies readonly AppRole[];
 
 export function canAccessProcurement(role: string | null | undefined): boolean {
   return PROCUREMENT_ROLES.includes(String(role ?? "") as ProcurementRole);
@@ -139,7 +149,7 @@ export function canWriteTimeTracking(role: string | null | undefined): boolean {
  * leurs écrans masquent Valider / Traiter au lieu d'afficher un bouton qui renvoie 403.
  */
 export const FUEL_WRITE_ROLES = ["admin", "logistics", "secretary"] as const satisfies readonly AppRole[];
-export const FUEL_READ_ROLES = [...FUEL_WRITE_ROLES, "workshop_manager", "management"] as const satisfies readonly AppRole[];
+export const FUEL_READ_ROLES = [...FUEL_WRITE_ROLES, "workshop_manager", "management", "accountant"] as const satisfies readonly AppRole[];
 
 export function canWriteFuel(role: string | null | undefined): boolean {
   return (FUEL_WRITE_ROLES as readonly string[]).includes(String(role ?? ""));
@@ -161,8 +171,8 @@ export function canWriteFuelPrice(role: string | null | undefined): boolean {
 export const TIRE_MOVEMENT_ROLES = ["admin", "management", "workshop_manager", "warehouse", "technician"] as const satisfies readonly AppRole[];
 
 /** Journal de trésorerie (T1) : saisie par l'administrateur et le secrétariat ; la direction lit. */
-export const TREASURY_WRITE_ROLES = ["admin", "secretary"] as const satisfies readonly AppRole[];
-export const TREASURY_READ_ROLES = ["admin", "secretary", "management"] as const satisfies readonly AppRole[];
+export const TREASURY_WRITE_ROLES = ["admin", "secretary", "accountant"] as const satisfies readonly AppRole[];
+export const TREASURY_READ_ROLES = ["admin", "secretary", "accountant", "management"] as const satisfies readonly AppRole[];
 /** Lecture limitée aux comptes carte carburant (lot T2) : la logistique suit la carte, pas la banque. */
 export const TREASURY_FUEL_CARD_READ_ROLES = [...TREASURY_READ_ROLES, "logistics"] as const satisfies readonly AppRole[];
 /**
@@ -173,11 +183,13 @@ export const TREASURY_FUEL_CARD_READ_ROLES = [...TREASURY_READ_ROLES, "logistics
  * Aujourd'hui égale à `FUEL_CARD_MANAGER_ROLES`, mais tenue à part exprès : la recharge est gardée par
  * `isFuelCardManager`, cette liste ne peut qu'en être un sous-ensemble, et ajouter un gestionnaire de
  * carte ne doit pas lui donner le droit de débiter une banque. Figé par fuel-recharge-source-roles.test.ts.
+ * Le comptable (10 novembre 2026) n'y figure pas : la recharge reste une opération carburant
+ * (logistique, secrétariat) ; il lit l'écriture de trésorerie qu'elle produit.
  */
 export const FUEL_RECHARGE_SOURCE_ROLES = ["admin", "secretary", "logistics"] as const satisfies readonly AppRole[];
 
 /** Factures client en attente (`/api/pending-invoices`). La direction y lit les indicateurs. */
-export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];
+export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "accountant", "logistics"] as const satisfies readonly AppRole[];
 
 /** Budget de mission (L1, `/api/mission-budgets`) : la logistique saisit, la direction approuve. */
 export const MISSION_BUDGET_WRITE_ROLES = ["admin", "logistics"] as const satisfies readonly AppRole[];
@@ -186,24 +198,24 @@ export const MISSION_BUDGET_APPROVE_ROLES = ["admin", "management"] as const sat
  * Décaissement et choix du compte source (L1c) : alignés sur FUEL_RECHARGE_SOURCE_ROLES, mais déclarés
  * à part pour qu'un changement côté carburant ne les déplace pas. Qui approuve ne décaisse pas.
  */
-export const MISSION_BUDGET_DISBURSE_ROLES = ["admin", "secretary", "logistics"] as const satisfies readonly AppRole[];
+export const MISSION_BUDGET_DISBURSE_ROLES = ["admin", "secretary", "accountant", "logistics"] as const satisfies readonly AppRole[];
 /** Lecture (liste, détail, besoin du jour, destinations) : qui saisit, approuve ou décaisse lit le budget. */
-export const MISSION_BUDGET_READ_ROLES = ["admin", "logistics", "management", "secretary"] as const satisfies readonly AppRole[];
+export const MISSION_BUDGET_READ_ROLES = ["admin", "logistics", "management", "secretary", "accountant"] as const satisfies readonly AppRole[];
 /**
  * Solde d'une mission terminée (Q18) : le reliquat revient au compte source, une écriture de trésorerie.
  * Aligné sur TREASURY_WRITE_ROLES (qui tient la caisse rend le reliquat), déclaré à part pour rester explicite.
  */
-export const MISSION_BUDGET_SETTLE_ROLES = ["admin", "secretary"] as const satisfies readonly AppRole[];
+export const MISSION_BUDGET_SETTLE_ROLES = ["admin", "secretary", "accountant"] as const satisfies readonly AppRole[];
 
 /**
  * Factures en attente de paiement et retenues à la source (lot F1, `/api/finance/...`) : lecture.
  * La logistique lit les retenues, le net et les taux : son suivi « opération et facturation » les porte déjà
  * (décision du 2026-11-05). Elle n'écrit rien (FINANCE_RECEIVABLE_WRITE_ROLES).
  */
-export const FINANCE_RECEIVABLE_READ_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];
+export const FINANCE_RECEIVABLE_READ_ROLES = ["admin", "management", "secretary", "accountant", "logistics"] as const satisfies readonly AppRole[];
 
 /** Dépôt d'une facture chez le client, taux de retenue d'un client : saisie (la direction lit). */
-export const FINANCE_RECEIVABLE_WRITE_ROLES = ["admin", "secretary"] as const satisfies readonly AppRole[];
+export const FINANCE_RECEIVABLE_WRITE_ROLES = ["admin", "secretary", "accountant"] as const satisfies readonly AppRole[];
 
 export function canReadFinanceReceivable(role: string | null | undefined): boolean {
   return (FINANCE_RECEIVABLE_READ_ROLES as readonly string[]).includes(String(role ?? ""));
@@ -297,14 +309,14 @@ export function canWriteVehiclePurchasePrice(role: string | null | undefined): b
 export const MAINTENANCE_COST_READ_ROLES = ["admin", "workshop_manager"] as const satisfies readonly AppRole[];
 
 /** Coût d'un véhicule (`GET /api/vehicles/:id/cost-summary`). */
-export const VEHICLE_COST_ROLES = ["admin", "management", "workshop_manager", "logistics"] as const satisfies readonly AppRole[];
+export const VEHICLE_COST_ROLES = ["admin", "management", "workshop_manager", "logistics", "accountant"] as const satisfies readonly AppRole[];
 
 /**
  * Rapports d'exploitation : inventaire des pièces (`GET /api/reports/inventory`) et
  * performance des techniciens (`GET /api/reports/technician-performance`).
  * Lus par `isInventoryReportReader` / `isTechnicianReportReader` et par l'écran `/reports`.
  */
-export const INVENTORY_REPORT_ROLES = ["admin", "management", "workshop_manager", "warehouse", "secretary"] as const satisfies readonly AppRole[];
+export const INVENTORY_REPORT_ROLES = ["admin", "management", "workshop_manager", "warehouse", "secretary", "accountant"] as const satisfies readonly AppRole[];
 export const TECHNICIAN_REPORT_ROLES = ["admin", "management", "workshop_manager"] as const satisfies readonly AppRole[];
 
 export function canReadInventoryReport(role: string | null | undefined): boolean {
@@ -368,7 +380,7 @@ export const OPERATIONS_COST_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter
  * qui lisent la facturation (`authorize` de `server/api/billing.routes.ts`). La facture est celle
  * d'un client de flotte (table `clients`), pas d'un compte : aucun compte `client` n'en reçoit.
  */
-export const CLIENT_BILLING_EVENT_ROLES: readonly AppRole[] = ["admin", "secretary", "logistics"];
+export const CLIENT_BILLING_EVENT_ROLES: readonly AppRole[] = ["admin", "secretary", "accountant", "logistics"];
 
 /**
  * Statistiques de facturation client (`GET /api/billing/statistics`, graphique CA par client) : les

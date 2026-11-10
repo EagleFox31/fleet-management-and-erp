@@ -91,7 +91,7 @@ export default function SupplierInvoicesListPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
-  const canCreateOrImport = ["admin", "secretary"].includes(user?.role || "");
+  const canCreateOrImport = ["admin", "secretary", "accountant"].includes(user?.role || "");
 
   const { data: rawInvoicesData, isLoading, error: listError } = useQuery<SupplierInvoice[]>({
     queryKey: ["/api/supplier-invoices", { status: statusFilter }],

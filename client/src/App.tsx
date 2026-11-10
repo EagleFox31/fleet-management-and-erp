@@ -33,6 +33,7 @@ import AdminDashboard from "@/pages/admin/dashboard";
 import WorkshopManagerDashboard from "@/pages/workshop-manager/dashboard";
 import TechnicianDashboard from "@/pages/technician/dashboard";
 import SecretaryDashboard from "@/pages/secretary/dashboard";
+import AccountantDashboard from "@/pages/accountant/dashboard";
 import LogisticsDashboard from "@/pages/logistics/dashboard";
 import WarehouseDashboard from "@/pages/warehouse/dashboard";
 import ManagementDashboard from "@/pages/management/dashboard";
@@ -78,6 +79,7 @@ import {
   MISSION_MANAGER_ROLES,
   PENDING_INVOICE_ROLES,
   PROCUREMENT_ROLES,
+  SUPPLIER_INVOICE_READ_ROLES,
 } from "@shared/constants/roles";
 import ImportBackup from "@/pages/admin/import-backup";
 import { WorkflowsIndex } from "@/pages/workflows/index";
@@ -224,6 +226,8 @@ function SmartDashboardRoute() {
         return <TechnicianDashboard />;
       case "secretary":
         return <SecretaryDashboard />;
+      case "accountant":
+        return <AccountantDashboard />;
       case "logistics":
         return <LogisticsDashboard />;
       case "warehouse":
@@ -650,32 +654,32 @@ function App() {
             {/* Supplier Invoices routes */}
             <Route path="/procurement/supplier-invoices">
               <AppLayout>
-                <RoleRoute component={SupplierInvoicesListPage} allowedRoles={PROCUREMENT_ROLES} />
+                <RoleRoute component={SupplierInvoicesListPage} allowedRoles={SUPPLIER_INVOICE_READ_ROLES} />
               </AppLayout>
             </Route>
 
             <Route path="/procurement/invoices">
               <AppLayout>
-                <RoleRoute component={SupplierInvoicesListPage} allowedRoles={PROCUREMENT_ROLES} />
+                <RoleRoute component={SupplierInvoicesListPage} allowedRoles={SUPPLIER_INVOICE_READ_ROLES} />
               </AppLayout>
             </Route>
             
             <Route path="/procurement/invoices/new">
               <AppLayout>
-                <RoleRoute component={NewSupplierInvoicePage} allowedRoles={PROCUREMENT_ROLES} />
+                <RoleRoute component={NewSupplierInvoicePage} allowedRoles={SUPPLIER_INVOICE_READ_ROLES} />
               </AppLayout>
             </Route>
             
             <Route path="/procurement/invoices/discrepancies">
               <AppLayout>
-                <RoleRoute component={InvoiceDiscrepanciesPage} allowedRoles={PROCUREMENT_ROLES} />
+                <RoleRoute component={InvoiceDiscrepanciesPage} allowedRoles={SUPPLIER_INVOICE_READ_ROLES} />
               </AppLayout>
             </Route>
             
             <Route path="/procurement/invoices/:id">
               {(params) => (
                 <AppLayout>
-                  <RoleRoute component={SupplierInvoiceDetailsPage} params={params} allowedRoles={PROCUREMENT_ROLES} />
+                  <RoleRoute component={SupplierInvoiceDetailsPage} params={params} allowedRoles={SUPPLIER_INVOICE_READ_ROLES} />
                 </AppLayout>
               )}
             </Route>
