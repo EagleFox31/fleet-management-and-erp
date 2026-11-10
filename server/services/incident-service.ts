@@ -171,7 +171,7 @@ export async function createIncident(
     .from(vehicles)
     .where(eq(vehicles.id, input.vehicleId))
     .limit(1);
-  if (!vehicleRow) throw new AppError(404, "Véhicule introuvable.");
+  if (!vehicleRow) throw new AppError(404, "Véhicule introuvable.", { code: "INCIDENT_VEHICLE_NOT_FOUND" });
   const registration: string = vehicleRow.registrationNumber;
 
   const now = (d.now ?? (() => new Date()))();

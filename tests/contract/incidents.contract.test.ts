@@ -120,7 +120,7 @@ describe("déclaration de panne", { timeout: 180000 }, () => {
     // Véhicule inexistant : 404, pas une violation de clé étrangère (500).
     const missing = await call("POST", adminCookie, payload(2_000_000_000));
     expect(missing.status).toBe(404);
-    expect(missing.body).toMatchObject({ code: "NOT_FOUND" });
+    expect(missing.body).toMatchObject({ code: "INCIDENT_VEHICLE_NOT_FOUND" });
 
     // Listes: le chauffeur ne voit que les siennes, le personnel voit tout, filtre par statut.
     const mine = await call("GET", driverCookie);
