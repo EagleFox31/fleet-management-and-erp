@@ -3582,6 +3582,14 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - revue des autres chemins : tous ceux de `mission-budgets-service.ts` (mise à jour, transitions, solde, dépenses) verrouillent la mission (`lockMission`) avant le budget ; aucun chemin inverse trouvé.
 - **Leçon généralisée** : tout service qui touche mission et budget prend les verrous dans le même ordre, mission puis budget, y compris les verrous implicites des triggers. Un verrou conditionnel (requête filtrée) ne verrouille rien quand le filtre est faux : verrouiller d'abord, tester ensuite.
 
+## 2026-11-10 — Tuile « À encaisser » : type local redéclaré à la place du contrat partagé
+
+- **Contexte** : démo comptable. La tuile des créances du tableau de bord comptable affichait une valeur fausse. Trouvé au tournage, avant toute recette.
+- **Cause racine** : l'écran redéclarait un type local de la réponse de `/api/finance/receivables-aging` au lieu d'importer `FinanceReceivablesAgingResponse`. La forme supposée ne correspondait pas au contrat, et TypeScript ne pouvait pas le voir.
+- **Classification** : contrat dupliqué, dérive silencieuse entre client et serveur.
+- **Résolution** : la page importe le contrat partagé et lit `totals.total.netPayable` / `count`.
+- **Prévention vérifiée** : `e2e/demo/11-comptable.spec.ts` asserte la tuile `accountant-kpi-receivables` (échoue si la valeur n'est plus lue depuis le contrat).
+- **Leçon généralisée** : une réponse d'API se type avec le contrat de `shared/contracts/`, jamais avec un type écrit à la main dans la page. Même règle pour les listes de rôles : une constante partagée (`FUEL_RECORD_WRITER_ROLES`) sert au middleware et à l'écran.
 ## 2026-11-10 — Remorque d'affectation : trois oublis du même lot, trouvés en revue et en CI (#635)
 
 - **Contexte** : ajout de `assignments.trailer_id` (lot remorque). Trois défauts trouvés avant la fusion, aucune donnée touchée.
@@ -3595,6 +3603,7 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/contract/mission-trailer-assignment.contract.test.ts`, cas « trailerId "abc", 1.5, 2147483648, true : 400, jamais 500 » et « création et ajout simultanés : un 201, un 409, jamais d'interblocage » ;
   - `tests/unit/server/vehicle-activity-sources.test.ts` échoue sur toute clé étrangère vers `vehicles.id` non classée.
 - **Leçon généralisée** : un objet imbriqué lu par une route est toujours déclaré dans son schéma Zod, sinon il n'est pas validé du tout. L'ordre des verrous consultatifs est fixé en un seul endroit et chaque route l'emprunte. Toute clé étrangère vers `vehicles.id` est classée dans `vehicle-lifecycle-sources.ts` dans la même PR.
+- **Suite (#649), quatrième oubli du même lot** : `openWork` (suppression douce) ne cherchait les affectations que par `vehicle_id`, alors que `VEHICLE_ACTIVITY_SOURCES` classait aussi `assignments.trailer_id` : une remorque attelée était supprimable. Corrigé, avec le contrôle du changement de `vehicleType` d'un véhicule attelé. Prévention : `tests/unit/server/vehicle-lifecycle-open-work.test.ts` exige que `openWork` mentionne chaque colonne `assignments.*` de `VEHICLE_ACTIVITY_SOURCES`. Règle : un lecteur du critère d'action dérive ses colonnes de la source, il ne les recopie pas.
 
 ## 2026-11-10 — Service importé par un test unitaire qui charge server/db : job unit rouge (#642)
 

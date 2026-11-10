@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { moduleLogger } from "../lib/logger";
 import { findActiveSessionUser } from "../services/session-user";
-import { VEHICLE_OPERATION_WRITE_ROLES, ALL_APP_ROLES, STOCK_ISSUER_ROLES, STOCK_VALUATION_READ_ROLES, STAFF_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES, INVENTORY_REPORT_ROLES, INVENTORY_MANAGER_ROLES, VEHICLE_PATCH_ROLES, DRIVER_MANAGER_ROLES, FUEL_CARD_MANAGER_ROLES, TECHNICIAN_REPORT_ROLES, type AppRole } from "@shared/constants/roles";
+import { VEHICLE_OPERATION_WRITE_ROLES, ALL_APP_ROLES, STOCK_ISSUER_ROLES, STOCK_VALUATION_READ_ROLES, STAFF_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES, INVENTORY_REPORT_ROLES, INVENTORY_MANAGER_ROLES, VEHICLE_PATCH_ROLES, DRIVER_MANAGER_ROLES, FUEL_CARD_MANAGER_ROLES, FUEL_RECORD_WRITER_ROLES, TECHNICIAN_REPORT_ROLES, type AppRole } from "@shared/constants/roles";
 
 const ALL_ROLES = ALL_APP_ROLES;
 
@@ -176,7 +176,7 @@ export const isDriverManager = authorize([...DRIVER_MANAGER_ROLES]);
 export const isFuelCardManager = authorize([...FUEL_CARD_MANAGER_ROLES]);
 // Saisie d'un plein depuis l'écran carburant. Le technicien n'en saisit pas ; le
 // chauffeur passe par sa mission (POST /api/missions/:id/fuel-records).
-export const isFuelRecordWriter = authorize(['admin', 'workshop_manager', 'secretary', 'logistics']);
+export const isFuelRecordWriter = authorize([...FUEL_RECORD_WRITER_ROLES]);
 export const isManagementOrAdmin = authorize(['admin', 'management']);
 // Toute session valide, avec `req.user` chargé (rôle normalisé) : pour les routes
 // ouvertes à tous dont la réponse dépend du rôle (cloison client, server/lib/client-scope.ts).
