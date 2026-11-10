@@ -119,6 +119,14 @@ export const resumeSession = createSessionResume({
   markPendingLogout: () => pendingServerLogout.mark(),
 });
 
+/**
+ * Fin de la lecture hors ligne (échéance atteinte pendant l'usage) : plus d'utilisateur actif, cache TanStack
+ * vidé, copie de lecture et marqueur supprimés ; la file d'envois est gardée pour la prochaine connexion.
+ */
+export function expireOfflineGrant(grant: { userId: number }): Promise<void> {
+  return expireOfflineSession(queryClient, grant.userId);
+}
+
 export function isAdmin(user: User | null): boolean {
   return !!user && user.role === "admin";
 }
