@@ -6,6 +6,7 @@ import { registerRoutes } from "./routes";
 import apiRouter from "./api";
 import { initializeDatabase } from "./init-database";
 import { moduleLogger } from "./lib/logger";
+import { isApiPath } from "./lib/routed-path";
 import { migrateLoginIdentifiers, pendingLoginIdentifiers } from "./services/login-identifier-migration";
 import { createIpFailureLimiter } from "./middleware/auth-ip-limit";
 import { trustProxyFromEnv } from "./lib/trust-proxy";
@@ -48,7 +49,7 @@ export async function createApp(
   app.disable("etag");
 
   app.use((req, res, next) => {
-    if (req.path.startsWith("/api")) {
+    if (isApiPath(req.path)) {
       res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       res.setHeader("Pragma", "no-cache");
       res.setHeader("Expires", "0");

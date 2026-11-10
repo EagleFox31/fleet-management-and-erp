@@ -3607,3 +3607,19 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `audit-writes-router.test.ts` et `idempotency-guard.test.ts` jouent les cibles avec barre inverse en socket brut contre une route déclarée sur l'app.
   - Helper commun : `tests/support/raw-request.ts`.
 - **Leçon généralisée** : la normalisation de chemin diffère entre couches (app, routeur monté, middleware qui lit `originalUrl`). Il faut normaliser ou rejeter **une seule fois, à l'entrée**, avant tout routage. Un contrôle transversal dérive ensuite son chemin du parseur du routeur (`req.baseUrl + req.path`), jamais d'`originalUrl` brut. Une garde déclarée en routeur ne protège une route déclarée ailleurs que si les deux lisent la même cible.
+
+## 2026-11-10 — Garde de double affectation contournée par `%36%32` : une garde lit sa route par un matcher Express
+
+- **Contexte** : revue sécurité de #640. `workOrderBookingGuard` (`server/middleware/booking-guard.ts`) lisait l'id de l'ordre de travail par regex sur `req.path` (`/^\/(\d+)\/?$/`). `PATCH /api/work-orders/%36%32` est servi par la route `/:id` (Express décode `62`), mais la regex ne reconnaît pas `%36%32` : la garde laisse passer et la double affectation n'est plus refusée en 409. Même constat, à plus faible enjeu, sur `req.path.startsWith("/api")` dans `server/app.ts` et `accessLog` : `/API/...`, servi par le montage `/api`, n'avait ni `no-store` ni journal d'accès. Enfin, un upgrade WebSocket hors `/ws` restait pendant hors développement (personne d'autre n'écoute).
+- **Cause racine** : la garde lisait le chemin elle-même au lieu de laisser Express le lire. Casse, `%xx` et barre finale ont la même lecture pour la route servie et pour un matcher Express, pas pour une regex écrite à la main.
+- **Classification** : sécurité, contournement d'une règle métier (double affectation) par une forme de cible équivalente. Préexistant.
+- **Résolution** :
+  - La garde reconnaît sa route par un matcher Express : `Router().post("/", ...)` et `Router().patch("/:id", ...)`, exactement comme `retiredVehicleWriteGuard`. L'id vient de `req.params.id`.
+  - `isApiPath` / `API_PREFIX` (`server/lib/routed-path.ts`, `/^\/api(?=\/|$)/i`) remplacent `startsWith("/api")` dans `app.ts`, `error-handler.ts` et `idempotency-guard.ts`.
+  - `server/index.ts` détruit la socket d'un upgrade hors `/ws` hors développement ; en développement, Vite HMR la prend.
+- **Prévention vérifiable** :
+  - `tests/contract/work-order-booking-guard.contract.test.ts` : en socket brut, `%3X` par chiffre, `/API/WORK-ORDERS/:id` et barre finale répondent 409, base inchangée. Rouge sans le correctif.
+  - `tests/unit/server/guard-path-matcher-hygiene.test.ts` : cliquet sur `server/middleware/*guard*`, qui refuse regex, comparaison ou méthode de chaîne sur `req.path`, et toute lecture de `req.originalUrl` / `req.url`. Liste tolérée vide.
+  - `tests/unit/server/upgrade-route.test.ts` : `upgradeRoute` (`server/lib/upgrade-route.ts`) refuse hors `/ws` hors développement, et `server/index.ts` détruit la socket refusée.
+  - `tests/unit/server/routed-path.test.ts` (`isApiPath`) et `GET /API/vehicles` avec `no-store` dans `non-canonical-target.contract.test.ts`.
+- **Leçon généralisée** : une garde reconnaît sa route par un matcher Express, jamais par une regex ou une comparaison sur `req.path`. Seule une lecture qui ne peut que refuser davantage (liste d'autorisation, refus par défaut) peut lire le chemin elle-même.
