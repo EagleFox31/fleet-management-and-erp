@@ -1,7 +1,4 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
-import { db } from "../../server/db";
-import { clientInvoices } from "../../shared/schema";
 import { isoDateInZone } from "../../shared/contracts/kpi-period";
 import {
   FINANCE_RECEIVABLES_AGING_PATH,
@@ -44,14 +41,12 @@ async function invoice(depositDaysAgo: number | null, net: string, status: "pend
     vatAmount: "1925.00",
     amountTTC: "11925.00",
     status,
+    // Facture émise = gelée (trigger client_invoices_issued_locked) : le dépôt est posé à la création.
+    ...(depositDaysAgo !== null
+      ? { depositedAt: daysAgo(depositDaysAgo), withholdingVatAmount: "0.00", withholdingIsAmount: "0.00", netPayable: net }
+      : {}),
   });
   session.ids.clientInvoiceIds.push(row.id);
-  if (depositDaysAgo !== null) {
-    await db
-      .update(clientInvoices)
-      .set({ depositedAt: daysAgo(depositDaysAgo), withholdingVatAmount: "0.00", withholdingIsAmount: "0.00", netPayable: net })
-      .where(eq(clientInvoices.id, row.id));
-  }
   return row.id;
 }
 

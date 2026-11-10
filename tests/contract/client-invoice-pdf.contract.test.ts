@@ -1,7 +1,4 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
-import { db } from "../../server/db";
-import { clientInvoices } from "../../shared/schema";
 import { MAX_DB_INTEGER_ID } from "../../shared/contracts/common";
 import { apiErrorProblems } from "../support/api-error";
 import { startContractSession } from "../support/contract-session";
@@ -37,9 +34,9 @@ beforeAll(async () => {
   session.ids.clientInvoiceIds.push(invoice.id);
   invoiceId = invoice.id;
   invoiceNumber = invoice.invoiceNumber;
-  const orphan = await createTestClientInvoice({ clientId: client.id });
+  // Facture émise = client gelé (trigger client_invoices_issued_locked) : l'orpheline naît sans client.
+  const orphan = await createTestClientInvoice({ clientId: null });
   session.ids.clientInvoiceIds.push(orphan.id);
-  await db.update(clientInvoices).set({ clientId: null }).where(eq(clientInvoices.id, orphan.id));
   orphanId = orphan.id;
 }, 180000);
 

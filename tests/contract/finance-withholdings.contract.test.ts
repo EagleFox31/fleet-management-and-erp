@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { db } from "../../server/db";
-import { clientInvoices, clients } from "../../shared/schema";
+import { clients } from "../../shared/schema";
 import { isoDateInZone } from "../../shared/contracts/kpi-period";
 import { FINANCE_WITHHOLDINGS_PATH, financeWithholdingsResponseSchema } from "../../shared/contracts/finance-withholdings";
 import { apiErrorProblems } from "../support/api-error";
@@ -27,7 +27,7 @@ const inv: Record<"a1" | "a2" | "b1", number> = { a1: 0, a2: 0, b1: 0 };
 let orphan = 0;
 
 async function deposited(
-  clientId: number,
+  clientId: number | null,
   depositedAt: string | null,
   amounts: { ht: string; ttc: string; vat: string; is: string; net: string },
   status: "pending" | "paid" | "cancelled" = "pending",
@@ -39,14 +39,12 @@ async function deposited(
     vatAmount: (Number(amounts.ttc) - Number(amounts.ht)).toFixed(2),
     amountTTC: amounts.ttc,
     status,
+    // Facture émise = gelée (trigger client_invoices_issued_locked) : le dépôt est posé à la création.
+    ...(depositedAt !== null
+      ? { depositedAt, withholdingVatAmount: amounts.vat, withholdingIsAmount: amounts.is, netPayable: amounts.net }
+      : {}),
   });
   session.ids.clientInvoiceIds.push(row.id);
-  if (depositedAt !== null) {
-    await db
-      .update(clientInvoices)
-      .set({ depositedAt, withholdingVatAmount: amounts.vat, withholdingIsAmount: amounts.is, netPayable: amounts.net })
-      .where(eq(clientInvoices.id, row.id));
-  }
   return row.id;
 }
 
@@ -79,8 +77,7 @@ beforeAll(async () => {
   await deposited(client.a, "2001-05-15", A1, "cancelled");
   await deposited(client.a, null, A1);
   // Facture sans client rattaché : ligne `clientId` nulle, groupe nul en dernier.
-  orphan = await deposited(client.b, "2001-05-20", B1);
-  await db.update(clientInvoices).set({ clientId: null }).where(eq(clientInvoices.id, orphan));
+  orphan = await deposited(null, "2001-05-20", B1);
   // Taux changé après dépôt : les montants figés ne bougent pas.
   await db.update(clients).set({ withholdingVatRate: "50.00", withholdingIsRate: "10.00" }).where(eq(clients.id, client.a));
 }, 180000);
