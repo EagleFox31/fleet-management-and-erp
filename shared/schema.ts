@@ -1,4 +1,4 @@
-import { pgTable, text, serial, date, integer, bigint, timestamp, boolean, foreignKey, real, jsonb, numeric, primaryKey, index, uniqueIndex, check, unique, type AnyPgColumn } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, bigserial, date, integer, bigint, timestamp, boolean, foreignKey, real, doublePrecision, uuid, jsonb, numeric, primaryKey, index, uniqueIndex, check, unique, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -1398,7 +1398,21 @@ export const missions = pgTable("missions", {
   completedAt: timestamp("completed_at"),
   cancelledAt: timestamp("cancelled_at"),
   cancellationReason: text("cancellation_reason"),
-});
+
+  // Points A (départ) et B (livraison) de la carte, facultatifs (GPS V1) : hub CEMAC choisi (code de
+  // shared/constants/cemac-corridors.ts) ou point posé sur la carte (code NULL). L'adresse texte reste
+  // la référence. Jumelle SQL : VEHICLE_POSITIONS_GPS_SQL (server/init-database.ts).
+  pickupLat: doublePrecision("pickup_lat"),
+  pickupLng: doublePrecision("pickup_lng"),
+  pickupHubCode: text("pickup_hub_code"),
+  deliveryLat: doublePrecision("delivery_lat"),
+  deliveryLng: doublePrecision("delivery_lng"),
+  deliveryHubCode: text("delivery_hub_code"),
+}, (table) => [
+  // Latitude et longitude vont par paire, dans leurs bornes ; un code de hub exige des coordonnées.
+  check("missions_pickup_geo_check", sql`(${table.pickupLat} IS NULL) = (${table.pickupLng} IS NULL) AND (${table.pickupLat} IS NULL OR (${table.pickupLat} BETWEEN -90 AND 90 AND ${table.pickupLng} BETWEEN -180 AND 180)) AND (${table.pickupHubCode} IS NULL OR (${table.pickupLat} IS NOT NULL AND ${table.pickupHubCode} <> ''))`),
+  check("missions_delivery_geo_check", sql`(${table.deliveryLat} IS NULL) = (${table.deliveryLng} IS NULL) AND (${table.deliveryLat} IS NULL OR (${table.deliveryLat} BETWEEN -90 AND 90 AND ${table.deliveryLng} BETWEEN -180 AND 180)) AND (${table.deliveryHubCode} IS NULL OR (${table.deliveryLat} IS NOT NULL AND ${table.deliveryHubCode} <> ''))`),
+]);
 
 // Budget de mission (L1, drapeau finance) : un par mission. Jumelle SQL : MISSION_BUDGETS_SQL
 // (server/init-database.ts) et server/db/migrations/20261105_mission_budgets.sql. Montants calculés
@@ -1763,6 +1777,43 @@ export const missionPodFiles = pgTable("mission_pod_files", {
   index("mission_pod_files_mission_idx").on(table.missionId, table.uploadedAt),
 ]);
 export type MissionPodFileRow = typeof missionPodFiles.$inferSelect;
+
+// Positions de véhicule (GPS V1, drapeau gps) : une ligne par point reçu, toutes sources confondues.
+// `phone` : téléphone du chauffeur pendant la mission (mission, auteur et identifiant de point exigés) ;
+// `tracker` : boîtier (lot balises ; device_id sans clé étrangère tant que telemetry_devices n'existe pas).
+// Rejeu sans doublon : (source, submitted_by, client_point_id) unique, pour ON CONFLICT DO NOTHING.
+// Cascade sur véhicule, mission et auteur : une trace n'a pas de sens sans eux. Purge au-delà de la
+// rétention : purge_vehicle_positions(jours). Jumelle : server/db/migrations/20261110_vehicle_positions_gps.sql.
+export const VEHICLE_POSITION_SOURCES = ["phone", "tracker"] as const;
+export const vehiclePositions = pgTable("vehicle_positions", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  vehicleId: integer("vehicle_id").notNull().references(() => vehicles.id, { onDelete: "cascade" }),
+  missionId: integer("mission_id").references(() => missions.id, { onDelete: "cascade" }),
+  driverId: integer("driver_id").references(() => drivers.id, { onDelete: "set null" }),
+  source: text("source", { enum: VEHICLE_POSITION_SOURCES }).notNull(),
+  deviceId: integer("device_id"),
+  submittedBy: integer("submitted_by").references(() => users.id, { onDelete: "cascade" }),
+  clientPointId: uuid("client_point_id"),
+  recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull(),
+  receivedAt: timestamp("received_at", { withTimezone: true }).defaultNow().notNull(),
+  lat: doublePrecision("lat").notNull(),
+  lng: doublePrecision("lng").notNull(),
+  accuracyM: real("accuracy_m"),
+  speedKmh: real("speed_kmh"),
+  heading: real("heading"),
+  // Point incohérent (vitesse implicite trop forte) : gardé et marqué, jamais rejeté (règle serveur).
+  suspect: boolean("suspect").notNull().default(false),
+}, (table) => [
+  check("vehicle_positions_source_check", sql`${table.source} IN ('phone', 'tracker')`),
+  check("vehicle_positions_phone_check", sql`${table.source} <> 'phone' OR (${table.missionId} IS NOT NULL AND ${table.submittedBy} IS NOT NULL AND ${table.clientPointId} IS NOT NULL)`),
+  check("vehicle_positions_tracker_check", sql`${table.source} <> 'tracker' OR ${table.deviceId} IS NOT NULL`),
+  check("vehicle_positions_coords_check", sql`${table.lat} BETWEEN -90 AND 90 AND ${table.lng} BETWEEN -180 AND 180`),
+  check("vehicle_positions_measures_check", sql`(${table.accuracyM} IS NULL OR ${table.accuracyM} >= 0) AND (${table.speedKmh} IS NULL OR ${table.speedKmh} >= 0) AND (${table.heading} IS NULL OR (${table.heading} >= 0 AND ${table.heading} < 360))`),
+  unique("vehicle_positions_client_point_unique").on(table.source, table.submittedBy, table.clientPointId),
+  index("vehicle_positions_mission_recorded_idx").on(table.missionId, table.recordedAt),
+  index("vehicle_positions_vehicle_recorded_idx").on(table.vehicleId, table.recordedAt.desc()),
+]);
+export type VehiclePositionRow = typeof vehiclePositions.$inferSelect;
 export type InsertMissionOperation = z.infer<typeof insertMissionOperationSchema>;
 
 export const insertMissionSchema = createInsertSchema(missions).omit({
@@ -1774,6 +1825,14 @@ export const insertMissionSchema = createInsertSchema(missions).omit({
   // Preuve de livraison : posée par le dépôt de fichier (mission_pod_files), jamais par le corps d'une requête.
   podUrl: true,
   podUploadedAt: true,
+  // Points A/B (GPS V1) : fermés tant que le lot API n'a pas sa validation (hub connu, paire complète) ;
+  // sinon un corps de requête les écrirait et un 23514 deviendrait une 500.
+  pickupLat: true,
+  pickupLng: true,
+  pickupHubCode: true,
+  deliveryLat: true,
+  deliveryLng: true,
+  deliveryHubCode: true,
 }).extend({
   pickupDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),
   deliveryDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),

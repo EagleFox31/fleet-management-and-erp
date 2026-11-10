@@ -85,7 +85,7 @@ describe("L1 : mission_budgets, init-database, migration jumelle et Drizzle", ()
 
   it("l'écart de contraintes est relu après la création de mission_budgets, pas avant", () => {
     const src = norm(readFileSync("server/init-database.ts", "utf8"));
-    expect(src).toMatch(/await pool\.query\(MISSION_BUDGETS_SQL\);\n(\s*(\/\/.*|await pool\.query\(MISSION_(DESTINATIONS|BUDGETS_TREASURY|BUDGET_EXPENSES|BUDGET_SETTLEMENT|POD_FILES)_SQL\);)\n)*\s*await reportCdcConstraintGaps\(pool\);/);
+    expect(src).toMatch(/await pool\.query\(MISSION_BUDGETS_SQL\);\n(\s*(\/\/.*|await pool\.query\(MISSION_(DESTINATIONS|BUDGETS_TREASURY|BUDGET_EXPENSES|BUDGET_SETTLEMENT|POD_FILES)_SQL\);|await pool\.query\(VEHICLE_POSITIONS_GPS_SQL\);)\n)*\s*await reportCdcConstraintGaps\(pool\);/);
     expect(src).not.toMatch(/async function applyCdcSchema\(\) \{[^}]*reportCdcConstraintGaps/);
   });
 });
@@ -105,7 +105,7 @@ describe("L1b : barème mission_destinations, init-database, migration jumelle e
 
   it("init-database porte exactement le SQL de la migration, appliqué après celui des budgets", () => {
     expect(initSql()).toBe(migration());
-    expect(initSource()).toMatch(/await pool\.query\(MISSION_BUDGETS_SQL\);\n(\s*\/\/.*\n)*\s*await pool\.query\(MISSION_DESTINATIONS_SQL\);\n(\s*(\/\/.*|await pool\.query\(MISSION_(BUDGETS_TREASURY|BUDGET_EXPENSES|BUDGET_SETTLEMENT|POD_FILES)_SQL\);)\n)*\s*await reportCdcConstraintGaps\(pool\);/);
+    expect(initSource()).toMatch(/await pool\.query\(MISSION_BUDGETS_SQL\);\n(\s*\/\/.*\n)*\s*await pool\.query\(MISSION_DESTINATIONS_SQL\);\n(\s*(\/\/.*|await pool\.query\(MISSION_(BUDGETS_TREASURY|BUDGET_EXPENSES|BUDGET_SETTLEMENT|POD_FILES)_SQL\);|await pool\.query\(VEHICLE_POSITIONS_GPS_SQL\);)\n)*\s*await reportCdcConstraintGaps\(pool\);/);
   });
 
   it("additif et idempotent : seed sans réécriture, aucune suppression", () => {
@@ -168,7 +168,7 @@ describe("L1c : FK trésorerie de mission_budgets, init-database et migration ju
     const start = src.indexOf(marker);
     expect(start).toBeGreaterThan(-1);
     expect(norm(src.slice(start + marker.length, src.indexOf("`;", start)))).toBe(migration());
-    expect(src).toMatch(/await pool\.query\(MISSION_DESTINATIONS_SQL\);\n(\s*\/\/.*\n)*\s*await pool\.query\(MISSION_BUDGETS_TREASURY_SQL\);\n(\s*(\/\/.*|await pool\.query\(MISSION_(BUDGET_(EXPENSES|SETTLEMENT)|POD_FILES)_SQL\);)\n)*\s*await reportCdcConstraintGaps\(pool\);/);
+    expect(src).toMatch(/await pool\.query\(MISSION_DESTINATIONS_SQL\);\n(\s*\/\/.*\n)*\s*await pool\.query\(MISSION_BUDGETS_TREASURY_SQL\);\n(\s*(\/\/.*|await pool\.query\(MISSION_(BUDGET_(EXPENSES|SETTLEMENT)|POD_FILES)_SQL\);|await pool\.query\(VEHICLE_POSITIONS_GPS_SQL\);)\n)*\s*await reportCdcConstraintGaps\(pool\);/);
   });
 
   it("les fichiers de migration passent par ordre alphabétique : celui-ci après la création de mission_budgets", () => {
@@ -206,7 +206,7 @@ describe("L1e : dépenses justifiées mission_budget_expenses, init-database, mi
     const start = src.indexOf(marker);
     expect(start).toBeGreaterThan(-1);
     expect(norm(src.slice(start + marker.length, src.indexOf("`;", start)))).toBe(migration());
-    expect(src).toMatch(/await pool\.query\(MISSION_BUDGETS_TREASURY_SQL\);\n(\s*\/\/.*\n)*\s*await pool\.query\(MISSION_BUDGET_EXPENSES_SQL\);\n(\s*(\/\/.*|await pool\.query\(MISSION_(BUDGET_SETTLEMENT|POD_FILES)_SQL\);)\n)*\s*await reportCdcConstraintGaps\(pool\);/);
+    expect(src).toMatch(/await pool\.query\(MISSION_BUDGETS_TREASURY_SQL\);\n(\s*\/\/.*\n)*\s*await pool\.query\(MISSION_BUDGET_EXPENSES_SQL\);\n(\s*(\/\/.*|await pool\.query\(MISSION_(BUDGET_SETTLEMENT|POD_FILES)_SQL\);|await pool\.query\(VEHICLE_POSITIONS_GPS_SQL\);)\n)*\s*await reportCdcConstraintGaps\(pool\);/);
   });
 
   it("les fichiers de migration passent par ordre alphabétique : celui-ci après la création de mission_budgets", () => {
@@ -268,7 +268,7 @@ describe("Q18 : mission soldée (settled_by, settled_at), init-database, migrati
     const start = src.indexOf(marker);
     expect(start).toBeGreaterThan(-1);
     expect(norm(src.slice(start + marker.length, src.indexOf("`;", start)))).toBe(migration());
-    expect(src).toMatch(/await pool\.query\(MISSION_BUDGET_EXPENSES_SQL\);\n(\s*\/\/.*\n)*\s*await pool\.query\(MISSION_BUDGET_SETTLEMENT_SQL\);\n(\s*(\/\/.*|await pool\.query\(MISSION_POD_FILES_SQL\);)\n)*\s*await reportCdcConstraintGaps\(pool\);/);
+    expect(src).toMatch(/await pool\.query\(MISSION_BUDGET_EXPENSES_SQL\);\n(\s*\/\/.*\n)*\s*await pool\.query\(MISSION_BUDGET_SETTLEMENT_SQL\);\n(\s*(\/\/.*|await pool\.query\(MISSION_POD_FILES_SQL\);|await pool\.query\(VEHICLE_POSITIONS_GPS_SQL\);)\n)*\s*await reportCdcConstraintGaps\(pool\);/);
   });
 
   it("les fichiers de migration passent par ordre alphabétique : celui-ci après les dépenses", () => {
