@@ -30,3 +30,18 @@ describe("vehicle_position_updated : resynchronisation ciblée", () => {
     expect(stale()).toEqual(["/api/vehicle-positions", "/api/missions/42/track", "/api/missions/7/track"]);
   });
 });
+
+/** PATCH /geo : mission_updated { missionId, geo: true } doit faire relire les points A/B aux autres profils. */
+describe("mission_updated : trace de la mission", () => {
+  const keys = ["/api/missions/42/track", "/api/missions/7/track", "/api/vehicle-positions"];
+  beforeEach(() => {
+    client.current.clear();
+    for (const key of keys) client.current.setQueryData([key], { ok: true });
+  });
+  const stale = () => keys.filter((key) => client.current.getQueryState([key])?.isInvalidated);
+
+  it("invalide la trace de la mission annoncée, pas celles des autres", () => {
+    handleDomainUpdate({ type: "mission_updated", entityId: 42, data: { missionId: 42, geo: true } });
+    expect(stale()).toEqual(["/api/missions/42/track"]);
+  });
+});

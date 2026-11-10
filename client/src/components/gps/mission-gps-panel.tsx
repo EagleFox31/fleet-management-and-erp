@@ -17,6 +17,7 @@ import {
   canViewTrack,
   describeNearestHub,
   formatPositionAge,
+  geoEditorReady,
   geoInputOf,
   geoSelectionOf,
   missionGeoEditable,
@@ -58,7 +59,7 @@ export function MissionGpsPanel({ missionId, status, role }: { missionId: number
 
   // Le formulaire n'existe qu'une fois la trace chargée : sinon il s'initialiserait « sans point » et
   // un enregistrement effacerait les points A/B déjà saisis.
-  const canEdit = !!track && canEditMissionGeo(role) && missionGeoEditable(status ?? track.status);
+  const canEdit = geoEditorReady(track, role, status);
   if (positionsQuery.error || (showTrack && trackQuery.error)) {
     return (
       <LoadingError
@@ -160,7 +161,7 @@ function MissionGeoEditor({ missionId, track }: { missionId: number; track: Miss
       apiRequest("PATCH", missionGeoPath(vars.id), { pickup: geoInputOf(vars.pickup), delivery: geoInputOf(vars.delivery) }),
     onSuccess: (_data, vars) => {
       appToast({ title: "Points enregistrés", description: "Le départ et la livraison sont à jour sur la carte.", variant: "success" });
-      // Le serveur n'émet aucun événement pour /geo : la resynchronisation est locale (détail, liste, trace).
+      // Resynchronisation locale (détail, liste, trace) ; les autres profils la reçoivent par mission_updated { geo: true }.
       queryClient.invalidateQueries({ queryKey: [`/api/missions/${vars.id}`] });
       queryClient.invalidateQueries({ queryKey: ["/api/missions"] });
       queryClient.invalidateQueries({ queryKey: [missionTrackPath(vars.id)] });

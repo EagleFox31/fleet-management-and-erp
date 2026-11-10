@@ -6,6 +6,7 @@ import {
   canViewTrack,
   canEditMissionGeo,
   formatPositionAge,
+  geoEditorReady,
   geoInputOf,
   geoSelectionOf,
   groupByVehicle,
@@ -84,6 +85,15 @@ describe("hydratation des points A/B", () => {
   it("saisie modifiée : la valeur serveur ne l'écrase pas", () => {
     const edited: GeoPair = { ...hubs, pickup: { kind: "map", lat: 4.05, lng: 9.7 } };
     expect(adoptStoredGeo(edited, hubs, empty)).toBe(edited);
+  });
+
+  it("geoEditorReady : jamais avant la trace, jamais sans droit d'écriture ni mission figée", () => {
+    const track = { status: "in_progress" };
+    expect(geoEditorReady(undefined, "logistics", "in_progress")).toBe(false);
+    expect(geoEditorReady(null, "admin")).toBe(false);
+    expect(geoEditorReady(track, "logistics", "in_progress")).toBe(true);
+    expect(geoEditorReady(track, "workshop_manager", "in_progress")).toBe(false);
+    expect(geoEditorReady(track, "logistics", "completed")).toBe(false);
   });
 
   it("l'état de départ égal au stocké n'est pas modifié (bouton Enregistrer inactif)", () => {

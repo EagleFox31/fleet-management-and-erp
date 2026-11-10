@@ -13,7 +13,7 @@
 - Choix reuse : Leaflet « vanilla » (même motif que `executive-corridor-map.tsx`, Leaflet déjà installé) plutôt que react-leaflet 4.2.1, absent du dépôt et à ajouter à un `node_modules` partagé. Cartes chargées en lazy.
 - Contrat zod : `shared/contracts/gps.ts` ; helpers purs : `client/src/lib/gps-display.ts` ; hooks : `client/src/hooks/use-gps.ts`.
 - Rôles : positions = `GPS_VIEW_ROLES`, trace = `GPS_TRACK_ROLES` (le chef d'atelier ne la demande pas : aucun appel, rien dessiné), édition A/B = `MISSION_GEO_WRITE_ROLES`. Drapeau `gps` coupé : écran, onglet et appels absents.
-- `PATCH /geo` n'émet aucun événement serveur : invalidation locale (détail, liste, trace).
+- `PATCH /geo` émet `mission_updated { missionId, geo: true }` : invalidation locale à l'enregistrement, et côté autres profils invalidation de la trace de la mission (un second logisticien ne garde pas d'anciens A/B).
 - Texte injecté dans les bulles : `escapeHtml`.
 
 ## Pourquoi
@@ -49,3 +49,22 @@ Un clic sur "Enregistrer" ne doit jamais effacer des points que l utilisateur n 
 
 - `node node_modules/vitest/vitest.mjs run tests/unit/client/gps-display.test.ts tests/unit/server/zod-id-range-hygiene.test.ts`
 - Navigateur : mission avec hubs A/B, contexte vierge, onglet "Suivi GPS" : hubs affiches, "Enregistrer" inactif.
+
+## Reprise de relecture, second tour (#665)
+
+### Quoi
+- `mission_updated` invalide aussi `/api/missions/<id>/track` dès que `missionId` est connu (useRealTimeSync).
+- Prédicat pur `geoEditorReady(track, role, status)` dans `client/src/lib/gps-display.ts`, utilisé par le panneau.
+- Premier cadrage de la carte de suivi : inclut la dernière position.
+- Ligne vide retirée au milieu des imports de `missions/[id].tsx` ; description de l'écran carte flotte : position relevée par le téléphone du chauffeur.
+
+### Comment
+- Le serveur émet `mission_updated { missionId, geo: true }` sur `PATCH /geo` : la trace est donc invalidée chez les autres profils, ce qui évite qu'un second logisticien écrase les points A/B du premier avec un état périmé. Les commentaires qui affirmaient qu'aucun événement n'existe pour `/geo` sont corrigés.
+- Cas ajouté dans `tests/unit/client/gps-realtime.test.ts` (rouge sans le correctif) ; test de `geoEditorReady` dans `gps-display.test.ts`.
+
+### Pourquoi
+Couche 3 de la règle des transitions (resync ciblé) manquante pour la trace ; éditeur A/B dont la condition d'affichage n'était pas testable.
+
+### Comment tester
+- `node node_modules/vitest/vitest.mjs run tests/unit/client/gps-realtime.test.ts tests/unit/client/gps-display.test.ts`
+- tsc global : 0 `error TS`.

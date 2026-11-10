@@ -1173,6 +1173,8 @@ export function handleDomainUpdate(update: RealTimeUpdate): void {
             queryKey: [`/api/missions/${missionId}/fuel-records`],
             type: "active",
           });
+          // `mission_updated { geo: true }` (PATCH /geo) : un autre logisticien ouvert sur la mission doit relire A/B.
+          queryClient.invalidateQueries({ queryKey: [`/api/missions/${missionId}/track`] });
           invalidateMissionDerivedQueries(missionId);
         } else {
           invalidateMissionDerivedQueries();

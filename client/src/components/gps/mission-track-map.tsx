@@ -37,6 +37,9 @@ export default function MissionTrackMap({ pickup, delivery, points, lastPosition
   const hereRef = useRef<{ dot: L.CircleMarker; accuracy: L.Circle | null } | null>(null);
   // Cadrage une seule fois : une mise à jour temps réel ne doit pas déplacer la vue.
   const fittedRef = useRef(false);
+  // Dernière position lue par l'effet du tracé sans le rendre dépendant d'elle (pas de redessin à chaque relevé).
+  const hereLatLngRef = useRef<[number, number] | null>(null);
+  hereLatLngRef.current = lastPosition ? [lastPosition.lat, lastPosition.lng] : null;
 
   useEffect(() => {
     if (!map) return;
@@ -89,10 +92,9 @@ export default function MissionTrackMap({ pickup, delivery, points, lastPosition
       }
     }
 
-    // Le repère de la dernière position vit dans son propre effet (mis à jour sur place) ; on le
-    // relit ici seulement pour le cadrage initial.
-    const dot = hereRef.current?.dot.getLatLng();
-    if (dot) bounds.push([dot.lat, dot.lng]);
+    // Le repère de la dernière position vit dans son propre effet (mis à jour sur place) ; sa
+    // position entre ici seulement dans le cadrage initial (l'effet du repère passe après celui-ci).
+    if (hereLatLngRef.current) bounds.push(hereLatLngRef.current);
     if (!fittedRef.current && bounds.length > 0) {
       map.fitBounds(L.latLngBounds(bounds), { padding: [32, 32], maxZoom: 11 });
       fittedRef.current = true;

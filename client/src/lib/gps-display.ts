@@ -135,6 +135,19 @@ export function sameGeoSelection(a: GeoSelection, b: GeoSelection): boolean {
   return true;
 }
 
+/**
+ * Le formulaire des points A/B n'existe qu'une fois la trace (donc les points stockés) chargée, pour
+ * un rôle qui peut écrire et une mission encore modifiable. Sinon il démarrerait « sans point » et un
+ * enregistrement effacerait les points existants.
+ */
+export function geoEditorReady(
+  track: { status?: string | null } | null | undefined,
+  role: string | null | undefined,
+  status?: string | null,
+): boolean {
+  return !!track && canEditMissionGeo(role) && missionGeoEditable(status ?? track.status);
+}
+
 export type GeoPair = { pickup: GeoSelection; delivery: GeoSelection };
 
 export function sameGeoPair(a: GeoPair, b: GeoPair): boolean {
