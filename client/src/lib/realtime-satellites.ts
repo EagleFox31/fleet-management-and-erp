@@ -133,6 +133,8 @@ export const SATELLITE_GROUPS = {
   missions: { keys: [MANAGEMENT_DASHBOARD] },
   /** Budget de mission (L1f) : liste, budget d'une mission et ses dépenses, besoin du jour. */
   missionBudgets: { keys: ["/api/mission-budgets", "/api/mission-budgets/daily-need"], byId: ["/api/missions/:missionId/launch-readiness"] },
+  /** Preuve de livraison déposée : fichiers de la mission, et liste « livrées non facturées ». */
+  missionPod: { keys: ["/api/billing/pending-invoices"], byId: ["/api/missions/:missionId/pod-files"] },
   /** Échéances documentaires : compteurs de flotte. */
   documents: { keys: ["/api/statistics/fleet"] },
   /** Cloche et listes d'alertes, y compris le filtre par type. */
@@ -199,6 +201,7 @@ export const EVENT_SATELLITES: Record<string, readonly SatelliteGroupName[]> = {
   mission_status_changed: ["missions"],
   mission_created_from_fuel: ["missions", "fuel"],
   mission_fuel_recorded: ["missions", "fuel"],
+  mission_pod_uploaded: ["missions", "missionPod"],
   mission_budget_updated: ["missionBudgets"],
   document_renewal_request_created: ["documents"],
   document_renewal_request_status_updated: ["documents"],

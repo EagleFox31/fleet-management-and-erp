@@ -12,6 +12,8 @@ import {
   createLaunchableVehicle,
   creditFuelCard,
   deleteJourneyRows,
+  depositPodByApi,
+  depositPodInBrowser,
   driveToDeliveredByApi,
   driveToDeliveredInBrowser,
   purgeJourneyRows,
@@ -105,6 +107,11 @@ test.describe("Mission vers facture vers paiement : parcours complet", () => {
       // Affectation, lancement et livraison à l'écran : rien n'est écrit dans missions.status.
       await driveToDeliveredInBrowser(logisticsPage, mission.id, orderNumber, await crew());
 
+      // Sans POD, la facture reste fermée ; le dépôt à l'écran l'ouvre.
+      await expect(logisticsPage.getByTestId("button-open-generate-invoice-dialog")).toBeDisabled();
+      await expect(logisticsPage.getByTestId("invoice-gate-reason")).toContainText("Déposez le POD avant de facturer");
+      await depositPodInBrowser(logisticsPage);
+
       // Facturation depuis l'écran mission.
       await expect(logisticsPage.getByTestId("button-open-generate-invoice-dialog")).toBeEnabled();
       await logisticsPage.getByTestId("button-open-generate-invoice-dialog").click();
@@ -188,6 +195,7 @@ async function deliveredMissionWithInvoice(api: APIRequestContext): Promise<{ mi
   const mission = (await created.json()) as { id: number };
   missionIds.push(mission.id);
   await driveToDeliveredByApi(api, mission.id, await crew());
+  await depositPodByApi(api, mission.id);
   const res = await api.post("/api/billing/invoices/generate", {
     data: { missionId: mission.id, amount: HT, dueDate: "2099-12-31" },
   });
