@@ -1,6 +1,7 @@
 # Scripts de garde lancés par node et importés par Vitest : un shebang suivi de CR casse l'import.
 .claude/hooks/*.mjs text eol=lf
 deploy/*.sh text eol=lf
+scripts/**/*.sh text eol=lf
 # Snapshots Vitest : écrits en LF par Vitest. Sortis en CRLF (core.autocrlf), ils étaient réécrits à chaque
 # passe et laissaient l'arbre modifié. Test : tests/unit/gitattributes-snapshots.test.ts.
 **/__snapshots__/*.snap text eol=lf
