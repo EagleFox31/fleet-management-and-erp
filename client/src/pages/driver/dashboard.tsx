@@ -9,6 +9,7 @@ import { useFuelPrice } from "@/hooks/use-fuel-price";
 import { localDateKey } from "@/lib/fuel-price-policy";
 import { useRealTimeSync } from "@/hooks/useRealTimeSync";
 import { PodDepositButton } from "@/components/missions/mission-pod-panel";
+import { DriverGpsPanel } from "@/components/driver/driver-gps-panel";
 import { splitDriverMissions } from "@/lib/driver-missions";
 import { useMemo, useState } from "react";
 import { format, isThisMonth } from "date-fns";
@@ -945,6 +946,8 @@ export default function DriverDashboard() {
                     )}
                   </div>
                 </div>
+
+                <DriverGpsPanel mission={activeMission} userId={user?.id} />
 
                 {/* CTA */}
                 <Button

@@ -1,0 +1,11 @@
+# Journal fleet-fe : GPS V1 téléphone, côté chauffeur
+
+## 2026-11-10 — Carte, itinéraire et relevé de position de la mission (empilé sur feat/gps-phone-api)
+
+Quoi : bloc « Trajet » dans la vue mission du chauffeur (`client/src/pages/driver/dashboard.tsx`) : carte (départ A, arrivée B, droite A-B à vol d'oiseau, trace envoyée, position courante), lien « Itinéraire » Google Maps URLs, relevé `watchPosition` pendant `in_progress` seulement (un point par 60 s ou 200 m, paquets de 50 au plus toutes les 2 min et au retour réseau), indicateur « Position partagée », message si l'autorisation est refusée. Le tout derrière le drapeau `gps` : coupé, rien n'est rendu ni relevé ni envoyé.
+Comment : logique pure `client/src/lib/gps-tracking.ts` (échantillonnage, UUID par point, tampon borné, lien Google), hook `use-gps-tracking.ts` (relevé, envoi POST JSON `/api/driver/missions/:id/positions`, trace `GET /api/missions/:id/track?since=`), composants `components/driver/driver-gps-panel.tsx` et `driver-mission-map.tsx` (chargée à la demande), contrat de lecture `shared/contracts/gps-track.ts` (nouveau fichier, ids bornés), config de tuiles unique `client/src/lib/map-tiles.ts` (`VITE_MAP_TILE_URL`, `VITE_MAP_TILE_ATTRIBUTION`, repli OSM).
+Choix reuse-first : Adapt du motif Leaflet vanilla de `executive-corridor-map.tsx` (leaflet ^1.9.4 déjà en dépendance, aucune dépendance ajoutée). react-leaflet 4.2.1 écarté : un paquet de plus pour une carte de quatre couches, et la v5 exige React 19.
+Tampon : propre au GPS (localStorage `fleetos-gps-buffer-u<id>-m<mission>`), séparé de la file hors ligne V5b (IndexedDB `fleetos-offline-u<id>`) ; `accepted:0` avec doublons compte pour un succès ; un 4xx (mission close, drapeau coupé) retire le paquet, un échec réseau ou 5xx le garde pour le rejeu.
+Pourquoi : le chauffeur n'avait ni carte ni itinéraire ; le logisticien lira la trace posée ici. Décisions du 2026-11-10 : pas de consentement, relevé seulement en route, ni Nominatim ni OSRM publics.
+Tester : `node node_modules/vitest/vitest.mjs run tests/unit/client/gps-tracking.test.ts` ; e2e `e2e/20-driver-gps-phone.spec.ts` (serveur avec `FEATURE_FLAGS=gps=on`, Postgres local, géolocalisation simulée).
+Limite : la PWA ne relève la position qu'au premier plan (écran verrouillé = trou dans la trace), comme le cadrage le dit.
