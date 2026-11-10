@@ -307,13 +307,13 @@ export default function SecretaryDashboard() {
                         {statDisplay(clientsView, statField(client, "totalMissions"))} missions
                       </span>
                     </div>
-                    {/* `totalRevenue` de la route = somme des carburants estimés : affiché comme tel,
-                        sans indicateur dérivé tant que la facturation n'est pas branchée. */}
+                    {/* `estimatedFuelCost` (ex-`totalRevenue`, déprécié) = somme des carburants estimés :
+                        affiché comme tel, sans indicateur dérivé tant que la facturation n'est pas branchée. */}
                     <div className="grid grid-cols-2 gap-4 text-xs">
                       <div>
                         <p className="text-gray-400">Carburant estimé</p>
                         <p className="font-semibold text-amber-600">
-                          {statDisplay(clientsView, statField(client, "totalRevenue"), formatPrice)}
+                          {statDisplay(clientsView, statField(client, "estimatedFuelCost"), formatPrice)}
                         </p>
                       </div>
                       <div>

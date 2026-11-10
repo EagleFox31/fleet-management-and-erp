@@ -108,6 +108,8 @@ describe("/api/operations : montants du budget réservés à leurs lecteurs (Q19
     const clientRow = statRow(stats.body, "clientName", clientName) as Record<string, unknown>;
     expect(clientRow).toBeDefined();
     for (const key of REVENUE_KEYS) expect(clientRow[key], `stats/by-client ${key}`).toBeNull();
+    // Alias exact du carburant estimé : masqué comme le nom déprécié (clé présente, valeur null).
+    expect(clientRow).toHaveProperty("estimatedFuelCost", null);
     expect(clientRow.totalMissions).toBe(1);
 
     const dest = await call("GET", "/api/operations/stats/by-destination", { actor: "technician" });
@@ -115,6 +117,7 @@ describe("/api/operations : montants du budget réservés à leurs lecteurs (Q19
     expect(destRow).toBeDefined();
     // Par destination, seul le revenu est calculé (ni marge ni pourcentage) ; le compteur s'appelle `count`.
     expect(destRow.totalRevenue).toBeNull();
+    expect(destRow).toHaveProperty("estimatedFuelCost", null);
     expect(destRow.count).toBe(1);
   });
 
@@ -127,10 +130,15 @@ describe("/api/operations : montants du budget réservés à leurs lecteurs (Q19
     expect(Number(byClient.body.statistics.totalRevenue)).toBe(ESTIMATED_FUEL_COST);
 
     const stats = await call("GET", "/api/operations/stats/by-client", { actor: "logistics" });
-    expect(Number((statRow(stats.body, "clientName", clientName) as any).totalRevenue)).toBe(ESTIMATED_FUEL_COST);
+    const clientRow = statRow(stats.body, "clientName", clientName) as any;
+    expect(Number(clientRow.totalRevenue)).toBe(ESTIMATED_FUEL_COST);
+    // Alias exact servi avec la même valeur ; `totalRevenue` reste servi une version (déprécié).
+    expect(Number(clientRow.estimatedFuelCost)).toBe(ESTIMATED_FUEL_COST);
 
     const dest = await call("GET", "/api/operations/stats/by-destination", { actor: "logistics" });
-    expect(Number((statRow(dest.body, "destination", destination) as any).totalRevenue)).toBe(ESTIMATED_FUEL_COST);
+    const destRow = statRow(dest.body, "destination", destination) as any;
+    expect(Number(destRow.totalRevenue)).toBe(ESTIMATED_FUEL_COST);
+    expect(Number(destRow.estimatedFuelCost)).toBe(ESTIMATED_FUEL_COST);
   });
 
   it("sans cookie : 401, aucun montant ni chiffre d'affaires", async () => {

@@ -31,6 +31,7 @@ import { formatTireUsageLabel, computeTireWearScore } from "@shared/constants/ti
 import { getVehicleTireStatusLabel } from "@shared/constants/tire-removal";
 import { cn } from "@/lib/utils";
 import { tiresPageState } from "@/lib/tires-page-state";
+import { fetchAllTires } from "@/lib/fetch-all-pages";
 import { queryView } from "@/lib/query-view";
 import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
@@ -581,12 +582,16 @@ export default function TiresInventoryPage() {
     refetchInterval: false,
     refetchOnWindowFocus: false,
   } as const;
-  const tiresQuery = useQuery<{ tires: TireTableRow[] }>({
-    queryKey: ["/api/tires"],
+  // Stock complet : sans `limit`, `/api/tires` ne rend que 20 pneus, et le tableau paginait
+  // côté client sur ces 20 seulement (« x sur 20 »). Toutes les pages sont lues ; une lecture
+  // incomplète est une erreur, jamais un stock partiel.
+  const tiresQuery = useQuery<TireTableRow[]>({
+    queryKey: ["/api/tires", "all"],
+    queryFn: () => fetchAllTires<TireTableRow>(),
     ...liveQueryConfig,
   });
 
-  const tires = tiresQuery.data?.tires || [];
+  const tires = tiresQuery.data ?? [];
 
   // Ces trois requêtes alimentent les KPI de l'en-tête, affichés quel que soit
   // l'onglet actif: elles ne doivent pas être conditionnées à un onglet.

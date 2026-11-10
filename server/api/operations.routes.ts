@@ -211,7 +211,8 @@ router.get("/missions/by-client/:clientName", authenticate, refuseDriver, async 
 router.get("/stats/by-client", authenticate, refuseDriver, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const stats = await operationsService.getStatsByClient();
-    // Chiffre d'affaires et marge sommés sur estimatedFuelCost : null hors lecteurs du budget (Q19).
+    // Carburant estimé (`estimatedFuelCost`, alias déprécié `totalRevenue`) et marge dépréciée qui en
+    // découle : ce n'est pas un chiffre d'affaires. Null hors lecteurs du budget (Q19).
     res.json(redactMissionBudget(req.user, stats));
   } catch (error: any) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching stats by client:" }));
