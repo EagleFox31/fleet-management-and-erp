@@ -11,6 +11,7 @@ export {
   IDEMPOTENCY_KEY_PATTERN,
   IDEMPOTENCY_REPLAYED_HEADER,
   IDEMPOTENCY_RETENTION_DAYS,
+  IDEMPOTENCY_STALE_SECONDS,
   IDEMPOTENCY_ROUTES,
   OFFLINE_OWNER_HEADER,
   type IdempotencyRoute,
@@ -28,7 +29,6 @@ export const IDEMPOTENCY_FLAG: FeatureKey = "offline-writes";
  * reprise, sauf route à `staleSeconds: null`. Sans risque pour mission et kilométrage : un
  * kilométrage se réécrit à l'identique et une transition déjà faite est refusée par la machine d'états.
  */
-export const IDEMPOTENCY_STALE_SECONDS = 60;
 
 /**
  * Statuts conservés et rejoués. Les 5xx et les refus liés à la session ou au débit

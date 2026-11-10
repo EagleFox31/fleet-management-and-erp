@@ -24,3 +24,9 @@
 **Pourquoi.** Réserves de la revue sécurité de #645 : cookie partagé entre onglets, registre qui rejouait des routes non protégées.
 
 **Tester.** Tests unitaires `tests/unit/client/offline-*.test.ts` ; contrat `tests/contract/offline-owner-guard.contract.test.ts` sous verrou.
+
+## 2026-11-10 18:00 - V5b-2b : audit sécurité et relecture (0aaaa7c2, fa78e0e5 et suite)
+
+- Quoi : 0aaaa7c2 (livraison V5b-2b et garde de préfixe), fa78e0e5 (`routeExample` dans le test de barrière), puis CORS des en-têtes d'idempotence, route de l'envoi liée à son type, date de création par défaut, plafond 409 dérivé du délai de reprise serveur, abonnement `session-changed` testé, repli `AbortSignal.timeout`, test de rétention exact, prérequis d'allumage dans le plan.
+- Comment et pourquoi : voir `docs/qa/journal/2026-11-10T1800-v5b-2b-audit-securite-suite.md`.
+- Tester : tests unitaires `tests/unit/client/offline-*.test.ts` ; contrat `tests/contract/offline-owner-guard.contract.test.ts` sous verrou.

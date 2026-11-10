@@ -41,6 +41,12 @@ export const IDEMPOTENCY_REPLAYED_HEADER = "Idempotent-Replayed";
  */
 export const OFFLINE_OWNER_HEADER = "X-Offline-Owner";
 
+/**
+ * Délai (secondes) au-delà duquel le serveur reprend une clé restée `in_progress`. Le client attend
+ * au moins ce délai, plus une marge, avant de classer un 409 « en cours » À revoir.
+ */
+export const IDEMPOTENCY_STALE_SECONDS = 60;
+
 /** Clé acceptée : 1 à 255 caractères ASCII imprimables sans espace (UUID conseillé). */
 export const IDEMPOTENCY_KEY_PATTERN = /^[\x21-\x7e]{1,255}$/;
 

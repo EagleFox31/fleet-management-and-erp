@@ -67,10 +67,43 @@ describe("purge : base vidée supprimée", () => {
 });
 
 describe("rétention des clés : une seule valeur", () => {
-  it("le schéma, le bootstrap SQL et la migration lisent la même durée que la constante partagée", () => {
-    const expected = `interval '${IDEMPOTENCY_RETENTION_DAYS} days'`;
-    for (const file of ["shared/schema.ts", "server/init-database.ts", "server/db/migrations/20261101_cdc_ecarts.sql"]) {
-      expect(readFileSync(file, "utf8"), file).toContain(expected);
+  // Compare la constante à l'intervalle réellement écrit dans chaque SQL, pas à une sous-chaîne.
+  const intervalsOf = (file: string) =>
+    Array.from(readFileSync(file, "utf8").matchAll(/idempotency_keys[\s\S]{0,600}?now\(\)\s*\+\s*interval\s+'(\d+)\s+days?'/gi), (m) => Number(m[1]));
+
+  it.each(["server/init-database.ts", "server/db/migrations/20261101_cdc_ecarts.sql"])("%s : intervalle égal à la constante", (file) => {
+    const found = intervalsOf(file);
+    expect(found.length).toBeGreaterThan(0);
+    for (const days of found) expect(days).toBe(IDEMPOTENCY_RETENTION_DAYS);
+  });
+
+  it("shared/schema.ts : intervalle égal à la constante", () => {
+    const m = readFileSync("shared/schema.ts", "utf8").match(/expiresAt:[^\n]*interval '(\d+) days?'/);
+    expect(m).not.toBeNull();
+    expect(Number(m![1])).toBe(IDEMPOTENCY_RETENTION_DAYS);
+  });
+});
+
+describe("signal de délai d'envoi", () => {
+  it("repli AbortController quand AbortSignal.timeout est absent : le signal s'interrompt", async () => {
+    vi.useFakeTimers();
+    const original = AbortSignal.timeout;
+    // @ts-expect-error vieux WebView sans AbortSignal.timeout
+    AbortSignal.timeout = undefined;
+    try {
+      const { timeoutSignal } = await import("@/lib/offline-queue");
+      const signal = timeoutSignal(1000);
+      expect(signal.aborted).toBe(false);
+      vi.advanceTimersByTime(1001);
+      expect(signal.aborted).toBe(true);
+    } finally {
+      AbortSignal.timeout = original;
+      vi.useRealTimers();
     }
+  });
+
+  it("utilise AbortSignal.timeout quand il existe", async () => {
+    const { timeoutSignal } = await import("@/lib/offline-queue");
+    expect(timeoutSignal(60_000).aborted).toBe(false);
   });
 });

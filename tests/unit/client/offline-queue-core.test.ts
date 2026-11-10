@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import { IDEMPOTENCY_STALE_SECONDS } from "@shared/idempotency-routes";
 import {
   backoffDelay,
+  IN_PROGRESS_DELAY_MS,
   MAX_ENTRY_AGE_MS,
   MAX_IN_PROGRESS_HITS,
   classifyOutcome,
@@ -180,6 +182,10 @@ describe("file d'écritures différées", () => {
     expect(entries(h)[0]).toMatchObject({ state: "rejected" });
     expect(entries(h)[0].lastError).toMatch(/Vérifiez/);
     expect(entries(h)[0].lastError).not.toMatch(/409|IDEMPOTENCY/);
+  });
+
+  it("le plafond des 409 couvre le délai de reprise du serveur plus une marge", () => {
+    expect(MAX_IN_PROGRESS_HITS * IN_PROGRESS_DELAY_MS).toBeGreaterThanOrEqual(IDEMPOTENCY_STALE_SECONDS * 1000 + 60_000);
   });
 
   it("route non protégée : jamais envoyée, À revoir, la file continue", async () => {

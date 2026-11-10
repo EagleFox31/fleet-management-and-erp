@@ -45,6 +45,17 @@ const LEASE_MS = 45_000;
 /** Un envoi doit finir (ou échouer) avant l'expiration du bail du rejeu, sinon un autre onglet reprendrait la boucle. */
 export const SEND_TIMEOUT_MS = LEASE_MS - 15_000;
 
+/**
+ * Signal qui s'interrompt après `ms`. `AbortSignal.timeout` manque sur les vieux WebView : repli par
+ * `AbortController` + `setTimeout`, sinon un envoi muet bloquerait la file sans fin.
+ */
+export function timeoutSignal(ms: number): AbortSignal {
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") return AbortSignal.timeout(ms);
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
+
 /** En-têtes d'un envoi différé : clé d'idempotence stable et propriétaire de la file (vérifié par le serveur à chaque envoi). */
 export function offlineRequestHeaders(entry: Pick<QueueEntry, "idempotencyKey" | "ownerUserId">): Record<string, string> {
   return { [IDEMPOTENCY_HEADER]: entry.idempotencyKey, [OFFLINE_OWNER_HEADER]: String(entry.ownerUserId) };
@@ -97,7 +108,7 @@ async function sendEntry(entry: QueueEntry): Promise<SendOutcome> {
     const response = await apiRequest(entry.endpoint, {
       method: entry.method,
       headers: offlineRequestHeaders(entry),
-      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+      signal: timeoutSignal(SEND_TIMEOUT_MS),
       body,
     });
     return { ok: true, replayed: response.headers.get(REPLAYED_HEADER) !== null };

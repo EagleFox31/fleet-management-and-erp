@@ -1,4 +1,4 @@
-import { IDEMPOTENCY_KEY_PATTERN, IDEMPOTENCY_RETENTION_DAYS } from "@shared/idempotency-routes";
+import { IDEMPOTENCY_KEY_PATTERN, IDEMPOTENCY_RETENTION_DAYS, IDEMPOTENCY_STALE_SECONDS } from "@shared/idempotency-routes";
 import { clientLogger } from "@/lib/logger";
 import type { OfflineActionDefinition } from "@/lib/offline-action-registry";
 
@@ -74,8 +74,10 @@ export function classifyOutcome(outcome: SendOutcome): ResponseClass {
 export const BACKOFF_BASE_MS = 2_000;
 export const BACKOFF_MAX_MS = 5 * 60_000;
 export const IN_PROGRESS_DELAY_MS = 5_000;
-/** Réponses « en cours » tolérées par envoi (environ une minute) avant de le passer « À revoir ». */
-export const MAX_IN_PROGRESS_HITS = 12;
+/** Marge au-delà du délai de reprise serveur (`IDEMPOTENCY_STALE_SECONDS`) avant de déclarer À revoir. */
+export const IN_PROGRESS_MARGIN_MS = 60_000;
+/** Réponses « en cours » tolérées par envoi (délai de reprise serveur plus une marge) avant de le passer « À revoir ». */
+export const MAX_IN_PROGRESS_HITS = Math.ceil((IDEMPOTENCY_STALE_SECONDS * 1000 + IN_PROGRESS_MARGIN_MS) / IN_PROGRESS_DELAY_MS);
 /** Un jour de marge sous la conservation des clés côté serveur (`IDEMPOTENCY_RETENTION_DAYS`). */
 export const MAX_ENTRY_AGE_MS = (IDEMPOTENCY_RETENTION_DAYS - 1) * 24 * 60 * 60 * 1000;
 
