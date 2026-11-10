@@ -8,6 +8,7 @@ import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestClient, createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
 import { leakText } from "../support/api-error";
+import { cleanupPodFiles, seedPodFile } from "../support/pod";
 import { deleteClientInvoicesWhere } from "../support/money-override";
 
 /**
@@ -44,7 +45,8 @@ function expectErrorContract(res: { body: any; headers: Headers }, code: string)
   expect(leakText(res.body)).not.toMatch(/stack|at \S+:\d+|SQLSTATE|TypeError|violates|NaN|duplicate key/);
 }
 
-async function newMission() {
+/** Par défaut : mission livrée avec une preuve de livraison, donc facturable. */
+async function newMission(options: { status?: "in_progress" | "delivered"; pod?: boolean } = {}) {
   const client = await createTestClient();
   ids.clientIds.push(client.id);
   const [mission] = await db
@@ -54,9 +56,11 @@ async function newMission() {
       clientId: client.id,
       pickupAddress: "Douala",
       deliveryAddress: "Yaoundé",
+      status: options.status ?? "delivered",
     })
     .returning();
   missionIds.push(mission.id);
+  if (options.pod !== false) await seedPodFile(mission.id, ids.userIds[0]);
   return mission;
 }
 
@@ -85,6 +89,7 @@ beforeAll(async () => {
 }, 120000);
 
 afterAll(async () => {
+  await cleanupPodFiles(missionIds);
   if (missionIds.length > 0) {
     await deleteClientInvoicesWhere(inArray(clientInvoices.missionId, missionIds));
     await db.delete(missions).where(inArray(missions.id, missionIds));
@@ -168,5 +173,23 @@ describe("Facturation d'une mission : contrat", { timeout: 120000 }, () => {
     expect(second.status).toBe(409);
     expectErrorContract(second, "CONFLICT");
     expect(await invoicesOf(mission.id)).toHaveLength(1);
+  });
+
+  it("sans preuve de livraison -> 409 lisible, aucune facture", async () => {
+    const mission = await newMission({ pod: false });
+    const res = await generate({ missionId: mission.id, amount: 1000, dueDate: "2026-12-31" });
+    expect(res.status).toBe(409);
+    expectErrorContract(res, "CONFLICT");
+    expect(res.body.message).toContain("Preuve de livraison manquante");
+    expect(await invoicesOf(mission.id)).toHaveLength(0);
+  });
+
+  it("mission non livrée (même avec un POD) -> 409 lisible, aucune facture", async () => {
+    const mission = await newMission({ status: "in_progress" });
+    const res = await generate({ missionId: mission.id, amount: 1000, dueDate: "2026-12-31" });
+    expect(res.status).toBe(409);
+    expectErrorContract(res, "CONFLICT");
+    expect(res.body.message).toContain("n'est pas livrée");
+    expect(await invoicesOf(mission.id)).toHaveLength(0);
   });
 });

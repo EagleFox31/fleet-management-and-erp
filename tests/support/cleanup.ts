@@ -15,6 +15,7 @@ import {
   missionOperations,
   tariffGrid,
   missions,
+  missionPodFiles,
   fuelRecords,
   partRequirements,
   parts,
@@ -278,6 +279,8 @@ async function deleteOrphanTestRows(): Promise<void> {
   // Historique du prix convenu (O3 3b) : changed_by vers users sans cascade, y compris sur une mission hors du lot.
   await db.delete(missionPriceHistory).where(inArray(missionPriceHistory.changedBy, testUsers));
   const testMissions = db.select({ id: missions.id }).from(missions).where(inArray(missions.createdBy, testUsers));
+  // Fichiers POD (lot POD) : FK vers la mission et vers l'auteur du dépôt, sans cascade ; supprimés avant la mission.
+  await db.delete(missionPodFiles).where(or(inArray(missionPodFiles.missionId, testMissions), inArray(missionPodFiles.uploadedBy, testUsers)));
   await deleteClientInvoicesWhere(inArray(clientInvoices.missionId, testMissions));
   // Budget de mission (L1) : FK vers la mission et vers ses auteurs, sans cascade.
   const testBudgetFilter = or(

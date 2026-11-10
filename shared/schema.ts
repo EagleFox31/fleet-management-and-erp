@@ -1741,6 +1741,28 @@ export const missionPriceHistory = pgTable("mission_price_history", {
   index("mission_price_history_mission_idx").on(table.missionId, table.changedAt),
 ]);
 export type MissionPriceHistoryRow = typeof missionPriceHistory.$inferSelect;
+
+// Preuve de livraison (POD) : un fichier déposé sur une mission, en ajouts seulement (ni modification
+// ni suppression). Pas de cascade : supprimer une mission portant un POD est refusé. Un même contenu
+// (sha256) n'est enregistré qu'une fois par mission. Jumelle : server/db/migrations/20261110_mission_pod_files.sql.
+export const MISSION_POD_MIME_TYPES = ["application/pdf", "image/jpeg", "image/png", "image/webp"] as const;
+export const missionPodFiles = pgTable("mission_pod_files", {
+  id: serial("id").primaryKey(),
+  missionId: integer("mission_id").notNull().references(() => missions.id),
+  path: text("path").notNull(),
+  originalName: text("original_name"),
+  mime: text("mime").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  sha256: text("sha256").notNull(),
+  uploadedBy: integer("uploaded_by").notNull().references(() => users.id),
+  uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
+}, (table) => [
+  check("mission_pod_files_mime_check", sql`${table.mime} IN ('application/pdf', 'image/jpeg', 'image/png', 'image/webp')`),
+  check("mission_pod_files_size_check", sql`${table.sizeBytes} > 0`),
+  unique("mission_pod_files_mission_sha256_unique").on(table.missionId, table.sha256),
+  index("mission_pod_files_mission_idx").on(table.missionId, table.uploadedAt),
+]);
+export type MissionPodFileRow = typeof missionPodFiles.$inferSelect;
 export type InsertMissionOperation = z.infer<typeof insertMissionOperationSchema>;
 
 export const insertMissionSchema = createInsertSchema(missions).omit({
@@ -1749,6 +1771,9 @@ export const insertMissionSchema = createInsertSchema(missions).omit({
   updatedAt: true,
   completedAt: true,
   cancelledAt: true,
+  // Preuve de livraison : posée par le dépôt de fichier (mission_pod_files), jamais par le corps d'une requête.
+  podUrl: true,
+  podUploadedAt: true,
 }).extend({
   pickupDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),
   deliveryDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),

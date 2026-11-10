@@ -3519,6 +3519,21 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - le contrat serveur des noms servis est figé par `tests/contract/operations-budget-scope.contract.test.ts` (`totalFuelCost`, et `estimatedFuelCost` avec T2).
 - **Leçon généralisée** : un chiffre affiché lit un champ que le contrat serveur sert réellement, sous un type nommé et non `any`. Un repli `|| 0` sur une donnée lue est interdit : un champ absent est « inconnu », jamais zéro. Avant de brancher une tuile, vérifier le nom du champ dans la réponse réelle, par un test de contrat ou un test de rendu sur une réponse de la forme servie.
 
+## 2026-11-10 — insertMissionSchema laissait POST /api/missions poser une fausse preuve de livraison (lot POD)
+
+- **Contexte** : à la préparation de la preuve de livraison obligatoire avant facture, relecture des chemins qui écrivent `missions.pod_url` et `missions.pod_uploaded_at`. `insertMissionSchema` (dérivé de la table) ne les omettait pas : un `POST /api/missions` portant `podUrl` et `podUploadedAt` les enregistrait tels quels. Le PATCH était déjà protégé par la liste blanche `updateMissionSchema`.
+- **Cause racine** :
+  - un schéma d'insertion dérivé de la table est une liste noire : toute colonne qui n'est pas omise est écrivable par le corps de la requête ;
+  - la route de création omettait `podUploadedAt` localement dans `createMissionSchema`, mais pas `podUrl` ; la protection était posée route par route, pas au schéma commun ;
+  - aucun test ne posait une colonne dérivée de l'état (preuve, horodatage) dans un corps de création pour vérifier qu'elle était ignorée.
+- **Classification** : défaut de validation d'entrée (affectation de masse), sans exploitation connue. Latent tant que la preuve ne conditionnait rien ; critique dès qu'elle conditionne la facturation.
+- **Résolution** :
+  - `podUrl` et `podUploadedAt` sortent de `insertMissionSchema` ; ils ne sont plus écrits que par `POST /api/missions/:id/pod-files`, qui vérifie le contenu réel du fichier ;
+  - la preuve vit dans `mission_pod_files` (ajouts seulement), `generateInvoiceFromMission` refuse (409) sans mission livrée ni fichier.
+- **Prévention vérifiée** :
+  - `tests/contract/mission-pod.contract.test.ts`, deux premiers cas : un POST avec `podUrl` et `podUploadedAt`, puis un PATCH avec `podUrl`, laissent les deux colonnes à `NULL` (rouge constaté avant le correctif, vert après) ;
+  - `tests/contract/client-invoice-generate.contract.test.ts` : 409 sans POD, 409 mission non livrée.
+- **Leçon généralisée** : un champ qui prouve un fait métier (preuve, validation, horodatage d'étape) ne s'écrit que par la route qui établit ce fait. Il est omis du schéma d'insertion commun, jamais seulement d'un schéma de route, et un test de contrat vérifie qu'un corps qui le porte est ignoré.
 ## 2026-11-10 — Garde de doublon d'OT préventif limitée aux OT « en attente » (V5a)
 
 - **Contexte** : le contrôle `checkDateBasedMaintenance` passe de la route manuelle à l'ordonnanceur (plusieurs passages par jour). La garde de `createDateBasedWorkOrder` ne regardait que les OT « en attente ». L'échéance du véhicule (`vehicles.nextMaintenanceDate`) n'avance pas à la clôture de l'OT. Near miss : trouvé en revue avant le premier passage en production, aucun OT en double créé.
