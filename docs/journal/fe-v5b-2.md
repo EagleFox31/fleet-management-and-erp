@@ -7,3 +7,10 @@
 - Pourquoi : l'ancien rejeu renvoyait sans clé (doublon possible si la réponse était perdue), sans ordre garanti, supprimait ou gardait sans distinguer un refus définitif d'une panne, et invalidait tout le cache. Réserves R2 et S1 de `cdc-ecarts.md:93` : la file ne se rejoue que si `/api/auth/me` rend son propriétaire, et la déconnexion ne détruit jamais en silence.
 - Tester : `tests/unit/client/offline-queue-core.test.ts` (classement, FIFO + arrêt, clé stable, 401, rejeté, compte changé, purge, verrou, migration), `offline-replay-gate.test.ts` (barrière, registre, en-têtes d'`apiRequest`), `offline-storage-scope.test.ts` et `offline-storage-session.test.ts` (purge complète, drapeaux).
 - Décision à confirmer : le changement de compte sans déconnexion détruit maintenant la file de l'ancien compte (S1), alors que l'ancien test documentait « tablette partagée : file gardée ». L'ancien comportement reste le défaut des options de `purgeAll` / `purgeOthers` ; seul le cycle de vie applicatif passe `dropQueues` / `dropOtherQueues`.
+
+## 2026-11-10 - V5b-2 : trace de la destruction d une file (S1 validé)
+
+- Quoi : la destruction d une file par changement de compte ou déconnexion consigne le nombre d envois détruits et leur répartition par type d écriture (clé du registre). Plus d identifiant de compte dans cette trace.
+- Comment : summarizeQueued dans offline-user-scope.ts, utilisé par purgeAll et purgeOthers.
+- Pourquoi : la cloison prime, mais une perte d envois ne doit être ni silencieuse ni exposer de contenu.
+- Tester : offline-storage-scope.test.ts, test changement de compte (règle S1) : file détruite, trace avec nombre et types, ni charge utile, ni e-mail, ni identifiant.

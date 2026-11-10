@@ -220,6 +220,12 @@ interface QueueEnvelope<T> {
   actions: T[];
 }
 
+/** Envois détruits par une purge : décompte et types seulement, jamais de contenu ni d'identifiant. */
+export interface QueueLoss {
+  count: number;
+  types: Record<string, number>;
+}
+
 export function createOfflineScope(kv: OfflineKv) {
   // Une purge d'un magasin incrémente son compteur : toute écriture démarrée
   // avant lui s'annule au lieu de ressusciter les données purgées.
@@ -253,6 +259,31 @@ export function createOfflineScope(kv: OfflineKv) {
       return 0;
     }
   }
+
+  /** Nombre d'envois d'un magasin et répartition par type d'écriture (clé du registre), sans contenu. */
+  async function summarizeQueued(db: string): Promise<QueueLoss> {
+    try {
+      const saved = await kv.get<QueueEnvelope<unknown>>(db, QUEUE_RECORD_KEY);
+      const actions = saved && Array.isArray(saved.actions) ? saved.actions : [];
+      const types: Record<string, number> = {};
+      for (const action of actions) {
+        const type =
+          action && typeof action === "object" && typeof (action as { type?: unknown }).type === "string"
+            ? (action as { type: string }).type.slice(0, 64)
+            : "inconnu";
+        types[type] = (types[type] ?? 0) + 1;
+      }
+      return { count: actions.length, types };
+    } catch {
+      return { count: 0, types: {} };
+    }
+  }
+
+  const mergeLoss = (losses: QueueLoss[]): QueueLoss => {
+    const types: Record<string, number> = {};
+    for (const loss of losses) for (const [type, n] of Object.entries(loss.types)) types[type] = (types[type] ?? 0) + n;
+    return { count: losses.reduce((a, l) => a + l.count, 0), types };
+  };
 
   async function listOfflineDbs(): Promise<string[] | null> {
     try {
@@ -360,22 +391,26 @@ export function createOfflineScope(kv: OfflineKv) {
     ): Promise<number> {
       const own = activeUserId !== null ? offlineDbName(activeUserId) : null;
       const others = ((await listOfflineDbs()) ?? []).filter((name) => name !== own);
-      const lost = own ? await countQueued(own) : 0;
+      const ownLoss = own ? await summarizeQueued(own) : { count: 0, types: {} };
+      const lost = ownLoss.count;
       const lostOthers = options.dropOtherQueues
-        ? (await Promise.all(others.map(countQueued))).reduce((a, b) => a + b, 0)
-        : 0;
+        ? mergeLoss(await Promise.all(others.map(summarizeQueued)))
+        : { count: 0, types: {} };
       await Promise.all([
         ...(own ? [clearDb(own)] : []),
         ...others.map(options.dropOtherQueues ? clearDb : dropReadCache),
       ]);
       await purgeLegacy();
-      if (lostOthers > 0) {
-        clientLogger.warn("Écritures hors ligne d'autres comptes détruites à la déconnexion", { lost: lostOthers });
+      if (lostOthers.count > 0) {
+        clientLogger.warn("Écritures hors ligne d'autres comptes détruites à la déconnexion", {
+          lost: lostOthers.count,
+          types: lostOthers.types,
+        });
       }
       if (lost > 0) {
         clientLogger.warn("Écritures hors ligne non synchronisées détruites à la déconnexion", {
           lost,
-          userId: activeUserId,
+          types: ownLoss.types,
         });
       }
       return lost;
@@ -391,9 +426,12 @@ export function createOfflineScope(kv: OfflineKv) {
       const keep = offlineDbName(keepUserId);
       const others = ((await listOfflineDbs()) ?? []).filter((name) => name !== keep);
       if (options.dropQueues) {
-        const lost = (await Promise.all(others.map(countQueued))).reduce((a, b) => a + b, 0);
-        if (lost > 0) {
-          clientLogger.warn("Écritures hors ligne d'un autre compte détruites au changement de compte", { lost });
+        const lost = mergeLoss(await Promise.all(others.map(summarizeQueued)));
+        if (lost.count > 0) {
+          clientLogger.warn("Écritures hors ligne d'un autre compte détruites au changement de compte", {
+            lost: lost.count,
+            types: lost.types,
+          });
         }
       }
       await Promise.all(others.map(options.dropQueues ? clearDb : dropReadCache));
