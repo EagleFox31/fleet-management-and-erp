@@ -7,6 +7,7 @@ import {
   canCancelFuelRecord,
   fuelRecordCancelSchema,
   isFuelRecordValidated,
+  isMissionBudgetSettled,
 } from "../../../shared/constants/fuel-record-cancel";
 import { fuelValidationLabel } from "../../../client/src/lib/fuel-record-status";
 import { fuelRecords, insertFuelRecordSchema } from "../../../shared/schema";
@@ -71,5 +72,24 @@ describe("cancellation_reason : colonne, jumelle SQL, jamais écrite par le clie
   });
   it("omise de insertFuelRecordSchema : un corps client qui la porte est ignoré", () => {
     expect(Object.keys(insertFuelRecordSchema.shape)).not.toContain("cancellationReason");
+  });
+});
+
+describe("Annulation d'un plein : motif limité à 500 caractères", () => {
+  it("accepte 500 caractères, refuse 501", () => {
+    expect(fuelRecordCancelSchema.safeParse({ reason: "a".repeat(500) }).success).toBe(true);
+    expect(fuelRecordCancelSchema.safeParse({ reason: "a".repeat(501) }).success).toBe(false);
+  });
+  it("compte après rognage : 500 caractères entourés d'espaces passent", () => {
+    expect(fuelRecordCancelSchema.safeParse({ reason: ` ${"a".repeat(500)} ` }).success).toBe(true);
+  });
+});
+
+describe("Règle « budget de mission soldé »", () => {
+  it("n'est soldé que si settledAt est posé", () => {
+    expect(isMissionBudgetSettled({ settledAt: new Date() })).toBe(true);
+    expect(isMissionBudgetSettled({ settledAt: "2026-11-10T10:00:00.000Z" })).toBe(true);
+    expect(isMissionBudgetSettled({ settledAt: null })).toBe(false);
+    expect(isMissionBudgetSettled({})).toBe(false);
   });
 });

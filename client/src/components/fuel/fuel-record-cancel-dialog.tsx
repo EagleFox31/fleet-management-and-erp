@@ -17,7 +17,7 @@ import { userMessageOf } from "@/lib/api-error";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { satelliteTargetsOf } from "@/lib/realtime-satellites";
 import { REALTIME_EVENTS } from "@shared/contracts/realtime-events";
-import { FUEL_RECORD_CANCEL_REASON_MIN_LENGTH } from "@shared/constants/fuel-record-cancel";
+import { FUEL_RECORD_CANCEL_REASON_MAX_LENGTH, FUEL_RECORD_CANCEL_REASON_MIN_LENGTH } from "@shared/constants/fuel-record-cancel";
 
 export type CancellableFuelRecord = { id: number; vehicleId?: number | null; missionId?: number | null };
 
@@ -105,7 +105,11 @@ export function FuelRecordCancelDialog({
           placeholder="Motif de l'annulation (obligatoire)"
           aria-label="Motif de l'annulation"
           rows={3}
+          maxLength={FUEL_RECORD_CANCEL_REASON_MAX_LENGTH}
         />
+        <p className="text-xs text-muted-foreground text-right" aria-live="polite">
+          {reason.length} / {FUEL_RECORD_CANCEL_REASON_MAX_LENGTH}
+        </p>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             Fermer

@@ -31,6 +31,7 @@ const ACTORS = {
   logistics: "logistics",
   workshop_manager: "workshop_manager",
   technician: "technician",
+  client: "client",
 } as const;
 type Actor = keyof typeof ACTORS;
 
@@ -183,6 +184,57 @@ describe("POST /api/fuel-records/:id/cancel", { timeout: 120000 }, () => {
     const row = await rowOf(r.id);
     expect(row.deletedAt).toBeNull();
     expect(row.cancellationReason).toBeNull();
+  });
+
+  it("client : 403, plein intact", async () => {
+    const r = await record({ validated: true, debit: "100.00" });
+    const res = await cancel(r.id, "client", { reason: "Motif valable" });
+    expect(res.status).toBe(403);
+    expect(leakText(res.body)).not.toMatch(TECHNICAL);
+    expect((await rowOf(r.id)).deletedAt).toBeNull();
+  });
+
+  it("motif de 501 caractères : 400, plein intact ; 500 caractères : 200", async () => {
+    const r = await record({ validated: true, debit: "100.00" });
+    const tooLong = await cancel(r.id, "admin", { reason: "a".repeat(501) });
+    expect(tooLong.status).toBe(400);
+    expect(leakText(tooLong.body)).not.toMatch(TECHNICAL);
+    expect((await rowOf(r.id)).deletedAt).toBeNull();
+    expect((await cancel(r.id, "admin", { reason: "a".repeat(500) })).status).toBe(200);
+  });
+
+  it("deux annulations simultanées, même motif : une seule écriture, une seule contre-passation, deux 200", async () => {
+    const r = await record({ validated: true, debit: "700.00" });
+    const stored = await rowOf(r.id);
+    await db.transaction((tx) => linkFuelConsumption(tx as never, stored, session.userIdOf("admin")));
+    const [a, b] = await Promise.all([
+      cancel(r.id, "admin", { reason: "Doublon simultané" }),
+      cancel(r.id, "logistics", { reason: "Doublon simultané" }),
+    ]);
+    expect([a.status, b.status]).toEqual([200, 200]);
+    const row = await rowOf(r.id);
+    expect(row.cancellationReason).toBe("Doublon simultané");
+    const lines = await linesOf(r.id);
+    expect(lines.filter((l) => l.requestKey === `fuel:${r.id}:reverse`)).toHaveLength(1);
+    expect(lines).toHaveLength(2);
+    // Un seul acteur est inscrit : celui qui a écrit en premier.
+    expect([session.userIdOf("admin"), session.userIdOf("logistics")]).toContain(row.deletedBy);
+  });
+
+  it("deux annulations simultanées, motifs différents : un 200, un 409, une seule contre-passation", async () => {
+    const r = await record({ validated: true, debit: "800.00" });
+    const stored = await rowOf(r.id);
+    await db.transaction((tx) => linkFuelConsumption(tx as never, stored, session.userIdOf("admin")));
+    const [a, b] = await Promise.all([
+      cancel(r.id, "admin", { reason: "Premier motif" }),
+      cancel(r.id, "logistics", { reason: "Second motif" }),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([200, 409]);
+    const winner = a.status === 200 ? "Premier motif" : "Second motif";
+    expect((await rowOf(r.id)).cancellationReason).toBe(winner);
+    const lines = await linesOf(r.id);
+    expect(lines.filter((l) => l.requestKey === `fuel:${r.id}:reverse`)).toHaveLength(1);
+    expect(leakText((a.status === 409 ? a : b).body)).not.toMatch(TECHNICAL);
   });
 
   it("plein physique validé : le chef d'atelier peut l'annuler", async () => {

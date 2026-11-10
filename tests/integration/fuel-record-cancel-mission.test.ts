@@ -2,6 +2,7 @@ import { eq, inArray } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { FuelService } from "../../server/services/fuel-service";
+import { settleMissionBudget } from "../../server/services/mission-budgets-service";
 import { fuelRecords, missionBudgets, missions } from "../../shared/schema";
 import { FUEL_RECORD_BUDGET_SETTLED_MESSAGE } from "../../shared/constants/fuel-record-cancel";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -79,5 +80,39 @@ describe("annulation d'un plein de mission", { timeout: 120000 }, () => {
     expect(row.deletedAt).toBeNull();
     expect(row.cancellationReason).toBeNull();
     expect(Number((await missionRow(mission.id)).actualFuelCost)).toBe(2000);
+  });
+
+  it("solde du budget et annulation en parallèle : l'un des deux passe seul, jamais budget soldé et plein annulé sans 409", async () => {
+    for (let round = 0; round < 3; round += 1) {
+      const { admin, mission, record } = await missionWithRecord("1500.00", 2);
+      await db.update(missions).set({ status: "completed" }).where(eq(missions.id, mission.id));
+      const [budget] = await db
+        .insert(missionBudgets)
+        .values({
+          missionId: mission.id,
+          budgetDate: "2026-11-10",
+          fuelLiters: "2",
+          fuelUnitPrice: "750",
+          fuelAmount: "1500",
+          fdrAmount: "0",
+          totalAmount: "1500",
+          status: "disbursed",
+        })
+        .returning();
+
+      const [cancelled, settled] = await Promise.allSettled([
+        service.cancelFuelRecord(record.id, { id: admin.id, role: "admin" }, "Course avec le solde"),
+        settleMissionBudget(budget.id, admin.id),
+      ]);
+
+      const [row] = await db.select().from(fuelRecords).where(eq(fuelRecords.id, record.id));
+      const [after] = await db.select().from(missionBudgets).where(eq(missionBudgets.id, budget.id));
+      const cancelOk = cancelled.status === "fulfilled";
+      if (!cancelOk) expect(cancelled.reason).toMatchObject({ status: 409, message: FUEL_RECORD_BUDGET_SETTLED_MESSAGE });
+      // Invariant : un plein annulé sans 409 implique l'annulation passée avant le solde, jamais après.
+      expect(row.deletedAt !== null).toBe(cancelOk);
+      expect(settled.status === "rejected" ? String((settled.reason as Error).message) : "ok").toBe("ok");
+      expect(after.settledAt).not.toBeNull();
+    }
   });
 });

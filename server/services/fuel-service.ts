@@ -1,6 +1,6 @@
 import { db } from "../db";
-import { fuelRecords, missionBudgets, vehicles, type FuelRecord, type InsertFuelRecord } from "@shared/schema";
-import { eq, desc, count, sum, avg, and, isNull, isNotNull } from "drizzle-orm";
+import { fuelRecords, missionBudgets, missions, vehicles, type FuelRecord, type InsertFuelRecord } from "@shared/schema";
+import { eq, desc, count, sum, avg, and, isNull } from "drizzle-orm";
 import { lockFuelCard } from "../lib/fuel-card-lock";
 import { reverseFuelLink } from "./treasury-links";
 import { AppError } from "../lib/app-error";
@@ -15,7 +15,9 @@ import {
   FUEL_RECORD_CANCEL_NOT_VALIDATED_MESSAGE,
   FUEL_RECORD_VALIDATED_DELETE_MESSAGE,
   FUEL_RECORD_VALIDATED_EDIT_MESSAGE,
+  FUEL_RECORD_CANCEL_REASON_MAX_LENGTH,
   FUEL_RECORD_CANCEL_REASON_MIN_LENGTH,
+  isMissionBudgetSettled,
   canCancelFuelRecord,
   isFuelRecordValidated,
 } from "@shared/constants/fuel-record-cancel";
@@ -123,6 +125,9 @@ export class FuelService {
       throw new AppError(401, "Authentification requise pour annuler un plein.");
     }
     const trimmed = typeof reason === "string" ? reason.trim() : "";
+    if (trimmed.length > FUEL_RECORD_CANCEL_REASON_MAX_LENGTH) {
+      throw new AppError(400, "Le motif d'annulation est limité à 500 caractères.");
+    }
     if (trimmed.length < FUEL_RECORD_CANCEL_REASON_MIN_LENGTH) {
       throw new AppError(400, "Le motif d'annulation est obligatoire (3 caractères au minimum).");
     }
@@ -139,12 +144,17 @@ export class FuelService {
       if (!isFuelRecordValidated(record)) throw new AppError(409, FUEL_RECORD_CANCEL_NOT_VALIDATED_MESSAGE);
 
       if (record.missionId !== null) {
-        const [settled] = await tx
-          .select({ id: missionBudgets.id })
+        // Même ordre que le solde (mission, puis budget) : le trigger du plein met à jour la mission, un
+        // verrou pris dans l'autre sens fait un interblocage. Le solde en cours se termine avant nous.
+        await tx.select({ id: missions.id }).from(missions).where(eq(missions.id, record.missionId)).for("update");
+        // Verrou pris sans condition : le solde (FOR UPDATE) attend cette lecture, ou l'inverse.
+        // Filtrer sur settled_at avant le verrou ne verrouillerait rien tant que le budget n'est pas soldé.
+        const [budget] = await tx
+          .select({ id: missionBudgets.id, settledAt: missionBudgets.settledAt })
           .from(missionBudgets)
-          .where(and(eq(missionBudgets.missionId, record.missionId), isNotNull(missionBudgets.settledAt)))
+          .where(eq(missionBudgets.missionId, record.missionId))
           .for("share");
-        if (settled) throw new AppError(409, FUEL_RECORD_BUDGET_SETTLED_MESSAGE);
+        if (budget && isMissionBudgetSettled(budget)) throw new AppError(409, FUEL_RECORD_BUDGET_SETTLED_MESSAGE);
       }
 
       const now = new Date();

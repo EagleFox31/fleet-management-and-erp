@@ -19,6 +19,12 @@ export const FUEL_RECORD_ALREADY_REMOVED_MESSAGE =
 export const FUEL_RECORD_CANCEL_FORBIDDEN_MESSAGE =
   "Vous n'avez pas le droit d'annuler ce plein.";
 export const FUEL_RECORD_CANCEL_REASON_MIN_LENGTH = 3;
+export const FUEL_RECORD_CANCEL_REASON_MAX_LENGTH = 500;
+
+/** Budget de mission soldé : `settled_at` posé (par le seul chemin de solde, mission-budgets-service). */
+export function isMissionBudgetSettled(budget: { settledAt?: Date | string | null }): boolean {
+  return budget.settledAt != null;
+}
 
 export function isFuelRecordValidated(record: { validationStatus?: string | null }): boolean {
   return record.validationStatus === "validated";
@@ -29,5 +35,6 @@ export const canCancelFuelRecord = canDeleteFuelRecord;
 
 /** Corps de POST /api/fuel-records/:id/cancel. */
 export const fuelRecordCancelSchema = z.object({
-  reason: z.string().trim().min(FUEL_RECORD_CANCEL_REASON_MIN_LENGTH, "Le motif d'annulation est obligatoire (3 caractères au minimum)."),
+  reason: z.string().trim().min(FUEL_RECORD_CANCEL_REASON_MIN_LENGTH, "Le motif d'annulation est obligatoire (3 caractères au minimum).")
+    .max(FUEL_RECORD_CANCEL_REASON_MAX_LENGTH, "Le motif d'annulation est limité à 500 caractères."),
 });
