@@ -1,8 +1,8 @@
-import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, notInArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { assignments, missionOperations, missions, vehicles } from "@shared/schema";
-import { ACTIVE_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
+import { VOID_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
 import {
   OPERATION_RECAP_STATUSES,
   recapStatusOf,
@@ -44,7 +44,7 @@ export async function listMissionOperations(filter: MissionOperationsFilter): Pr
     LEFT JOIN LATERAL (
       SELECT a.trailer_id FROM assignments a
       WHERE a.mission_id = m.id AND a.trailer_id IS NOT NULL
-        AND a.status IN (${sql.join(ACTIVE_ASSIGNMENT_STATUSES.map((s) => sql`${s}`), sql`, `)})
+        AND a.status NOT IN (${sql.join(VOID_ASSIGNMENT_STATUSES.map((s) => sql`${s}`), sql`, `)})
       ORDER BY a.id DESC LIMIT 1
     ) att ON TRUE
     LEFT JOIN LATERAL (
@@ -104,12 +104,12 @@ function valuesOf(body: MissionOperationBody) {
   return values;
 }
 
-/** Remorque attelée à l'affectation active la plus récente de la mission, s'il y en a une. */
-async function activeAssignmentTrailer(missionId: number): Promise<number | null> {
+/** Remorque de l'affectation non annulée la plus récente (encore visible une fois la mission terminée). */
+async function liveAssignmentTrailer(missionId: number): Promise<number | null> {
   const [a] = await db
     .select({ trailerId: assignments.trailerId })
     .from(assignments)
-    .where(and(eq(assignments.missionId, missionId), isNotNull(assignments.trailerId), inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES])))
+    .where(and(eq(assignments.missionId, missionId), isNotNull(assignments.trailerId), notInArray(assignments.status, [...VOID_ASSIGNMENT_STATUSES])))
     .orderBy(desc(assignments.id))
     .limit(1);
   return a?.trailerId ?? null;
@@ -128,7 +128,7 @@ export async function upsertMissionOperation(missionId: number, body: MissionOpe
     if (!v) throw new AppError(400, "Remorque introuvable.");
   }
   const values = valuesOf(body);
-  const prefill = body.trailerVehicleId === undefined ? await activeAssignmentTrailer(missionId) : null;
+  const prefill = body.trailerVehicleId === undefined ? await liveAssignmentTrailer(missionId) : null;
   const [row] = await db
     .insert(missionOperations)
     .values({ ...values, ...(prefill ? { trailerVehicleId: prefill } : {}), missionId, createdBy: userId, updatedBy: userId })

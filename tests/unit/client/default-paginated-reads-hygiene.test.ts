@@ -53,7 +53,6 @@ const FROZEN: Record<string, number> = {
   "client/src/pages/technicians/index.tsx": 1,
   "client/src/pages/maintenance/gmao-dashboard.tsx": 1,
   "client/src/pages/workshop-manager/dashboard.tsx": 1,
-  "client/src/pages/lot/screens.tsx": 1,
   "client/src/pages/inventory/parts-database.tsx": 1,
   // `getAll` des services et hooks génériques, sans appelant d'écran repéré : à vérifier, pas supprimé.
   "client/src/lib/api-calls.ts": 4,

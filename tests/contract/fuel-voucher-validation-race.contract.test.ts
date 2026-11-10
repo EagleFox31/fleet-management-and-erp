@@ -45,7 +45,8 @@ async function shownVersion(id: number): Promise<string> {
   expect(res.status).toBe(200);
   const row = fuelVouchersResponseSchema.parse(res.body).find((v) => v.id === id);
   expect(row).toBeDefined();
-  return row!.version;
+  expect(row!.version).toBeDefined();
+  return row!.version as string;
 }
 
 const statusOf = async (id: number) =>
@@ -121,5 +122,15 @@ describe("POST /api/fuel-vouchers/:id/validate : contrôle de version (F3)", { t
     expect((await call("POST", `/api/fuel-vouchers/${record.id}/validate`, { version: "x".repeat(200) })).status).toBe(400);
     expect((await statusOf(record.id)).s).toBe("pending");
     expect((await call("POST", `/api/fuel-vouchers/${record.id}/validate`)).status).toBe(200);
+  });
+
+  it("bon annulé (suppression douce) ou inconnu : 404 lisible, jamais 409, rien n'est validé", async () => {
+    const record = await pendingRecord();
+    await db.update(fuelRecords).set({ deletedAt: new Date() }).where(eq(fuelRecords.id, record.id));
+    const cancelled = await call("POST", `/api/fuel-vouchers/${record.id}/validate`);
+    expect(cancelled.status).toBe(404);
+    expect(cancelled.body.message).not.toBe(FUEL_VOUCHER_STALE_MESSAGE);
+    expect((await statusOf(record.id)).s).toBe("pending");
+    expect((await call("POST", "/api/fuel-vouchers/2147483000/validate")).status).toBe(404);
   });
 });

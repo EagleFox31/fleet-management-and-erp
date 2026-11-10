@@ -3443,7 +3443,16 @@ export default function MissionDetailsPage() {
                 data-testid="select-edit-vehicle"
               >
                 <option value="">Non assigné</option>
-                {(availableVehicles || []).map((vehicle: any) => (
+                {/* Valeur héritée absente de la liste (remorque, véhicule non opérationnel) : affichée telle quelle, pas un faux « Non assigné ». */}
+                {editForm.vehicleId &&
+                  !(availableVehicles || []).some((vehicle: any) => String(vehicle.id) === editForm.vehicleId && !isTrailerVehicleType(vehicle.vehicleType)) && (
+                    <option value={editForm.vehicleId}>
+                      {mission?.assignment?.vehicle?.registrationNumber ?? `Véhicule ${editForm.vehicleId}`} (actuel, indisponible)
+                    </option>
+                  )}
+                {(availableVehicles || [])
+                  .filter((vehicle: any) => !isTrailerVehicleType(vehicle.vehicleType))
+                  .map((vehicle: any) => (
                   <option key={vehicle.id} value={vehicle.id}>
                     {vehicle.registrationNumber} - {vehicle.brand} {vehicle.model}
                   </option>

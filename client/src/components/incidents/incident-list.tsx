@@ -18,7 +18,7 @@ export function IncidentList({ onRowClick }: { onRowClick?: (incident: Incident)
 
   const columns: PremiumDataTableColumn<Incident>[] = [
     { id: "createdAt", header: "Déclarée le", cell: (i) => formatDate(i.createdAt) },
-    { id: "vehicle", header: "Véhicule", cell: (i) => `#${i.vehicleId}` },
+    { id: "vehicle", header: "Véhicule", cell: (i) => i.vehicleRegistration ?? `Véhicule ${i.vehicleId}` },
     { id: "description", header: "Description", cell: (i) => i.description },
     { id: "reportedBy", header: "Par", cell: (i) => i.reportedByName ?? "—" },
     {
