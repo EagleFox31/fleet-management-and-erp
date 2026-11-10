@@ -143,7 +143,13 @@ describe("pin-login : le compteur de verrouillage suit l'identifiant canonique (
       "SELECT username_normalized FROM login_attempts_by_username WHERE username_normalized LIKE $1",
       [`pin:%${driver.id}`],
     );
-    expect(rows.map((r) => r.username_normalized).filter((k) => k.endsWith(String(driver.id)))).toEqual([`pin:${driver.id}`]);
+    // Le LIKE ramasse aussi la clé d'un autre identifiant qui se termine par les mêmes chiffres
+    // (ex. pin:999999147 pour le compte 147) : on ne garde que les variantes de CET identifiant
+    // (espaces, zéros en tête), pas les identifiants plus longs.
+    const mine = rows
+      .map((r) => r.username_normalized as string)
+      .filter((k) => k.slice(4).trim().replace(/^0+/, "") === String(driver.id));
+    expect(mine).toEqual([`pin:${driver.id}`]);
   });
 });
 
