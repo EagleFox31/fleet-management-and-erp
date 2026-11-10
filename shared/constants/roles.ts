@@ -45,6 +45,13 @@ export function canReadDriverPersonalData(role: string | null | undefined): bool
 }
 
 /**
+ * Lecteur (`viewer`) : lecture seule sur tout le personnel. La garde `viewerReadOnlyGuard`
+ * (server/middleware) refuse toute écriture ; seules ces routes lui restent ouvertes, parce
+ * qu'elles n'écrivent rien de métier. Chemins tels qu'Express les voit sous `/api`.
+ */
+export const VIEWER_WRITE_ALLOWED = [{ method: "POST", path: "/auth/logout" }] as const;
+
+/**
  * Rôle applicatif — dérivé du schéma, jamais recopié.
  *
  * Il existait trois déclarations locales et divergentes de ce type
@@ -74,6 +81,7 @@ export const ROLE_LABELS: Record<AppRole, string> = {
   logistics: "Logisticien",
   warehouse: "Magasinier",
   management: "Direction",
+  viewer: "Lecteur",
   client: "Client",
   driver: "Chauffeur",
   user: "Utilisateur",

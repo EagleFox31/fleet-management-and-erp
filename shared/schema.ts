@@ -21,7 +21,11 @@ export const users = pgTable("users", {
       "workshop_manager", // Chef d'atelier - Gestion équipe, planning
       "technician",        // Technicien/Maintenancier - Interventions, pneumatiques
       "secretary",         // Secrétaire - Saisie, documentation, facturation
+<<<<<<< HEAD
       "accountant",        // Comptable - Règlements, trésorerie, encaissements, carte carburant (consultation)
+=======
+      "viewer",        // Lecteur - Lecture seule sur le personnel, aucune saisie
+>>>>>>> 4a6b5662 (Rôle lecteur : garde lecture seule globale, écran, menu, landing, contrat parcourant les écritures)
       "logistics",         // Logisticien - Planification missions, FDR
       "warehouse",         // Magasinier - Stock, alertes CDE
       "management",        // Direction - Vue exécutive lecture seule
