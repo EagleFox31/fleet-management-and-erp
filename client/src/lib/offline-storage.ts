@@ -90,7 +90,7 @@ export async function purgeOfflineSession(
   setActiveOfflineUserId(null);
   cancelScheduledReplay();
   // Le marqueur de reprise part en premier : plus aucun démarrage hors ligne ne rouvre ce compte.
-  await offlineResume.clear().catch(logResumeFailure);
+  await offlineResume.clear(active).catch(logResumeFailure);
   // Les autres onglets de l'appareil se purgent aussi (la file est partagée entre onglets).
   if (options.broadcast !== false) sessionChannel.post({ type: "logout" });
   try {
@@ -124,7 +124,7 @@ export async function expireOfflineSession(queryClient: QueryClient, userId: num
   queryClient.clear();
   // Session expirée : plus de lecture hors ligne pour ce compte (la file d'envois est gardée).
   await offlineScope.dropUserReadCache(userId);
-  await offlineResume.clear().catch(logResumeFailure);
+  await offlineResume.clear(userId).catch(logResumeFailure);
   // Envois gardés : l'utilisateur est prévenu qu'il doit se reconnecter pour qu'ils partent.
   void announceKeptSends(userId);
 }

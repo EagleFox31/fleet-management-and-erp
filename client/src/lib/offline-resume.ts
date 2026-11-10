@@ -21,6 +21,12 @@ import { OFFLINE_READ_PROFILES, type OfflineReadProfile } from "@/lib/offline-us
 export const RESUME_DB = "fleetos-offline-resume";
 export const RESUME_KEY = "offline-resume";
 export const RESUME_VERSION = 1;
+/**
+ * Pierre tombale (localStorage) : posée quand la suppression du marqueur échoue (IndexedDB
+ * indisponible). Elle ne contient que `{ userId }` (ni jeton ni email), bloque toute restauration
+ * et fait retenter la purge au démarrage suivant.
+ */
+export const RESUME_REVOKED_KEY = "fleetos-offline-resume-revoked";
 /** Même durée que la copie de lecture du chauffeur (`DRIVER_CACHE_MAX_AGE_MS`). */
 export const RESUME_TTL_MS = 72 * 60 * 60 * 1000;
 /** Un dernier contact plus loin dans le futur que ceci trahit une horloge reculée : marqueur refusé. */
@@ -31,6 +37,13 @@ export interface ResumeKv {
   get<T>(db: string, key: string): Promise<T | undefined>;
   set(db: string, key: string, value: unknown): Promise<void>;
   del(db: string, key: string): Promise<void>;
+}
+
+/** Accès à la pierre tombale ; chaque méthode peut lever (stockage indisponible). */
+export interface RevokedStore {
+  read(): string | null;
+  write(value: string): void;
+  remove(): void;
 }
 
 export type FlagSnapshot = Record<string, boolean>;
@@ -108,7 +121,11 @@ function snapshot(flags: FlagSnapshot | null | undefined, fallback?: FlagSnapsho
   return out;
 }
 
-export function createOfflineResume(kv: ResumeKv, profiles: readonly OfflineReadProfile[] = OFFLINE_READ_PROFILES) {
+export function createOfflineResume(
+  kv: ResumeKv,
+  profiles: readonly OfflineReadProfile[] = OFFLINE_READ_PROFILES,
+  revoked: RevokedStore | null = null,
+) {
   // Les opérations passent l'une après l'autre : une purge lancée après une écriture l'emporte,
   // une écriture lancée après une purge repart d'un magasin vide.
   let chain: Promise<unknown> = Promise.resolve();
@@ -121,6 +138,36 @@ export function createOfflineResume(kv: ResumeKv, profiles: readonly OfflineRead
   const readRaw = () => kv.get<unknown>(RESUME_DB, RESUME_KEY);
   const drop = () => kv.del(RESUME_DB, RESUME_KEY);
 
+  // Pierre tombale : jamais d'exception, un stockage illisible compte comme « pas de pierre ».
+  const isRevoked = (): boolean => {
+    try {
+      return !!revoked?.read();
+    } catch {
+      return false;
+    }
+  };
+  const lift = (): void => {
+    try {
+      revoked?.remove();
+    } catch {
+      /* retentée au prochain passage */
+    }
+  };
+  /** Supprime le marqueur ; si IndexedDB refuse, pose la pierre tombale (seule trace : un userId). */
+  async function revokeMarker(userId: number | null): Promise<void> {
+    try {
+      await drop();
+      lift();
+    } catch (err) {
+      if (!revoked) throw err;
+      try {
+        revoked.write(JSON.stringify({ userId }));
+      } catch {
+        throw err;
+      }
+    }
+  }
+
   return {
     /**
      * Après une réponse réseau réussie qui identifie le compte (`/api/auth/me`, connexion).
@@ -132,7 +179,7 @@ export function createOfflineResume(kv: ResumeKv, profiles: readonly OfflineRead
       return run(async () => {
         const profile = resumeProfileOf(user.role, profiles);
         if (!profile || !Number.isInteger(user.id) || user.id <= 0) {
-          await drop();
+          await revokeMarker(null);
           return false;
         }
         const previous = parseMarker(await readRaw());
@@ -146,6 +193,8 @@ export function createOfflineResume(kv: ResumeKv, profiles: readonly OfflineRead
           flags: snapshot(flags, fallback),
         };
         await kv.set(RESUME_DB, RESUME_KEY, marker);
+        // Connexion en ligne réussie : le marqueur révoqué est remplacé, la pierre tombale n'a plus d'objet.
+        lift();
         return true;
       });
     },
@@ -156,6 +205,7 @@ export function createOfflineResume(kv: ResumeKv, profiles: readonly OfflineRead
      */
     touch(userId: number, flags: FlagSnapshot | null, now: number = Date.now()): Promise<boolean> {
       return run(async () => {
+        if (isRevoked()) return false;
         const raw = await readRaw();
         if (raw === undefined) return false;
         const marker = parseMarker(raw);
@@ -181,6 +231,11 @@ export function createOfflineResume(kv: ResumeKv, profiles: readonly OfflineRead
      */
     read(now: number = Date.now()): Promise<ResumeGrant | null> {
       return run(async () => {
+        if (isRevoked()) {
+          // Révoqué : aucune restauration, et la purge est retentée (pierre levée si elle aboutit).
+          await revokeMarker(null).catch(() => undefined);
+          return null;
+        }
         const raw = await readRaw();
         if (raw === undefined) return null;
         const verdict = judge(raw, now, profiles);
@@ -202,13 +257,15 @@ export function createOfflineResume(kv: ResumeKv, profiles: readonly OfflineRead
     /** Échéance pour l'affichage (bandeau), sans aucun effet de bord. */
     peek(now: number = Date.now()): Promise<{ expiresAt: number } | null> {
       return run(async () => {
+        if (isRevoked()) return null;
         const verdict = judge(await readRaw(), now, profiles);
         return verdict.ok ? { expiresAt: verdict.marker.expiresAt } : null;
       });
     },
 
-    clear(): Promise<void> {
-      return run(drop);
+    /** Révocation (déconnexion, 401) : `userId` du compte révoqué, pour la pierre tombale si IndexedDB refuse. */
+    clear(userId: number | null = null): Promise<void> {
+      return run(() => revokeMarker(userId));
     },
 
     /** Événement d'un autre onglet : le marqueur d'un autre compte est périmé, celui du même reste. */

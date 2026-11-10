@@ -13,3 +13,8 @@
 **Tester.** `node node_modules/vitest/vitest.mjs run tests/unit/client --reporter=dot` (fichiers `offline-resume*.test.ts`, `session-resume-offline.test.ts`, `session-check.test.ts`).
 
 **Notes.** Le drapeau « offline-read » du brief n'existe pas : le marqueur garde `driver-offline` et `offline-writes`, tous deux requis. Après restauration, l'écran d'accueil attend encore `/me` (affichage du tableau de bord hors ligne : lot suivant).
+
+**Suite (décision 0a, déconnexion sans réseau).**
+- À la déconnexion, le marqueur est supprimé en premier (`purgeOfflineSession`, avant `postLogout`) : purge IndexedDB locale, indépendante du réseau.
+- Si la suppression IndexedDB échoue : pierre tombale `fleetos-offline-resume-revoked` dans localStorage, contenu `{ userId }` seulement. Elle bloque toute restauration (`read`, `peek`, `touch`). Le démarrage suivant retente la purge du marqueur et lève la pierre si elle aboutit. Une connexion en ligne réussie (`record`) remplace le marqueur et lève aussi la pierre, y compris celle d'un autre compte. Même mécanisme sur 401.
+- Tests : `offline-resume-storage.test.ts`, bloc « pierre tombale » (rouge constaté : 6 échecs sans le correctif, puis vert).

@@ -1,7 +1,11 @@
 import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const idb = vi.hoisted(() => ({ dbs: new Map<string, Map<string, unknown>>() }));
+const idb = vi.hoisted(() => ({
+  dbs: new Map<string, Map<string, unknown>>(),
+  // Suppression IndexedDB en panne, pour la pierre tombale.
+  failDelOf: null as string | null,
+}));
 
 vi.mock("idb-keyval", () => ({
   createStore: (db: string) => db,
@@ -14,7 +18,10 @@ vi.mock("idb-keyval", () => ({
     if (!idb.dbs.has(name)) idb.dbs.set(name, new Map());
     idb.dbs.get(name)!.set(key, structuredClone(value));
   },
-  del: async (key: string, store?: string) => void idb.dbs.get(store ?? "keyval-store")?.delete(key),
+  del: async (key: string, store?: string) => {
+    if (idb.failDelOf !== null && store === idb.failDelOf) throw new Error("IndexedDB indisponible");
+    idb.dbs.get(store ?? "keyval-store")?.delete(key);
+  },
   clear: async (store?: string) => void idb.dbs.get(store ?? "keyval-store")?.clear(),
 }));
 vi.mock("@/hooks/use-toast", () => ({ toast: vi.fn() }));
@@ -37,7 +44,7 @@ import {
   isNetworkSuccess,
 } from "@/lib/offline-storage";
 import { offlineResume } from "@/lib/offline-kv";
-import { RESUME_DB, RESUME_KEY, RESUME_TTL_MS } from "@/lib/offline-resume";
+import { RESUME_DB, RESUME_KEY, RESUME_REVOKED_KEY, RESUME_TTL_MS } from "@/lib/offline-resume";
 import { getActiveOfflineUserId, setActiveOfflineUserId } from "@/lib/offline-user-scope";
 
 const ME = "/api/drivers/me";
@@ -70,7 +77,20 @@ function coldStart() {
   return new QueryClient();
 }
 
+/** localStorage factice : la pierre tombale y vit. */
+const lsData = new Map<string, string>();
+const fakeWindow = {
+  localStorage: {
+    getItem: (k: string) => lsData.get(k) ?? null,
+    setItem: (k: string, v: string) => void lsData.set(k, v),
+    removeItem: (k: string) => void lsData.delete(k),
+  },
+};
+
 beforeEach(() => {
+  vi.stubGlobal("window", fakeWindow);
+  lsData.clear();
+  idb.failDelOf = null;
   idb.dbs.clear();
   setActiveOfflineUserId(null);
 });
@@ -268,5 +288,77 @@ describe("preuve de contact réseau", () => {
     expect(isNetworkSuccess({ type: "updated", action: { type: "success", manual: true } })).toBe(false);
     expect(isNetworkSuccess({ type: "updated", action: { type: "error" } })).toBe(false);
     expect(isNetworkSuccess({ type: "added" })).toBe(false);
+  });
+});
+
+describe("pierre tombale : suppression IndexedDB en échec à la déconnexion", () => {
+  it("déconnexion hors ligne, suppression refusée, redémarrage sans réseau : aucune restauration", async () => {
+    const client = await onlineSession(7);
+    idb.failDelOf = RESUME_DB;
+    await purgeOfflineSession(client);
+    // Le marqueur est resté dans IndexedDB, mais la pierre tombale le révoque.
+    expect(markerRaw()).toBeDefined();
+    expect(JSON.parse(lsData.get(RESUME_REVOKED_KEY)!)).toEqual({ userId: 7 });
+    const cold = coldStart();
+    expect(await resumeOfflineRead(cold, T0 + 1000)).toBe(false);
+    expect(getActiveOfflineUserId()).toBeNull();
+    expect(cold.getQueryCache().getAll()).toEqual([]);
+  });
+
+  it("le démarrage suivant retente la purge : marqueur supprimé, pierre levée quand elle aboutit", async () => {
+    const client = await onlineSession(7);
+    idb.failDelOf = RESUME_DB;
+    await purgeOfflineSession(client);
+    expect(await resumeOfflineRead(coldStart(), T0 + 1000)).toBe(false);
+    expect(lsData.has(RESUME_REVOKED_KEY)).toBe(true);
+    idb.failDelOf = null;
+    expect(await resumeOfflineRead(coldStart(), T0 + 2000)).toBe(false);
+    expect(markerRaw()).toBeUndefined();
+    expect(lsData.has(RESUME_REVOKED_KEY)).toBe(false);
+  });
+
+  it("la pierre tombale ne contient que le userId", async () => {
+    const client = await onlineSession(7);
+    idb.failDelOf = RESUME_DB;
+    await purgeOfflineSession(client);
+    expect(Object.keys(JSON.parse(lsData.get(RESUME_REVOKED_KEY)!))).toEqual(["userId"]);
+  });
+
+  it("pierre tombale d'un autre userId : un autre compte qui se reconnecte en ligne n'est pas bloqué, la pierre est effacée", async () => {
+    const clientA = await onlineSession(7);
+    idb.failDelOf = RESUME_DB;
+    await purgeOfflineSession(clientA);
+    idb.failDelOf = null;
+    expect(lsData.has(RESUME_REVOKED_KEY)).toBe(true);
+    await onlineSession(8);
+    expect(lsData.has(RESUME_REVOKED_KEY)).toBe(false);
+    expect(markerRaw()).toMatchObject({ userId: 8 });
+    expect(await resumeOfflineRead(coldStart(), T0 + 1000)).toBe(true);
+    expect(getActiveOfflineUserId()).toBe(8);
+  });
+
+  it("suppression qui aboutit : pas de pierre tombale", async () => {
+    const client = await onlineSession(7);
+    await purgeOfflineSession(client);
+    expect(lsData.has(RESUME_REVOKED_KEY)).toBe(false);
+    expect(markerRaw()).toBeUndefined();
+  });
+
+  it("401 avec suppression refusée : même pierre tombale", async () => {
+    const client = await onlineSession(7);
+    idb.failDelOf = RESUME_DB;
+    await expireOfflineSession(client, 7);
+    expect(JSON.parse(lsData.get(RESUME_REVOKED_KEY)!)).toEqual({ userId: 7 });
+    expect(await resumeOfflineRead(coldStart(), T0 + 1000)).toBe(false);
+  });
+
+  it("pierre tombale : aucun rafraîchissement d'échéance", async () => {
+    const client = await onlineSession(7);
+    idb.failDelOf = RESUME_DB;
+    await purgeOfflineSession(client);
+    setActiveOfflineUserId(7);
+    const before = structuredClone(markerRaw());
+    await refreshOfflineResume(client, T0 + 60_000);
+    expect(markerRaw()).toEqual(before);
   });
 });
