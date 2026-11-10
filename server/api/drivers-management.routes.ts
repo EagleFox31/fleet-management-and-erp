@@ -3,14 +3,14 @@ import { z } from "zod";
 import { and, eq, desc, isNull, like } from "drizzle-orm";
 import { db } from "../db";
 import { drivers, missions, assignments, clients, vehicles, users } from "@shared/schema";
-import { authenticate, isAdmin, isDriverManager } from "../middleware/auth";
+import { authenticate, authorize, isAdmin, isDriverManager } from "../middleware/auth";
 import { cpcTrainingService } from "../services/cpc-training-service";
 import { AppError } from "../lib/app-error";
 import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { driverEventScopes } from "../lib/driver-realtime";
 import { toFieldErrors } from "@shared/errors";
-import { DRIVER_DIRECTORY_READ_ROLES, type AppRole } from "@shared/constants/roles";
+import { DRIVER_DIRECTORY_READ_ROLES, MISSION_READ_ROLES, type AppRole } from "@shared/constants/roles";
 import { toExpiryDateOnly } from "@shared/constants/expiry-day";
 import { bodyIdSchema } from "@shared/contracts/common";
 import { CPC_TRAINING_DATE_FUTURE_MESSAGE, isCpcTrainingDateInFuture } from "../lib/driver-cpc-input";
@@ -132,8 +132,10 @@ function broadcastDriverUpdate(
   });
 }
 
-// GET /api/drivers/me — Profil chauffeur de l'utilisateur connecté + ses missions
-router.get("/me", async (req, res, next) => {
+// GET /api/drivers/me — Profil chauffeur de l'utilisateur connecté + ses missions.
+// Lecteurs des missions seulement : une fiche peut être liée à n'importe quel compte (`userId`), et un
+// technicien ou un client lié recevrait sinon adresses et clients de missions qu'il n'a pas à lire.
+router.get("/me", authorize([...MISSION_READ_ROLES]), async (req, res, next) => {
   try {
     const userId = req.session?.userId;
     if (!userId) return res.status(401).json({ message: "Non authentifié" });
