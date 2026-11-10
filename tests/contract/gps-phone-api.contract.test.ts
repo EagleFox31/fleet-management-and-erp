@@ -267,6 +267,54 @@ describe("plafond de points par mission", { timeout: 120000 }, () => {
     expect(res.status, JSON.stringify(res.body)).toBe(429);
     expect(JSON.stringify(res.body)).not.toMatch(/violates|constraint|syntax/i);
   });
+
+  it("le rejeu d'un paquet au plafond répond « doublons » (200), pas 429 ; seul un point nouveau est refusé", async () => {
+    const [m] = await db.insert(missions).values({ orderNumber: uniqueTestToken("MIS"), pickupAddress: "TEST A", deliveryAddress: "TEST B", status: "in_progress" } as any).returning();
+    missionIds.push(m.id);
+    await db.insert(assignments).values({ missionId: m.id, vehicleId, driverId: driverAId, status: "in_progress", startedAt: new Date(Date.now() - 30 * 60_000) } as any);
+    const known = point({ recordedAt: minutesAgo(5) });
+    await db.execute(sql`
+      INSERT INTO vehicle_positions (vehicle_id, mission_id, driver_id, source, submitted_by, client_point_id, recorded_at, lat, lng)
+      SELECT ${vehicleId}, ${m.id}, ${driverAId}, 'phone', ${session.userIdOf("driverA")}, gen_random_uuid(), now() - (g * interval '1 second') - interval '10 minutes', 4.05, 9.7
+      FROM generate_series(1, 49999) g`);
+    await db.execute(sql`
+      INSERT INTO vehicle_positions (vehicle_id, mission_id, driver_id, source, submitted_by, client_point_id, recorded_at, lat, lng)
+      VALUES (${vehicleId}, ${m.id}, ${driverAId}, 'phone', ${session.userIdOf("driverA")}, ${known.clientPointId}::uuid, ${known.recordedAt}::timestamptz, 4.05, 9.7)`);
+
+    const replay = await session.call("POST", `/api/driver/missions/${m.id}/positions`, { actor: "driverA", body: { points: [known, known] } });
+    expect(replay.status, JSON.stringify(replay.body)).toBe(200);
+    expect(replay.body).toMatchObject({ accepted: 0, duplicates: 2 });
+    const mixed = await session.call("POST", `/api/driver/missions/${m.id}/positions`, { actor: "driverA", body: { points: [known, point()] } });
+    expect(mixed.status, JSON.stringify(mixed.body)).toBe(429);
+  });
+});
+
+describe("mission annulée en route", { timeout: 120000 }, () => {
+  it("points relevés avant l'annulation (+ 2 min) acceptés, après rejetés ; chauffeur retiré d'une mission qui continue : 403", async () => {
+    const mk = async (missionStatus: string, assignmentStatus: string, cancelledMinAgo: number | null) => {
+      const [m] = await db.insert(missions).values({
+        orderNumber: uniqueTestToken("MIS"), pickupAddress: "TEST A", deliveryAddress: "TEST B", status: missionStatus,
+        ...(cancelledMinAgo === null ? {} : { cancelledAt: new Date(Date.now() - cancelledMinAgo * 60_000) }),
+      } as any).returning();
+      missionIds.push(m.id);
+      await db.insert(assignments).values({ missionId: m.id, vehicleId, driverId: driverAId, status: assignmentStatus, startedAt: new Date(Date.now() - 40 * 60_000) } as any);
+      return m.id;
+    };
+    const cancelledId = await mk("cancelled", "cancelled", 10);
+    const before = await session.call("POST", `/api/driver/missions/${cancelledId}/positions`, { actor: "driverA", body: { points: [point({ recordedAt: minutesAgo(15) }), point({ recordedAt: minutesAgo(9) })] } });
+    expect(before.status, JSON.stringify(before.body)).toBe(201);
+    expect(before.body).toMatchObject({ accepted: 2, rejected: 0 });
+    const after = await session.call("POST", `/api/driver/missions/${cancelledId}/positions`, { actor: "driverA", body: { points: [point({ recordedAt: minutesAgo(5) })] } });
+    expect(after.status, JSON.stringify(after.body)).toBe(200);
+    expect(after.body).toMatchObject({ accepted: 0, rejected: 1 });
+    expect(after.body.rejections[0].reason).toBe("out_of_window");
+    const other = await session.call("POST", `/api/driver/missions/${cancelledId}/positions`, { actor: "driverB", body: { points: [point({ recordedAt: minutesAgo(15) })] } });
+    expect(other.status).toBe(403);
+
+    const removedId = await mk("in_progress", "cancelled", null);
+    const removed = await session.call("POST", `/api/driver/missions/${removedId}/positions`, { actor: "driverA", body: { points: [point()] } });
+    expect(removed.status).toBe(403);
+  });
 });
 
 describe("lecture : dernière position et trace", { timeout: 120000 }, () => {
@@ -301,8 +349,12 @@ describe("lecture : dernière position et trace", { timeout: 120000 }, () => {
 
 describe("points A/B des missions", { timeout: 120000 }, () => {
   it("PATCH /geo : hub valide (coordonnées du hub), point libre, effacement ; hub inconnu et demi-point 400 ; rôles", async () => {
+    broadcasts.length = 0;
     const hub = await session.call("PATCH", `/api/missions/${missionId}/geo`, { actor: "logistics", body: { pickup: { hubCode: "douala" }, delivery: { lat: 3.87, lng: 11.52 } } });
     expect(hub.status, JSON.stringify(hub.body)).toBe(200);
+    const updated = broadcasts.filter((b) => b.event === "mission_updated");
+    expect(updated.length).toBeGreaterThanOrEqual(1);
+    expect(updated[0].data).toMatchObject({ entity: "mission", entityId: missionId, payload: { missionId } });
     expect(hub.body.pickupHubCode).toBe("douala");
     expect(hub.body.pickupLat).toBeCloseTo(4.0511);
     const [row] = await db.select().from(missions).where(eq(missions.id, missionId));

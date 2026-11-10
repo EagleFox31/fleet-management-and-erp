@@ -98,6 +98,7 @@ import { LOGIN_BODY_INVALID_MESSAGE, loginRequestSchema } from "@shared/contract
 import { auditWrites } from "../middleware/audit-writes";
 import { AUDIT_CONFIG, CDC_AUDIT_CONFIG } from "../lib/audit-config";
 import { idempotencyGuard } from "../middleware/idempotency-guard";
+import { offlineOwnerGuard } from "../middleware/offline-owner-guard";
 import { retiredVehicleWriteGuard } from "../middleware/retired-vehicle-write-guard";
 import { viewerReadOnlyGuard } from "../middleware/viewer-read-only-guard";
 import { requireFeature } from "../lib/feature-flags";
@@ -161,6 +162,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(auditWrites(CDC_AUDIT_CONFIG));
   // Idempotence des ecritures rejouables (CDC #10b) : routes de IDEMPOTENCY_ROUTES, drapeau
   // `offline-writes` (coupe par defaut), apres la session (req.session.userId).
+  // Proprietaire d'un envoi differe (V5b-2b) : verifie a CHAQUE envoi, avant la reservation de cle.
+  apiRouter.use(offlineOwnerGuard());
   apiRouter.use(idempotencyGuard());
   // Vehicule retire (L3) : ecritures rattachees refusees en 409 pour le personnel, table
   // RETIRED_VEHICLE_WRITE_ROUTES. Montee ici, avant registerRoutes : couvre aussi routes.ts.

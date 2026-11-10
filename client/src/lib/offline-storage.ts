@@ -1,7 +1,9 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { clientLogger } from "@/lib/logger";
+import { applyRestoredQueries } from "@/lib/offline-restore";
 import { pendingServerLogout } from "@/lib/pending-logout";
 import {
+  DRIVER_READ_PROFILE,
   getActiveOfflineUserId,
   setActiveOfflineUserId,
   subscribeActiveOfflineUser,
@@ -12,9 +14,11 @@ import {
   announceKeptSends,
   cancelScheduledReplay,
   enqueueOfflineWrite,
+  isOfflineFlagEnabled,
   replayOnReconnect,
   startOfflineQueueRuntime,
 } from "@/lib/offline-queue";
+import { FEATURE_FLAGS_PATH, isFeatureKey } from "@shared/feature-flags";
 import { releaseReplayGate } from "@/lib/offline-replay-gate";
 import { OFFLINE_QUEUED_MESSAGE } from "@/lib/offline-queue-core";
 import { toast } from "@/hooks/use-toast";
@@ -50,10 +54,16 @@ export interface OfflineAction {
  * change, le cache TanStack du précédent est vidé, ses copies hors ligne et
  * l'ancien format global (propriétaire inconnu) sont détruits.
  */
-export function activateOfflineUser(queryClient: QueryClient, userId: number): void {
+export function activateOfflineUser(
+  queryClient: QueryClient,
+  userId: number,
+  options: { broadcast?: boolean } = {},
+): void {
   if (getActiveOfflineUserId() === userId) return;
   queryClient.clear();
   setActiveOfflineUserId(userId);
+  // Cookie partagé : les autres onglets cessent de rejouer au nom de l'ancien compte.
+  if (options.broadcast !== false) sessionChannel.post({ type: "session-changed", userId });
   void offlineScope.purgeLegacy();
   cancelScheduledReplay();
   // Changement de compte : les copies et les envois en attente de l'autre compte sont détruits (S1).
@@ -106,9 +116,14 @@ export async function expireOfflineSession(queryClient: QueryClient, userId: num
     clientLogger.warn("Annulation des requêtes à l'expiration de session en échec", { err });
   }
   queryClient.clear();
+  // Session expirée : plus de lecture hors ligne pour ce compte (la file d'envois est gardée).
+  await offlineScope.dropUserReadCache(userId);
   // Envois gardés : l'utilisateur est prévenu qu'il doit se reconnecter pour qu'ils partent.
   void announceKeptSends(userId);
 }
+
+/** Lecteur de drapeaux des profils de lecture hors ligne (un drapeau inconnu est éteint). */
+const readFlag = (flag: string): boolean => isFeatureKey(flag) && isOfflineFlagEnabled(flag);
 
 /**
  * Persiste dans IndexedDB les seules requêtes de la liste blanche, dans le
@@ -117,6 +132,7 @@ export async function expireOfflineSession(queryClient: QueryClient, userId: num
 export async function persistQueryClientToIndexedDB(queryClient: QueryClient): Promise<void> {
   const userId = getActiveOfflineUserId();
   if (userId === null) return;
+  const flagsKnown = queryClient.getQueryData([FEATURE_FLAGS_PATH]) !== undefined;
   try {
     await offlineScope.saveCache(
       userId,
@@ -128,6 +144,9 @@ export async function persistQueryClientToIndexedDB(queryClient: QueryClient): P
           dataUpdatedAt: query.state.dataUpdatedAt,
         },
       })),
+      Date.now(),
+      readFlag,
+      { dropIfEmpty: flagsKnown && !DRIVER_READ_PROFILE.flags.every(readFlag) },
     );
   } catch (err) {
     clientLogger.warn("Échec de sauvegarde du cache dans IndexedDB", { err });
@@ -142,19 +161,11 @@ export async function restoreQueryClientFromIndexedDB(queryClient: QueryClient):
   const userId = getActiveOfflineUserId();
   if (userId === null) return 0;
   try {
-    const queries = await offlineScope.loadCache(userId);
+    const queries = await offlineScope.loadCache(userId, Date.now(), readFlag);
     // L'utilisateur a pu changer pendant la lecture : ne rien appliquer.
     if (getActiveOfflineUserId() !== userId) return 0;
 
-    let restoredCount = 0;
-    for (const item of queries) {
-      if (queryClient.getQueryData(item.queryKey) !== undefined) continue;
-      queryClient.setQueryData(item.queryKey, item.state.data, {
-        updatedAt: typeof item.state.dataUpdatedAt === "number" ? item.state.dataUpdatedAt : undefined,
-      });
-      restoredCount++;
-    }
-    return restoredCount;
+    return applyRestoredQueries(queryClient, queries);
   } catch (err) {
     clientLogger.warn("Échec de restauration du cache IndexedDB", { err });
     return 0;
@@ -205,6 +216,11 @@ export function setupOfflinePersistence(queryClient: QueryClient): () => void {
   // Un autre onglet s'est déconnecté : cet onglet se purge aussi, sans réémettre.
   const unsubscribeChannel = sessionChannel.subscribe((message) => {
     if (message.type === "logout") void purgeOfflineSession(queryClient, { broadcast: false });
+    // Un autre compte s'est connecté dans un autre onglet : cet onglet adopte ce compte, ce qui
+    // arrête tout rejeu en cours pour l'ancien (garde `aborted` de la file).
+    if (message.type === "session-changed" && getActiveOfflineUserId() !== message.userId) {
+      activateOfflineUser(queryClient, message.userId, { broadcast: false });
+    }
   });
 
   // Sauvegarde debounced lors des modifications de cache

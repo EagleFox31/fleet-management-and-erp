@@ -3696,3 +3696,17 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - Règle ajoutée à `AGENTS.md` §10.
 - **Leçon généralisée** : un protocole tiers impose son transport ; on ne l'adopte pas avant d'avoir nommé qui peut émettre la requête. Sans jeton CSRF, une écriture exige POST et `application/json` (le navigateur envoie alors une requête préalable CORS), et le client qui ne sait pas faire attend un jeton d'appareil plutôt que d'ouvrir le cookie.
 
+## 2026-11-10 — File hors ligne : le propriétaire vérifié avant la boucle ne couvre pas la boucle (V5b-2b)
+
+- **Contexte** : la file d'écritures différées (V5b-2, #645) contrôlait une fois, avant la boucle de rejeu, que la session ouverte appartenait au propriétaire de la file (`/api/auth/me`). Revue sécurité de #645.
+- **Cause racine** : le cookie de session est partagé entre tous les onglets du navigateur. Onglet 1 rejoue la file du compte A ; dans l'onglet 2, B se connecte. Les envois suivants de A partent avec le cookie de B, une clé neuve, et sont exécutés puis attribués à B. Un contrôle d'identité fait avant une boucle ne vaut que pour l'instant où il est fait.
+- **Classification** : sécurité, attribution d'une écriture à un autre compte (intégrité du stock, du kilométrage, des pannes). Détecté en revue, avant que `offline-writes` soit allumé.
+- **Résolution** :
+  - Chaque envoi porte `X-Offline-Owner` (propriétaire de la file). `server/middleware/offline-owner-guard.ts`, générique (toute écriture portant aussi `Idempotency-Key`, aucun `if` par route), compare à la session et répond 409 `OFFLINE_OWNER_MISMATCH` avant toute écriture ni réservation de clé.
+  - Le client classe ce code en « auth » : boucle arrêtée, file gardée, jamais « À revoir ». Le login diffuse `session-changed` aux autres onglets, qui adoptent le compte et arrêtent leur rejeu.
+  - Même revue : le registre rejouait des routes non protégées (`work_order_note` POST, `odometer_reading` en POST alors que la route protégée est PUT). La liste des routes protégées vit désormais dans `shared/idempotency-routes.ts` ; la file refuse de rejouer automatiquement ce qui n'y figure pas.
+- **Prévention vérifiable** :
+  - `tests/contract/offline-owner-guard.contract.test.ts` : propriétaire différent de la session donne 409 et aucune clé réservée ; propriétaire égal passe ; en-tête absent inchangé. Rouge sans le garde (2 échecs).
+  - `tests/unit/client/offline-queue-core.test.ts` : « bascule de compte pendant la boucle : aucun envoi après le changement », 409 propriétaire classé auth, route non protégée jamais envoyée, envoi trop ancien non rejoué, plafond des 409 « en cours ».
+  - `tests/unit/client/offline-registry-routes.test.ts` : chaque type du registre doit correspondre à une route protégée. Rouge sur les anciennes déclarations (3 échecs).
+- **Leçon généralisée** : un contrôle d'identité avant une boucle ne couvre pas la boucle, et le cookie est partagé entre onglets. L'identité se porte par requête et se vérifie côté serveur à chaque écriture, pas une fois côté client. Ne rejouer automatiquement qu'une écriture dont la protection contre le doublon est prouvée par un test, pas par une déclaration.

@@ -1,4 +1,5 @@
 import { FEATURE_FLAGS_PATH, type FeatureKey } from "@shared/feature-flags";
+import { OFFLINE_OWNER_HEADER, isAutoReplayable, sameProtectedRoute } from "@shared/idempotency-routes";
 import { NETWORK_ERROR_MESSAGE } from "@shared/errors";
 import { ApiError, userMessageOf } from "@/lib/api-error";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -41,6 +42,24 @@ export const IDEMPOTENCY_HEADER = "Idempotency-Key";
 const REPLAYED_HEADER = "Idempotent-Replayed";
 
 const LEASE_MS = 45_000;
+/** Un envoi doit finir (ou échouer) avant l'expiration du bail du rejeu, sinon un autre onglet reprendrait la boucle. */
+export const SEND_TIMEOUT_MS = LEASE_MS - 15_000;
+
+/**
+ * Signal qui s'interrompt après `ms`. `AbortSignal.timeout` manque sur les vieux WebView : repli par
+ * `AbortController` + `setTimeout`, sinon un envoi muet bloquerait la file sans fin.
+ */
+export function timeoutSignal(ms: number): AbortSignal {
+  if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") return AbortSignal.timeout(ms);
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
+
+/** En-têtes d'un envoi différé : clé d'idempotence stable et propriétaire de la file (vérifié par le serveur à chaque envoi). */
+export function offlineRequestHeaders(entry: Pick<QueueEntry, "idempotencyKey" | "ownerUserId">): Record<string, string> {
+  return { [IDEMPOTENCY_HEADER]: entry.idempotencyKey, [OFFLINE_OWNER_HEADER]: String(entry.ownerUserId) };
+}
 
 // ---------------------------------------------------------------------------
 // Drapeaux
@@ -88,7 +107,8 @@ async function sendEntry(entry: QueueEntry): Promise<SendOutcome> {
     }
     const response = await apiRequest(entry.endpoint, {
       method: entry.method,
-      headers: { [IDEMPOTENCY_HEADER]: entry.idempotencyKey },
+      headers: offlineRequestHeaders(entry),
+      signal: timeoutSignal(SEND_TIMEOUT_MS),
       body,
     });
     return { ok: true, replayed: response.headers.get(REPLAYED_HEADER) !== null };
@@ -139,6 +159,26 @@ function newUuid(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+/**
+ * Vrai si la file peut rejouer cet envoi : route protégée par la clé d'idempotence ET route de son type
+ * (la route protégée d'un autre type ne convient pas).
+ */
+export function isEntryAutoReplayable(
+  entry: Pick<QueueEntry, "type" | "method" | "endpoint" | "idempotencyKey" | "payload">,
+): boolean {
+  const definition = getOfflineAction(entry.type);
+  return (
+    isAutoReplayable({
+      method: entry.method,
+      endpoint: entry.endpoint,
+      idempotencyKey: entry.idempotencyKey,
+      payload: entry.payload,
+    }) &&
+    (definition === undefined ||
+      sameProtectedRoute(entry, { method: definition.method, endpoint: definition.routeExample }))
+  );
+}
+
 export const offlineQueue = createOfflineQueue({
   store: {
     read: (userId) => offlineScope.readQueue<unknown>(userId),
@@ -151,6 +191,7 @@ export const offlineQueue = createOfflineQueue({
   withMutationLock: (userId, fn) => lockProvider.run(`queue-u${userId}`, fn),
   tryReplayLock: (userId, fn) => lockProvider.tryRun(`replay-u${userId}`, fn),
   getDefinition: getOfflineAction,
+  isAutoReplayable: isEntryAutoReplayable,
   invalidateFor: (entry) => {
     const definition = getOfflineAction(entry.type);
     if (!definition?.invalidations || !queryClient) return;
@@ -269,7 +310,7 @@ function scheduleRefresh(): void {
 
 export type EnqueueWriteResult =
   | { queued: true; entry: QueueEntry }
-  | { queued: false; reason: "disabled" | "no-user" | "session-changed" | "unknown-type" };
+  | { queued: false; reason: "disabled" | "no-user" | "session-changed" | "unknown-type" | "invalid" };
 
 /**
  * Met une écriture en file si les drapeaux le permettent. `queued: false, reason: "disabled"` :
@@ -285,8 +326,7 @@ export async function enqueueOfflineWrite(input: EnqueueInput): Promise<EnqueueW
     const entry = await offlineQueue.enqueue(input);
     return { queued: true, entry };
   } catch (err) {
-    if (err instanceof OfflineQueueError && err.reason !== "unknown-type") return { queued: false, reason: err.reason };
-    if (err instanceof OfflineQueueError) return { queued: false, reason: "unknown-type" };
+    if (err instanceof OfflineQueueError) return { queued: false, reason: err.reason };
     throw err;
   }
 }
@@ -341,10 +381,11 @@ export async function replayOfflineQueue(options: ReplayOptions = {}): Promise<R
   }
 }
 
-/** Nombre d'envois que la déconnexion détruirait (0 si le hors ligne n'est pas actif). */
+/** Nombre d'envois que la déconnexion détruirait. */
 export async function pendingSendCount(): Promise<number> {
   const userId = getActiveOfflineUserId();
-  if (userId === null || !isOfflineFlagEnabled("offline-writes")) return 0;
+  // Compté même drapeau coupé : des envois déjà en file seraient détruits par la déconnexion.
+  if (userId === null) return 0;
   try {
     return await offlineScope.queuedCount(userId);
   } catch {

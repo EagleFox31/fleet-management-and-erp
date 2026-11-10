@@ -1778,6 +1778,15 @@ BEGIN
   END IF;
 END $$;`;
 
+
+/**
+ * GPS V1 : index (mission_id, driver_id). Identique à server/db/migrations/20261110_vehicle_positions_mission_driver_idx.sql
+ * (tests/unit/server/vehicle-positions-gps-schema.test.ts). Après VEHICLE_POSITIONS_GPS_SQL (appelé après reportCdcConstraintGaps).
+ */
+export const VEHICLE_POSITIONS_MISSION_DRIVER_IDX_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+CREATE INDEX IF NOT EXISTS vehicle_positions_mission_driver_idx ON vehicle_positions (mission_id, driver_id);`;
 // Grille tarifaire (O3) — jumelle de server/db/migrations/20261106_tariff_grid.sql.
 export const TARIFF_GRID_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
 SET LOCAL lock_timeout = '5s';
@@ -2976,6 +2985,8 @@ export async function initializeDatabase() {
     // Relu après le dernier SQL qui pose une contrainte réconciliée : au premier démarrage, une table
     // pas encore créée serait signalée à tort.
     await reportCdcConstraintGaps(pool);
+    // Index GPS (mission, chauffeur) — jumelle de server/db/migrations/20261110_vehicle_positions_mission_driver_idx.sql.
+    await pool.query(VEHICLE_POSITIONS_MISSION_DRIVER_IDX_SQL);
     // FK vehicle_documents.type → vehicle_document_types(code), NOT VALID — jumelle de
     // server/db/migrations/20261106_vehicle_documents_type_fk.sql ; nombre de lignes hors référentiel journalisé.
     await pool.query(VEHICLE_DOCUMENTS_TYPE_FK_SQL);
