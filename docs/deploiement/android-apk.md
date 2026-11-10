@@ -25,6 +25,11 @@ les navigations HTML. Il y injecte le bridge, donc les plugins (caméra, géoloc
 notifications) restent disponibles. Les appels `/api` et `/ws` partent par le réseau
 normal.
 
+La géolocalisation est autorisée **au premier plan seulement** (`ACCESS_COARSE_LOCATION`,
+`ACCESS_FINE_LOCATION`) : en V1, le suivi ne tourne qu'écran ouvert. Le manifeste ne
+demande ni localisation en arrière-plan ni service au premier plan ; un test le vérifie
+(`tests/unit/shared/native-shell.test.ts`).
+
 ### Limites connues
 
 - La documentation Capacitor présente `server.url` comme un outil de live reload. Ce
@@ -58,8 +63,14 @@ Comportement du workflow :
   l'APK.
 - Sur une PR, le keystore n'est jamais lu : on obtient une APK debug.
 - `workflow_dispatch` accepte une entrée `server_url`, qui sert à construire une APK de
-  test pointée sur un serveur du réseau local (ex. `http://192.168.1.20:5000`). Le
-  `http` y est accepté et autorise le trafic en clair pour cette APK seulement.
+  test pointée sur un serveur du réseau local (ex. `http://192.168.1.20:5000`). Une
+  origine `http` produit toujours une **APK debug non signée** (artefact
+  `FleetOS-Tech-Debug-APK`), même si le keystore est posé : seule une origine `https`
+  est signée, et le trafic en clair n'est autorisé que dans cette APK de test.
+- Le keystore décodé est effacé en fin de job, même en cas d'échec.
+- Le test sur émulateur (job `smoke`) ne tourne qu'en lancement manuel ou si la
+  coquille native change (`android/**`, `capacitor.config.ts`, `scripts/android-*`,
+  `client/public/sw.js`, `shared/native-shell.ts`, ce workflow).
 
 `CAP_SERVER_URL` doit être une origine seule : `https://hôte[:port]`, sans chemin,
 paramètre ni identifiants. `shared/native-shell.ts` refuse toute autre forme avec un
@@ -116,5 +127,6 @@ journal. Ne jamais commiter de `*.keystore` ni de `*.b64`.
 1. Démarrer le serveur sur une base **locale**, en forçant `DATABASE_URL`, car le
    `.env` racine pointe sur la prod.
 2. Lancer le workflow à la main avec `server_url = http://<IP-du-poste>:5000`.
-3. Installer l'APK debug sur un téléphone du même réseau.
+3. Installer l'APK debug (artefact `FleetOS-Tech-Debug-APK`, non signée) sur un
+   téléphone du même réseau.
 4. Se connecter : les appels `/api` et le WebSocket partent vers ce serveur.

@@ -72,10 +72,24 @@ describe("APK release : garde-fous hors de capacitor.config.ts", () => {
     expect(manifest).not.toMatch(/networkSecurityConfig/);
   });
 
-  it("le workflow refuse de signer une APK dont l'origine n'est pas https", () => {
+  it("le workflow ne signe qu'une origine https : http donne une APK debug, vide est refusé", () => {
     const workflow = read(".github/workflows/build-android-apk.yml");
     const step = workflow.slice(workflow.indexOf("id: check_keystore"), workflow.indexOf("has_keystore=true"));
-    expect(step).toContain('if [ -z "$CAP_SERVER_URL" ]');
-    expect(step).toMatch(/case "\$CAP_SERVER_URL" in\s+https:\/\/\*\) ;;\s+\*\)[^\n]*exit 1/);
+    expect(step).toMatch(/if \[ -z "\$CAP_SERVER_URL" \]; then[\s\S]*?exit 1/);
+    // Hors https : sortie avant le décodage du keystore, sans signature.
+    expect(step).toMatch(/case "\$CAP_SERVER_URL" in\s+https:\/\/\*\) ;;\s+\*\)[\s\S]*?has_keystore=false[\s\S]*?exit 0 ;;\s+esac/);
+    expect(step.indexOf("esac")).toBeLessThan(step.indexOf("base64 --decode"));
+  });
+
+  it("le workflow efface toujours le keystore décodé", () => {
+    const workflow = read(".github/workflows/build-android-apk.yml");
+    expect(workflow).toMatch(/if: always\(\)\s+run: rm -f android\/app\/release\.keystore/);
+  });
+
+  it("géolocalisation au premier plan seulement (V1 : suivi écran ouvert)", () => {
+    const manifest = read("android/app/src/main/AndroidManifest.xml");
+    expect(manifest).toContain('android:name="android.permission.ACCESS_COARSE_LOCATION"');
+    expect(manifest).toContain('android:name="android.permission.ACCESS_FINE_LOCATION"');
+    expect(manifest).not.toMatch(/ACCESS_BACKGROUND_LOCATION|FOREGROUND_SERVICE_LOCATION/);
   });
 });
