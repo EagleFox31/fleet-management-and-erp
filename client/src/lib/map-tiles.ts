@@ -20,5 +20,3 @@ export const MAP_TILES = {
   attribution: orDefault(env.VITE_MAP_TILE_ATTRIBUTION, OSM_ATTRIBUTION),
   maxZoom: 19,
 } as const;
-
-export const { url, attribution, maxZoom } = MAP_TILES;

@@ -126,6 +126,24 @@ export function fetchAllVehicles<T = any>(
   return fetchAllPages<T>(fetchFn, { path: "/api/vehicles", listKey: "vehicles", pageSize, maxPages, unreadable, tooMany });
 }
 
+/** `GET /api/parts` plafonne à 1000 par appel (`Math.min(rawLimit, 1000)`). */
+export const PARTS_PAGE_SIZE = 1000;
+
+/** Catalogue de pièces complet (10 par défaut sans `limit`). */
+export function fetchAllParts<T = any>(
+  fetchFn: FetchLike = defaultFetch,
+  { pageSize = PARTS_PAGE_SIZE, maxPages = REPORT_MAX_PAGES } = {},
+): Promise<T[]> {
+  return fetchAllPages<T>(fetchFn, {
+    path: "/api/parts",
+    listKey: "parts",
+    pageSize,
+    maxPages,
+    unreadable: "Les pièces n'ont pas pu être lues en entier. Réessayez.",
+    tooMany: (total, limit) => `Trop de pièces à afficher (${total}, limite ${limit}).`,
+  });
+}
+
 /** `GET /api/tires` n'a pas de plafond serveur : pages de 500, comme les OT. */
 export const TIRES_PAGE_SIZE = 500;
 

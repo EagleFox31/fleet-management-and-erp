@@ -29,7 +29,7 @@ import {
   missionTrackResponseSchema,
   type MissionTrackPoint,
   type MissionTrackResponse,
-} from "@shared/contracts/gps-track";
+} from "@shared/contracts/gps";
 
 function readBuffer(key: string): GpsPoint[] {
   try {
