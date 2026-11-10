@@ -750,6 +750,30 @@ export async function reportVehicleDocumentTypeGaps(client: Queryable, log: Warn
  * server/db/migrations/20261103_drivers_user_id_unique.sql : tests/unit/server/drivers-user-id-unique-schema.test.ts
  * compare les deux. Doublons existants : index non posé, rien supprimé, écart relu par reportDriverUserIdUniqueGaps.
  */
+/**
+ * Remorque d'une affectation (assignments.trailer_id) et unicité « une remorque par attelage actif ». Doit rester
+ * identique à server/db/migrations/20261110_assignments_trailer.sql :
+ * tests/unit/server/assignments-trailer-schema.test.ts compare les deux. Index non posé si des doublons
+ * existent, rien supprimé, écart relu par reportAssignmentsTrailerGaps.
+ */
+export const ASSIGNMENTS_TRAILER_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+ALTER TABLE assignments ADD COLUMN IF NOT EXISTS trailer_id integer REFERENCES vehicles(id) ON DELETE SET NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'uq_assignments_trailer_active') THEN
+    IF EXISTS (SELECT 1 FROM assignments WHERE trailer_id IS NOT NULL AND status IN ('pending', 'accepted', 'in_progress') GROUP BY trailer_id HAVING count(*) > 1) THEN
+      RAISE WARNING 'uq_assignments_trailer_active non posé : remorques attelées à plusieurs affectations actives';
+    ELSE
+      CREATE UNIQUE INDEX uq_assignments_trailer_active ON assignments (trailer_id) WHERE trailer_id IS NOT NULL AND status IN ('pending', 'accepted', 'in_progress');
+    END IF;
+  END IF;
+EXCEPTION WHEN lock_not_available OR unique_violation THEN
+  RAISE WARNING 'uq_assignments_trailer_active non posé : verrou indisponible ou doublon apparu pendant la création';
+END $$;`;
+
 export const DRIVERS_USER_ID_UNIQUE_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
 SET LOCAL lock_timeout = '5s';
 
@@ -1093,6 +1117,25 @@ export async function reportDriverUserIdUniqueGaps(client: Queryable, log: WarnL
 }
 
 /**
+ * Relit pg_indexes après ASSIGNMENTS_TRAILER_SQL : si uq_assignments_trailer_active manque, journalise chaque
+ * remorque attelée à plusieurs affectations actives pour que l'exploitation corrige à la main.
+ */
+export async function reportAssignmentsTrailerGaps(client: Queryable, log: WarnLogger = initLog) {
+  const idx = await client.query(
+    `SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'uq_assignments_trailer_active'`,
+  );
+  if (idx.rows.length > 0) return;
+  const dup = await client.query(
+    `SELECT trailer_id, array_agg(id ORDER BY id) AS assignment_ids FROM assignments
+     WHERE trailer_id IS NOT NULL AND status IN ('pending', 'accepted', 'in_progress')
+     GROUP BY trailer_id HAVING count(*) > 1`,
+  );
+  for (const row of dup.rows as Array<{ trailer_id: number; assignment_ids: number[] }>) {
+    log.warn({ trailerId: row.trailer_id, assignmentIds: row.assignment_ids }, "Remorque attelée à plusieurs affectations actives : uq_assignments_trailer_active non posé");
+  }
+}
+
+/**
  * Relit pg_indexes après VEHICLE_TIRES_ACTIVE_POSITION_UNIQUE_SQL (le RAISE WARNING n'atteint pas les logs
  * applicatifs). Index absent : journalise le nombre de positions en double et chaque couple (véhicule, position)
  * avec ses montages actifs, identifiants seulement. Rien n'est démonté ni supprimé ici : l'atelier choisit.
@@ -1360,6 +1403,93 @@ CREATE OR REPLACE TRIGGER trg_users_keep_active_admin
 BEFORE UPDATE OF role, deleted_at OR DELETE ON users
 FOR EACH ROW
 EXECUTE FUNCTION fn_users_keep_active_admin();`;
+
+/**
+ * Verrou d'argent en base sur les pleins validés (lot V1, D2). Doit rester identique à
+ * server/db/migrations/20261110_money_lock_fuel.sql (AGENTS.md §5), comparé par
+ * tests/unit/server/fuel-records-lock-schema.test.ts. Un seul envoi = une transaction (SET LOCAL
+ * lock_timeout borne l'attente du verrou de table ; un échec est toléré et relu après l'appel).
+ */
+export const FUEL_RECORDS_VALIDATED_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+CREATE OR REPLACE FUNCTION fn_fuel_records_validated_lock()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  free_cols text[] := ARRAY['updated_at', 'updated_by', 'mission_id', 'deleted_at', 'deleted_by', 'cancellation_reason'];
+BEGIN
+  -- Levée explicite pour la transaction en cours, ou plein encore en attente (sa validation comprise) : rien à garder.
+  IF current_setting('fleetos.allow_money_override', true) = 'on' OR OLD.validation_status IS DISTINCT FROM 'validated' THEN
+    IF TG_OP = 'DELETE' THEN
+      RETURN OLD;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Plein validé : suppression refusée.'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
+  END IF;
+
+  -- Toute colonne hors liste blanche (montants, quantités, statut de validation, auteur...) est gelée.
+  IF (to_jsonb(NEW) - free_cols) IS DISTINCT FROM (to_jsonb(OLD) - free_cols) THEN
+    RAISE EXCEPTION 'Plein validé : seule son annulation tracée est permise.'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
+  END IF;
+
+  -- La mission ne se change pas ; elle ne se détache que vers NULL, et seulement par l'action de clé étrangère
+  -- (suppression de la mission : UPDATE lancé par un trigger, profondeur > 1). En direct, le plein sortirait du
+  -- budget de sa mission sans annulation tracée.
+  IF NEW.mission_id IS DISTINCT FROM OLD.mission_id AND (NEW.mission_id IS NOT NULL OR pg_trigger_depth() <= 1) THEN
+    RAISE EXCEPTION 'Plein validé : la mission ne se change pas.'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
+  END IF;
+
+  -- Annulation tracée : une seule fois, de NULL vers une valeur, avec auteur et motif.
+  IF (NEW.deleted_at, NEW.deleted_by, NEW.cancellation_reason)
+       IS DISTINCT FROM (OLD.deleted_at, OLD.deleted_by, OLD.cancellation_reason) THEN
+    IF OLD.deleted_at IS NOT NULL OR OLD.deleted_by IS NOT NULL OR OLD.cancellation_reason IS NOT NULL
+       OR NEW.deleted_at IS NULL OR NEW.deleted_by IS NULL
+       OR NEW.cancellation_reason IS NULL OR btrim(NEW.cancellation_reason) = ''
+       OR char_length(NEW.cancellation_reason) > 500 THEN
+      RAISE EXCEPTION 'Plein validé : annulation une seule fois, avec un motif de 1 à 500 caractères.'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION fn_fuel_records_truncate_lock()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF current_setting('fleetos.allow_money_override', true) = 'on' THEN
+    RETURN NULL;
+  END IF;
+  RAISE EXCEPTION 'Pleins : vidage de la table refusé.'
+    USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
+END;
+$$;
+
+DO $do$
+BEGIN
+  CREATE OR REPLACE TRIGGER trg_fuel_records_validated_lock
+  BEFORE UPDATE OR DELETE ON fuel_records
+  FOR EACH ROW
+  EXECUTE FUNCTION fn_fuel_records_validated_lock();
+
+  CREATE OR REPLACE TRIGGER trg_fuel_records_truncate_lock
+  BEFORE TRUNCATE ON fuel_records
+  FOR EACH STATEMENT
+  EXECUTE FUNCTION fn_fuel_records_truncate_lock();
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'triggers de verrou des pleins non posés : verrou de table indisponible, nouvel essai au démarrage suivant';
+END $do$;`;
 
 /**
  * L1 : budget de mission (drapeau finance), un par mission. Doit rester identique à
@@ -2351,6 +2481,9 @@ export async function initializeDatabase() {
     // Un pneu actif par position — jumelle de server/db/migrations/20261107_vehicle_tires_active_position_unique.sql.
     await pool.query(VEHICLE_TIRES_ACTIVE_POSITION_UNIQUE_SQL);
     await reportVehicleTireActivePositionGaps(pool);
+    // Remorque par affectation — jumelle de server/db/migrations/20261110_assignments_trailer.sql.
+    await pool.query(ASSIGNMENTS_TRAILER_SQL);
+    await reportAssignmentsTrailerGaps(pool);
     // Contrôles inopinés QHSE (lot Q1) — jumelle de server/db/migrations/20261105_qhse_inspections.sql.
     await pool.query(QHSE_INSPECTIONS_SQL);
     // Cycle de vie du véhicule — jumelle de server/db/migrations/20261105_vehicle_lifecycle.sql.
@@ -2649,6 +2782,20 @@ export async function initializeDatabase() {
     await reportUsersPinBcryptGaps(pool);
     // Au moins un administrateur actif — jumelle de server/db/migrations/20261105_users_keep_active_admin.sql.
     await pool.query(USERS_KEEP_ACTIVE_ADMIN_SQL);
+    // Plein validé verrouillé en base (lot V1) — jumelle de server/db/migrations/20261110_money_lock_fuel.sql.
+    await pool.query(FUEL_RECORDS_VALIDATED_LOCK_SQL);
+    // Verrou de table indisponible (lock_timeout) : le RAISE WARNING n'atteint pas les logs applicatifs, relire pg_trigger.
+    const { rows: fuelLockTriggers } = await pool.query(
+      `SELECT tgname FROM pg_trigger WHERE tgrelid = 'fuel_records'::regclass
+          AND tgname IN ('trg_fuel_records_validated_lock', 'trg_fuel_records_truncate_lock')`,
+    );
+    if (fuelLockTriggers.length < 2) {
+      initLog.warn(
+        { present: fuelLockTriggers.map((r: { tgname: string }) => r.tgname) },
+        "Triggers de verrou des pleins validés non posés (verrou de table indisponible) : la garde du service reste " +
+          "active ; nouvel essai au démarrage suivant.",
+      );
+    }
     // Grille tarifaire (O3) — jumelle de server/db/migrations/20261106_tariff_grid.sql.
     await pool.query(TARIFF_GRID_SQL);
     // Prix convenu d'une mission (O3 lot 3) — jumelle de server/db/migrations/20261106_mission_agreed_price.sql.
