@@ -175,6 +175,7 @@ export const EVENT_SATELLITES: Record<string, readonly SatelliteGroupName[]> = {
   client_invoice_payment_recorded: ["clientMoney"],
   client_invoices_overdue: ["clientMoney"],
   client_invoice_deposited: ["clientMoney"],
+  client_credit_note_created: ["clientMoney"],
   client_withholding_updated: ["clientMoney"],
   supplier_invoice_created: ["supplierMoney"],
   supplier_invoice_updated: ["supplierMoney"],

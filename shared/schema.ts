@@ -1584,6 +1584,9 @@ export const clientInvoices = pgTable("client_invoices", {
   
   // Paiement
   balance: numeric("balance", { precision: 15, scale: 2 }).notNull(), // Solde restant
+  // Avoirs émis (lot V1, PR5) : cumul TTC, à la hausse seulement, au plus égal au TTC (trigger de verrou).
+  // Montant payé = amount_ttc - credited_amount_ttc - balance.
+  creditedAmountTtc: numeric("credited_amount_ttc", { precision: 15, scale: 2 }).notNull().default("0"),
   status: text("status", { enum: ["pending", "partial", "paid", "overdue", "cancelled"] }).notNull().default("pending"),
 
   // Dépôt chez le client (lot F1) : date de dépôt et retenues figées à cet instant.
@@ -1624,6 +1627,28 @@ export const clientPayments = pgTable("client_payments", {
   recordedBy: integer("recorded_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// Avoirs clients (lot V1, PR5) : note de crédit sur une facture émise. Table immuable (trigger, contrainte
+// client_credit_notes_immutable) ; l'avoir se plafonne au solde de la facture, les remboursements sont hors v1.
+export const clientCreditNotes = pgTable("client_credit_notes", {
+  id: serial("id").primaryKey(),
+  creditNoteNumber: text("credit_note_number").notNull().unique(), // AV-YYYYMMDD-NNN
+  invoiceId: integer("invoice_id").notNull().references(() => clientInvoices.id, { onDelete: "restrict" }),
+  reason: text("reason").notNull(),
+  amountHT: numeric("amount_ht", { precision: 15, scale: 2 }).notNull(),
+  vatRate: numeric("vat_rate", { precision: 5, scale: 2 }).notNull().default("0"),
+  vatAmount: numeric("vat_amount", { precision: 15, scale: 2 }).notNull().default("0"),
+  amountTTC: numeric("amount_ttc", { precision: 15, scale: 2 }).notNull(),
+  // Idempotence du double clic : même clé = même avoir.
+  requestKey: text("request_key").notNull().unique(),
+  createdBy: integer("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  amountPositive: check("client_credit_notes_amount_ht_positive", sql`${table.amountHT} > 0`),
+  ttcIsHtPlusVat: check("client_credit_notes_ttc_sum", sql`${table.amountTTC} = ${table.amountHT} + ${table.vatAmount}`),
+  reasonNotBlank: check("client_credit_notes_reason_not_blank", sql`length(btrim(${table.reason})) > 0`),
+  invoiceIdx: index("idx_client_credit_notes_invoice_id").on(table.invoiceId),
+}));
 
 // Relations pour les missions et assignments
 export const missionsRelations = relations(missions, ({ one, many }) => ({
@@ -1863,6 +1888,7 @@ export const insertClientInvoiceSchema = createInsertSchema(clientInvoices).omit
   withholdingIsAmount: true,
   netPayable: true,
   depositedBy: true,
+  creditedAmountTtc: true,
   createdAt: true,
   updatedAt: true,
 }).extend({
@@ -1897,6 +1923,8 @@ export type InsertMissionStep = z.infer<typeof insertMissionStepSchema>;
 
 export type ClientInvoice = typeof clientInvoices.$inferSelect;
 export type InsertClientInvoice = z.infer<typeof insertClientInvoiceSchema>;
+
+export type ClientCreditNote = typeof clientCreditNotes.$inferSelect;
 
 export type ClientPayment = typeof clientPayments.$inferSelect;
 export type InsertClientPayment = z.infer<typeof insertClientPaymentSchema>;

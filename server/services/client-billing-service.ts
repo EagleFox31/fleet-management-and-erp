@@ -10,9 +10,10 @@ import {
   type ClientPayment
 } from "@shared/schema";
 import { eq, desc, and, sql, gte, lte, inArray, gt, lt, ne } from "drizzle-orm";
-import { CANCELLED_CLIENT_INVOICE_STATUS } from "@shared/constants/client-invoices";
+import { CANCELLED_CLIENT_INVOICE_STATUS, paidTtcOf } from "@shared/constants/client-invoices";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
+import { INVOICE_NUMBER_SPEC, nextDailyNumber } from "../lib/daily-document-number";
 
 const log = moduleLogger("client-billing");
 
@@ -59,30 +60,7 @@ export class ClientBillingService {
    * NOTE: This should only be called within a transaction that will insert the invoice
    */
   private async generateInvoiceNumberInTransaction(tx: any): Promise<string> {
-    const today = new Date();
-    const dateStr = today.toISOString().split('T')[0].replace(/-/g, ''); // YYYYMMDD
-    
-    // Lock ALL invoices for this date to prevent concurrent generation
-    // Use advisory lock for the date to handle "first invoice of day" case
-    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`invoice-${dateStr}`}))`);
-    
-    // Now safely find the last number
-    const todayInvoices = await tx
-      .select(publicClientInvoiceColumns)
-      .from(clientInvoices)
-      .where(sql`${clientInvoices.invoiceNumber} LIKE ${'FACT-' + dateStr + '-%'}`)
-      .orderBy(desc(clientInvoices.invoiceNumber))
-      .limit(1);
-    
-    let sequence = 1;
-    if (todayInvoices.length > 0) {
-      const lastNumber = todayInvoices[0].invoiceNumber;
-      const lastSequence = parseInt(lastNumber.split('-').pop() || '0');
-      sequence = lastSequence + 1;
-    }
-    
-    const sequenceStr = sequence.toString().padStart(3, '0');
-    return `FACT-${dateStr}-${sequenceStr}`;
+    return nextDailyNumber(tx, INVOICE_NUMBER_SPEC);
   }
   
   /**
@@ -272,11 +250,7 @@ export class ClientBillingService {
       totalVAT: invoicesList.reduce((sum, inv) => sum + parseFloat(inv.vatAmount || "0"), 0),
       totalAmountTTC: invoicesList.reduce((sum, inv) => sum + parseFloat(inv.amountTTC || "0"), 0),
       totalBalance: invoicesList.reduce((sum, inv) => sum + parseFloat(inv.balance || "0"), 0),
-      totalPaid: invoicesList.reduce((sum, inv) => {
-        const total = parseFloat(inv.amountTTC || "0");
-        const balance = parseFloat(inv.balance || "0");
-        return sum + (total - balance);
-      }, 0),
+      totalPaid: invoicesList.reduce((sum, inv) => sum + paidTtcOf(inv), 0),
       pending: invoicesList.filter(inv => inv.status === "pending").length,
       partial: invoicesList.filter(inv => inv.status === "partial").length,
       paid: invoicesList.filter(inv => inv.status === "paid").length,
@@ -528,11 +502,7 @@ export class ClientBillingService {
       totalAmountHT: filteredInvoices.reduce((sum, inv) => sum + parseFloat(inv.amountHT || "0"), 0),
       totalVAT: filteredInvoices.reduce((sum, inv) => sum + parseFloat(inv.vatAmount || "0"), 0),
       totalAmountTTC: filteredInvoices.reduce((sum, inv) => sum + parseFloat(inv.amountTTC || "0"), 0),
-      totalPaid: filteredInvoices.reduce((sum, inv) => {
-        const total = parseFloat(inv.amountTTC || "0");
-        const balance = parseFloat(inv.balance || "0");
-        return sum + (total - balance);
-      }, 0),
+      totalPaid: filteredInvoices.reduce((sum, inv) => sum + paidTtcOf(inv), 0),
       totalOutstanding: filteredInvoices.reduce((sum, inv) => sum + parseFloat(inv.balance || "0"), 0),
       invoices: filteredInvoices,
     };
@@ -624,7 +594,7 @@ export class ClientBillingService {
       const existing = clientsMap.get(clientId);
       const amountTTC = parseFloat(r.invoice.amountTTC || "0");
       const balance = parseFloat(r.invoice.balance || "0");
-      const paid = amountTTC - balance;
+      const paid = paidTtcOf(r.invoice);
 
       if (existing) {
         existing.totalInvoices++;

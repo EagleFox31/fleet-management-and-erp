@@ -140,7 +140,7 @@ describe("suivi des opérations clients", { timeout: 120000 }, () => {
     const waiting = await rowOf();
     expect(waiting.row).toMatchObject({ recapStatus: "awaiting_payment", invoiceNumber: inv.invoiceNumber });
     expect(waiting.parsed.recap.awaiting_payment).toBe(1);
-    await db.update(clientInvoices).set({ status: "paid" }).where(eq(clientInvoices.id, inv.id));
+    await db.update(clientInvoices).set({ status: "paid", balance: "0" }).where(eq(clientInvoices.id, inv.id));
     expect((await rowOf()).row.recapStatus).toBe("paid");
   });
 });

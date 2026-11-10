@@ -531,6 +531,13 @@ export const CLIENT_BILLING_EVENT_ROLES: readonly AppRole[] = ["admin", "secreta
  */
 export const CLIENT_BILLING_STATS_ROLES: readonly AppRole[] = [...CLIENT_BILLING_EVENT_ROLES, "management"];
 
+/**
+ * Émettre un avoir (lot V1, PR5) : l'avoir réduit une créance déjà émise, donc comptable et administrateur
+ * seulement (moins large que l'enregistrement d'un paiement). La lecture suit la facturation client
+ * (`CLIENT_BILLING_EVENT_ROLES`) : aucun compte `client` ne voit un avoir.
+ */
+export const CREDIT_NOTE_WRITER_ROLES = ["admin", "accountant"] as const satisfies readonly AppRole[];
+
 export function canReadClientBilling(role: string | null | undefined): boolean {
   return (CLIENT_BILLING_STATS_ROLES as readonly string[]).includes(String(role ?? ""));
 }
