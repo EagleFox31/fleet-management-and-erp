@@ -1,0 +1,31 @@
+## V5b-3 : lecture hors ligne du chauffeur
+
+- Quoi : liste blanche de lecture hors ligne du chauffeur et bandeau « Hors ligne, données du <date à heure> ». Persisté pour son compte seulement : `/api/drivers/me` (réduit à son identité et à ses missions in_progress/delivered), le détail, les pleins, la préparation au départ et les métadonnées POD de ces missions, le solde de la carte carburant. Rien d'autre.
+- Comment : `offline-user-scope.ts` gagne une table de profils (`OFFLINE_READ_PROFILES`: technicien, chauffeur), chacun avec ses drapeaux et un sélecteur. Le profil chauffeur part de `/api/drivers/me` (données du compte) : sans cette ancre valide, rien n'est gardé ; une mission n'est retenue que si elle figure dans `/me`, que son statut est in_progress/delivered et que le détail porte une affectation de ce chauffeur. La fiche chauffeur (permis, CNI, naissance, CPC, matricule) est coupée avant écriture. Drapeaux `driver-offline` ET `offline-writes` lus à l'écriture et à la relecture (`offline-storage.ts`) ; inconnus au démarrage hors ligne, on relit ce qui a été écrit drapeaux allumés. Le bandeau (`offline-data-banner.tsx`, texte dans `lib/offline-data-banner.ts`) est branché sur `driver/dashboard.tsx` de façon purement additive, `dataUpdatedAt` de `/api/drivers/me`. Cloison par compte, purge à la déconnexion et au changement de compte : mécanismes de #56 inchangés.
+- Pourquoi : lecture indispensable sur un quai sans réseau (plan V5b, décisions 3 et 7 : cache minimal, pas de documents personnels).
+- Tester : `tests/unit/client/offline-read-driver.test.ts` (sélection, second compte sans accès, purge, drapeaux éteints, bandeau). Drapeaux éteints, le comportement est celui d'avant.
+- Non fait : e2e `setOffline(true)` + second compte (voir PR : exige un serveur de dev et des comptes chauffeur sur une base locale non préparés ici). Dépendance à #659 : aucune fonctionnelle ; `offline-user-scope.ts` est touché hors des sections de #659 (conflit de contexte possible seulement).
+
+### Cache minimal : liste blanche de champs (décision 7)
+
+- Quoi : le cache du chauffeur ne garde plus que les champs affichés. `client/src/lib/offline-driver-projection.ts` (logique pure, `pickFields` + une forme par endpoint) est appliqué dans le profil chauffeur de `offline-user-scope.ts` : fiche `/api/drivers/me`, détail mission, pleins, check-list de lancement, pièces de preuve, solde carte.
+- Retirés : e-mail client, `workflowData`, ids de validation, `podUrl`, budgets et suggestion, montants des pleins, `detail` des contrôles (contient les budgets), solde carte (seuls le prix moyen au litre et sa source sont gardés, ce sont les seuls champs lus par l'écran chauffeur), nom de l'auteur du dépôt de preuve.
+- Garde-fou : test récursif dans `tests/unit/client/offline-read-driver.test.ts` (aucune clé sensible, instantané des chemins de clés persistés). Toute clé ajoutée au cache fait échouer l'instantané et impose une relecture.
+- Serveur : `router.param("id")` (missions et preuves) et le contrôle explicite de `launch-readiness` vérifient l'appartenance au chauffeur ; aucun défaut serveur constaté. `fuel-card.routes.ts` non touché (son `console.error` reste).
+- Non fait (dette) : e2e Playwright hors ligne (`setOffline(true)` puis second compte) : demande Postgres local + serveur local avec drapeaux, non monté dans cette passe ; la cloison par compte est couverte en unitaire avec un stockage en mémoire.
+
+### Suite de l'audit sécurité
+
+- Contact client retiré du cache (`client: { name }` seulement) : aucun écran chauffeur ne lit contact ni téléphone. Instantané régénéré : seules `client.contactPerson` et `client.phone` disparaissent. Les noms `contactPerson`, `phone`, `contact`, `telephone` sont interdits dans le test récursif.
+- Drapeaux connus et éteints : la copie de lecture est supprimée à la prochaine sauvegarde (`saveCache(..., { dropIfEmpty })`).
+- Session expirée (401) : `dropUserReadCache` supprime le cache de lecture du compte, la file d'envois est gardée. Compteur propre au cache, pour qu'une sauvegarde en vol n'efface pas la file.
+- Âge maximal du cache contenant des données chauffeur : `DRIVER_CACHE_MAX_AGE_MS` = 72 h (les autres profils gardent 7 jours).
+- Constat : l'utilisateur actif n'est tenu qu'en mémoire (`offline-user-scope.ts`), activé à la connexion ou par un `/api/auth/me` réussi (`session-resume.ts`). Au démarrage hors ligne (`unreachable`), aucun compte n'est activé : rien n'est restauré. La lecture hors ligne ne sert donc que si l'application reste ouverte (perte de réseau en cours de session). E2e non tenté, noté en dette.
+
+### Reserves de relecture
+
+- Regle cache <= ecran appliquee : le tableau de bord chauffeur (`pages/driver/dashboard.tsx`) ne lit que `/api/drivers/me` et `/api/fuel-card/balance`. Detail mission, pleins, check-list de lancement et pieces de preuve (aucun ecran chauffeur ne les lit) sortent de la liste blanche, ainsi que leur controle d'appartenance. La forme des missions de `/me` suit exactement l'interface `Mission` de l'ecran. Corrige au passage la forme de `cargo` (jsonb) : le champ n'est plus persiste.
+- Copie restauree marquee perimee (`applyRestoredQueries`, `offline-restore.ts`) : plus de copie reduite affichee comme fraiche pendant `staleTime` ; hors ligne, elle reste visible.
+- Instantane : les chemins de cles viennent des formes elles-memes (`shapeKeyPaths(DRIVER_CACHE_SHAPES)`). Test de mutation : ajouter `missionType` ou `actualFuelCost` a une forme fait echouer l'instantane. Correction de la phrase precedente : ce n'est pas "toute cle ajoutee au cache" qui echoue, c'est toute cle ajoutee a une forme (le filtre retire de toute facon une cle absente de la forme).
+- Onglet « Mes performances » : « indisponible hors ligne » (la copie ne contient que les missions en cours ou livrees, les chiffres seraient faux), sous les deux drapeaux.
+- Lecteur de drapeaux a la restauration : faux tant qu'ils sont inconnus (le lecteur indulgent est supprime ; sans compte actif au demarrage hors ligne il ne servait a rien).

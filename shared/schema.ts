@@ -1812,6 +1812,7 @@ export const vehiclePositions = pgTable("vehicle_positions", {
   unique("vehicle_positions_client_point_unique").on(table.source, table.submittedBy, table.clientPointId),
   index("vehicle_positions_mission_recorded_idx").on(table.missionId, table.recordedAt),
   index("vehicle_positions_vehicle_recorded_idx").on(table.vehicleId, table.recordedAt.desc()),
+  index("vehicle_positions_mission_driver_idx").on(table.missionId, table.driverId),
 ]);
 export type VehiclePositionRow = typeof vehiclePositions.$inferSelect;
 export type InsertMissionOperation = z.infer<typeof insertMissionOperationSchema>;

@@ -70,6 +70,8 @@ import cappedStatisticsRoutes from "./capped-statistics.routes";
 import paymentInstrumentsRoutes from "./payment-instruments.routes";
 import incidentsRoutes from "./incidents.routes";
 import driverBreakdownsRoutes from "./driver-breakdowns.routes";
+import driverPositionsRoutes from "./driver-positions.routes";
+import missionTrackRoutes from "./mission-track.routes";
 import qhseInspectionsRoutes from "./qhse-inspections.routes";
 import qualityCheckRoutes from "./quality-check.routes";
 import missionAdvisoriesRoutes from "./mission-advisories.routes";
@@ -213,6 +215,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // Garde au montage: aucune route du routeur missions ne se protégeait seule.
   // POD avant missions.routes : mêmes middlewares, sa propre garde chauffeur (router.param).
   apiRouter.use("/missions", authenticate, isStaff, missionPodRoutes);
+  apiRouter.use("/missions", authenticate, missionTrackRoutes);
   apiRouter.use("/missions", authenticate, isStaff, missionPriceRoutes);
   apiRouter.use("/missions", authenticate, isStaff, missionsRoutes);
   // Relevé client : avant /clients (isStaff), la cloison client et les rôles finance sont posés sur la route.
@@ -330,6 +333,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use(paymentInstrumentsRoutes);
   apiRouter.use(incidentsRoutes);
   apiRouter.use(driverBreakdownsRoutes);
+  apiRouter.use(driverPositionsRoutes);
   apiRouter.use(qhseInspectionsRoutes);
   apiRouter.use(qualityCheckRoutes);
   apiRouter.use(technicianWorkOrdersRoutes);

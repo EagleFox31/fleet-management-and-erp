@@ -36,7 +36,7 @@ export const MOUNT_CASES: readonly MountCase[] = [
   { name: "part-scans", method: "GET", path: "/api/part-scans/resolve", flags: ["part-qr"], allowed: PART_SCAN_ROLES, reached: 400 },
   { name: "part-sales (lecture)", method: "GET", path: "/api/part-sales", flags: ["part-sales"], allowed: PART_SALE_READ_ROLES },
   { name: "part-sales (écriture)", method: "POST", path: "/api/part-sales", flags: ["part-sales"], allowed: PART_SALE_ROLES },
-  { name: "vehicle-positions", method: "GET", path: "/api/vehicle-positions", flags: ["gps"], allowed: GPS_VIEW_ROLES },
+  { name: "vehicle-positions", method: "GET", path: "/api/vehicle-positions?maxAgeMinutes=x", flags: ["gps"], allowed: GPS_VIEW_ROLES, reached: 400 },
   { name: "admin/telemetry-devices", method: "GET", path: "/api/admin/telemetry-devices", flags: ["gps"], allowed: ["admin"] },
   // Provisoire jusqu'au lot #6 (jeton d'appareil) : administrateur seulement, jamais sans session.
   { name: "telemetry", method: "POST", path: "/api/telemetry/positions", flags: ["gps"], allowed: ["admin"] },
