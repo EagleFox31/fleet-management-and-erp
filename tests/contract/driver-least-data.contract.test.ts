@@ -139,9 +139,10 @@ describe("GET /api/operations/missions, coordonnées du client", { timeout: 1200
     for (const value of Object.values(CONTACT)) expect(sent).not.toContain(value);
   });
 
-  it("le technicien ne reçoit ni contact, ni e-mail, ni téléphone", async () => {
+  it("le technicien est refusé : ni contact, ni e-mail, ni téléphone", async () => {
     const res = await call("GET", "/api/operations/missions", { actor: "technician" });
-    expect(res.status).toBe(200);
+    // Listes d'exploitation fermées au technicien (MISSION_READ_ROLES) : 403, aucune coordonnée dans le refus.
+    expect(res.status).toBe(403);
     const sent = JSON.stringify(res.body);
     for (const value of Object.values(CONTACT)) expect(sent).not.toContain(value);
   });

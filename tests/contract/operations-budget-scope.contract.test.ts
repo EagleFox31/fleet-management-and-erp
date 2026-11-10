@@ -12,11 +12,11 @@ import { uniqueTestToken } from "../support/ids";
  * entière et additionnaient `estimatedFuelCost` en « chiffre d'affaires ». Pour un client ou une destination
  * qui n'a qu'une mission, ce total est le montant exact.
  *
- * Technicien et chauffeur n'en reçoivent aucun : chaque montant est une sentinelle cherchée dans
+ * Magasinier et chauffeur n'en reçoivent aucun : chaque montant est une sentinelle cherchée dans
  * `JSON.stringify(body)` entier. Hors lecteurs, `totalRevenue`, `margin` et `marginPercentage` valent null, les
  * compteurs restent. La logistique, lectrice, voit les montants.
  */
-const ACTORS = { logistics: "logistics", technician: "technician", driver: "driver" } as const;
+const ACTORS = { logistics: "logistics", warehouse: "warehouse", driver: "driver" } as const;
 type Actor = keyof typeof ACTORS;
 
 const ESTIMATED_FUEL_COST = 7418263;
@@ -78,7 +78,7 @@ const statRow = (body: unknown, key: "clientName" | "destination", value: string
   (body as Record<string, unknown>[]).find((row) => row[key] === value || (row as any).client?.name === value);
 
 describe("/api/operations : montants du budget réservés à leurs lecteurs (Q19)", { timeout: 180000 }, () => {
-  for (const actor of ["technician", "driver"] as const) {
+  for (const actor of ["warehouse", "driver"] as const) {
     it(`${actor} : listes de missions sans montant du budget`, async () => {
       for (const path of ["/api/operations/missions", "/api/operations/missions/active"]) {
         const res = await call("GET", path, { actor });
@@ -91,20 +91,20 @@ describe("/api/operations : montants du budget réservés à leurs lecteurs (Q19
     it(`${actor} : missions d'un client et statistiques sans chiffre d'affaires`, async () => {
       for (const path of [`/api/operations/missions/by-client/${encodeURIComponent(clientName)}`, "/api/operations/stats/by-client", "/api/operations/stats/by-destination"]) {
         const res = await call("GET", path, { actor });
-        // Le chauffeur est refusé sur ces routes (refuseDriver) : la réponse ne porte alors aucun montant non plus.
+        // Le chauffeur est refusé sur ces routes (operationsCostReader) : la réponse ne porte alors aucun montant non plus.
         expect(res.status, path).toBe(actor === "driver" ? 403 : 200);
         expect(leaked(res.body), path).toEqual([]);
       }
     });
   }
 
-  it("technicien : revenu et marge à null, compteurs conservés", async () => {
-    const byClient = await call("GET", `/api/operations/missions/by-client/${encodeURIComponent(clientName)}`, { actor: "technician" });
+  it("magasinier : revenu et marge à null, compteurs conservés", async () => {
+    const byClient = await call("GET", `/api/operations/missions/by-client/${encodeURIComponent(clientName)}`, { actor: "warehouse" });
     expect(containsMission(byClient.body)).toBe(true);
     for (const key of REVENUE_KEYS) expect(byClient.body.statistics[key], `by-client statistics.${key}`).toBeNull();
     expect(byClient.body.statistics.totalMissions).toBe(1);
 
-    const stats = await call("GET", "/api/operations/stats/by-client", { actor: "technician" });
+    const stats = await call("GET", "/api/operations/stats/by-client", { actor: "warehouse" });
     const clientRow = statRow(stats.body, "clientName", clientName) as Record<string, unknown>;
     expect(clientRow).toBeDefined();
     for (const key of REVENUE_KEYS) expect(clientRow[key], `stats/by-client ${key}`).toBeNull();
@@ -112,7 +112,7 @@ describe("/api/operations : montants du budget réservés à leurs lecteurs (Q19
     expect(clientRow).toHaveProperty("estimatedFuelCost", null);
     expect(clientRow.totalMissions).toBe(1);
 
-    const dest = await call("GET", "/api/operations/stats/by-destination", { actor: "technician" });
+    const dest = await call("GET", "/api/operations/stats/by-destination", { actor: "warehouse" });
     const destRow = statRow(dest.body, "destination", destination) as Record<string, unknown>;
     expect(destRow).toBeDefined();
     // Par destination, seul le revenu est calculé (ni marge ni pourcentage) ; le compteur s'appelle `count`.
