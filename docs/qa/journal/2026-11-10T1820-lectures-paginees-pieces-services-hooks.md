@@ -1,0 +1,20 @@
+## 2026-11-10T18:20:44+01:00 — Lectures paginées par défaut : pièces, services et hooks génériques (#666)
+- **Statut** : fait (PR)
+- **Quoi** :
+  - `fetchAllParts` (`PARTS_PAGE_SIZE = 1000`) et `useAllParts` (clé `["/api/parts", "all"]`, sous le préfixe invalidé). `inventory/parts-database` lit toutes les pièces ; il faisait `.map` sur l'objet `{ parts, total }`. Une lecture refusée affiche `InlineQueryError` (message de `userMessageOf`, « Réessayer ») au lieu d'une liste vide.
+  - `technician/fleet-status` : la lecture des pièces est supprimée. Elle ne servait qu'au spinner et aurait lu tout le catalogue (jusqu'à 20 pages) dans la PWA du technicien.
+  - Services `vehiclesService.getAll`, `maintenanceService.getWorkOrders`, `partsService.getAllParts` et `getAllTires` : ils renvoyaient l'objet `{ liste, total }` comme un tableau. Ils lisent maintenant toutes les pages. Les lectures sans `limit` sont retirées de `lib/api-calls.ts`.
+  - `useVehicles` et `useMaintenance` passent par `useAllVehicles` et `useAllWorkOrders`.
+  - `fetchAllWorkOrdersForScreen` et `ALL_WORK_ORDERS_UNREADABLE` passent dans `lib/fetch-all-work-orders.ts`, pour qu'un service n'importe pas un module de hooks. Le hook réexporte le message.
+- **Comment tester (QA)** :
+  - `tests/unit/client/fetch-all-pages.test.ts` : « lecture complète des pièces », 1 500 pièces lues en 2 pages ; une page en échec rejette avec « Les pièces n'ont pas pu être lues en entier ».
+  - `tests/unit/client/default-paginated-reads-hygiene.test.ts` : 5 entrées gelées retirées (`api-calls`, `useVehicles`, `useMaintenance`, `fleet-status`, `parts-database`). La taille de page des pièces est vérifiée contre le plafond de `GET /api/parts`.
+  - Campagnes : tsc 0, unitaires client verts (après fusion de main).
+- **Pourquoi** : une route paginée lue sans `limit` rend une seule page sans le signaler. Un service qui renvoie l'objet comme un tableau fait planter son appelant.
+- **RAIDER** :
+  - R : `fetchAllPages` et hooks `useAll*` partagés.
+  - A : tailles de page lues dans le source serveur.
+  - D : clés préfixées, invalidations inchangées, cliquet du garde-fou.
+  - E : erreur lisible à l'écran, aucun détail technique.
+  - Ne s'appliquent pas : I et Retroactive (lecture seule).
+- **Reste / risques** : seule exception gelée restante, `inventory/tires/index.tsx` (rotations : la route ignore `limit`, à lever avec la route).

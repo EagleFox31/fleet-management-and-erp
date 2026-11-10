@@ -1,5 +1,5 @@
 import { maintenanceApi } from "@/lib/api-calls";
-import { fetchAllWorkOrdersForScreen } from "@/hooks/use-all-work-orders";
+import { fetchAllWorkOrdersForScreen } from "@/lib/fetch-all-work-orders";
 import { maintenanceElapsedDays } from "@shared/constants/maintenance-due-day";
 
 export interface WorkOrder {

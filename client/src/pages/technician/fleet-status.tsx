@@ -23,7 +23,6 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useAllVehicles } from "@/hooks/use-all-vehicles";
-import { useAllParts } from "@/hooks/use-all-parts";
 import { useState, useEffect } from "react";
 import { queryClient } from "@/lib/queryClient";
 import { InlineQueryError } from "@/components/ui/inline-query-error";
@@ -83,7 +82,6 @@ export default function FleetTechnicianPWA() {
     refetchOnMount: true
   });
 
-  const { isLoading: partsLoading } = useAllParts();
 
   const { data: fuelRecords, isLoading: fuelLoading } = useQuery<any>({
     queryKey: ['/api/fuel-records'],
@@ -124,7 +122,7 @@ export default function FleetTechnicianPWA() {
     );
   }
 
-  if (dataLoading || vehiclesLoading || maintenanceLoading || partsLoading || fuelLoading) {
+  if (dataLoading || vehiclesLoading || maintenanceLoading || fuelLoading) {
     return (
       <div className="flex flex-col items-center justify-center h-screen p-4">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
