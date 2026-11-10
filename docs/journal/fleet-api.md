@@ -868,3 +868,8 @@ Reste : DELETE (garde deux familles de roles, verrou carte, suppression douce), 
 ## 2026-11-10 — Verrou d'argent : compléments de relecture de la PR1
 - **Quoi** : `deleteFuelRecordsWhere` et `deleteClientInvoicesWhere` exigent un `SQL` (un `undefined` viderait la table verrou levé) ; le ROLLBACK de `deleteFuelRecordsByVehiclesRaw` ne masque plus l'erreur d'origine (échec journalisé par `moduleLogger`, erreur d'origine relancée) ; exception de la restauration de sauvegarde écrite dans `docs/plans/v1-verrou-argent.md` (Réserves) et figée par un test d'hygiène sur les imports de `server/**` ; décompte corrigé dans le fragment de journal de la PR1 (43 DELETE migrés plus 2 en recette).
 - **Preuve** : `money-override-hygiene.test.ts` 6/6 ; `tsc --noEmit` 0 erreur.
+
+## 2026-11-10 — Verrou d'argent PR2 : pleins (service)
+- **Quoi** : plein validé immuable (409 sur PATCH et DELETE), `POST /api/fuel-records/:id/cancel`, colonne `cancellation_reason`, écrans, `withMoneyOverride` dans la restauration de sauvegarde.
+- **Comment** : voir `docs/qa/journal/` du même jour ; « budget soldé » = `mission_budgets.settled_at IS NOT NULL`.
+- **Preuve** : unitaires 9/9 (rouge d'abord), tsc 0 erreur ; contrat et intégration laissés à la CI (le `.env` racine pointe la production).

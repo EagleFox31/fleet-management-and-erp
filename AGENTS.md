@@ -384,6 +384,12 @@ Notes :
   réceptionne, par le PATCH de la demande comme par la commande fournisseur. Les
   demandes reçues avant cette date restent à `NULL`.
   Voir `docs/analysis/MATRICE_ROLES_GAP.md`.
+- Plein carburant validé (`validation_status = validated`) : immuable. `PATCH` et `DELETE` répondent 409
+  (`FuelService.updateFuelRecord` / `deleteFuelRecord`, sous `SELECT ... FOR UPDATE`). La correction passe par
+  `POST /api/fuel-records/:id/cancel` (motif de 3 caractères minimum, `cancellation_reason`, suppression douce,
+  contre-passation en trésorerie, rejeu du même motif = 200), puis par la saisie d'un nouveau plein. Refusé (409)
+  si le budget de la mission est soldé (`mission_budgets.settled_at`). Le `PATCH` reste déclaré dans
+  `server/routes.ts` : le déplacer dans `server/api` est au backlog (`docs/plans/v1-verrou-argent.md`).
 - Environ 1 000 `console.*` restent côté serveur : les migrer vers `moduleLogger`
   quand on touche un fichier, ne jamais les supprimer (§10).
 - Coût carburant estimé compté comme revenu : `server/services/operations-service.ts` (l. 251, 296, 318) somme `estimatedFuelCost` dans `totalRevenue`, puis la marge en dépend. Aucune garde. Ne pas ajouter de marge ou de revenu nouveau sur ce champ avant correction.

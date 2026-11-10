@@ -97,3 +97,7 @@ Plan établi le 2026-11-10 sur main e7b0f5ba. Les numéros de ligne ci-dessous v
 3. aa modifie `generateInvoiceFromMission` (vers la ligne 118) : éviter tout conflit sur ce fichier.
 4. Revue sécurité obligatoire sur les PR 2 à 5. Envoyer à 0a chaque SHA final.
 5. Avant la fusion de la PR 3, 0a compte en production, en lecture seule, les pleins validés et les factures émises.
+
+## Backlog (PR2)
+- Déplacer le `PATCH /api/fuel-records/:id` de `server/routes.ts` vers `server/api/fuel-records.routes.ts` (lot séparé) ; la garde du plein validé vit déjà dans `FuelService.updateFuelRecord`.
+- Budget de mission soldé : « soldé » = `mission_budgets.settled_at` non nul (seule notion de clôture existante, Q18).
