@@ -24,6 +24,7 @@ import {
   documentRenewalRequests,
   drivers,
   fuelRecords,
+  incidents,
   missions,
   partRequirements,
   parts,
@@ -395,9 +396,12 @@ async function seedLogistics(): Promise<void> {
   }
 }
 
-export const DEMO_DRIVER_DAY = { orderNumber: "DEMO-JOUR-001", vehicle: "DEMO-JOUR-001", employee: "DEMO-EMP-JOUR", pickup: "Douala, port", delivery: "Bafoussam, marché central" } as const;
+export const DEMO_DRIVER_DAY = { orderNumber: "DEMO-JOUR-001", vehicle: "DEMO-JOUR-001", employee: "DEMO-EMP-JOUR", pickup: "Douala, port", delivery: "Bafoussam, marché central", pin: "1234" } as const;
 
-/** Mission du jour du chauffeur1 : affectée, à démarrer depuis son tableau de bord. */
+/**
+ * Chauffeur de la démo « chauffeur » : compte avec PIN, camion libre, aucune mission (le logisticien la programme
+ * dans le parcours) et aucune panne restante des passages précédents (idempotence).
+ */
 async function seedDriverDay(): Promise<void> {
   const userId = await ensureUser(DEMO_ACCOUNTS.driver);
   const vehicleId = await ensureVehicle(DEMO_DRIVER_DAY.vehicle, "T480", null);
@@ -408,20 +412,18 @@ async function seedDriverDay(): Promise<void> {
     await db.delete(assignments).where(inArray(assignments.missionId, ids));
     await db.delete(missions).where(inArray(missions.id, ids));
   }
+  // Pannes déclarées par un passage précédent sur ce camion : la déclaration, puis l'ordre de travail qu'elle a ouvert.
+  const oldWorkOrders = (await db.select({ id: incidents.workOrderId }).from(incidents).where(eq(incidents.vehicleId, vehicleId))).map((r) => r.id).filter((id): id is number => id !== null);
+  await db.delete(incidents).where(eq(incidents.vehicleId, vehicleId));
+  if (oldWorkOrders.length > 0) await db.delete(workOrders).where(inArray(workOrders.id, oldWorkOrders));
   await db.update(drivers).set({ userId: null }).where(and(eq(drivers.userId, userId), ne(drivers.employeeNumber, DEMO_DRIVER_DAY.employee)));
   await db
     .insert(drivers)
     .values({ userId, firstName: "Samuel", lastName: "Biyick", employeeNumber: DEMO_DRIVER_DAY.employee, cpcStatus: "FORMÉ", cpcTrainingDate: isoDayFromNow(-30), licenseExpiry: "2099-12-31", isActive: true })
     .onConflictDoNothing();
   await db.update(drivers).set({ userId, isActive: true }).where(eq(drivers.employeeNumber, DEMO_DRIVER_DAY.employee));
-  const [driver] = await db.select({ id: drivers.id }).from(drivers).where(eq(drivers.employeeNumber, DEMO_DRIVER_DAY.employee));
-  const [client] = await db.select({ id: clients.id }).from(clients).where(eq(clients.name, DEMO_INVOICE.clientName));
-  const now = new Date();
-  const [mission] = await db
-    .insert(missions)
-    .values({ clientId: client.id, orderNumber: DEMO_DRIVER_DAY.orderNumber, pickupAddress: DEMO_DRIVER_DAY.pickup, deliveryAddress: DEMO_DRIVER_DAY.delivery, pickupDate: now, status: "assigned", workflowData: { budgetPlan: { fuelBudget: 150000, roadExpensesBudget: 40000, contingencyBudget: 20000 } } })
-    .returning({ id: missions.id });
-  await db.insert(assignments).values({ missionId: mission.id, vehicleId, driverId: driver.id, status: "accepted" });
+  // Connexion par PIN (4 chiffres, haché comme en production).
+  await db.update(users).set({ pin: await bcrypt.hash(DEMO_DRIVER_DAY.pin, 4) }).where(eq(users.id, userId));
 }
 
 export const DEMO_ACCOUNTING = {
