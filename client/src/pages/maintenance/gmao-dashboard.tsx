@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAllWorkOrders } from "@/hooks/use-all-work-orders";
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -98,9 +99,7 @@ export default function GMAODashboard() {
   });
 
   // Charger les données
-  const { data: workOrdersData } = useQuery<any>({
-    queryKey: ["/api/work-orders"],
-  });
+  const { data: workOrders = [] } = useAllWorkOrders();
 
   const { data: schedulesData, isError: schedulesFailed, error: schedulesError, refetch: refetchSchedules } = useQuery<any>({
     queryKey: ["/api/maintenance-schedules"],
@@ -114,7 +113,6 @@ export default function GMAODashboard() {
     queryKey: ["/api/work-orders/statistics"],
   });
 
-  const workOrders = Array.isArray(workOrdersData) ? workOrdersData : workOrdersData?.workOrders || [];
   const schedules = Array.isArray(schedulesData) ? schedulesData : [];
   const technicians = Array.isArray(usersData)
     ? usersData.filter((u: any) => u.role === "technician" || u.role === "workshop_manager")
