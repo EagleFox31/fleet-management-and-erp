@@ -9,6 +9,7 @@ import type { BookingConflict } from "@shared/contracts/work-order-booking";
 import { BookingConflictAlert } from "@/components/work-orders/booking-conflict-alert";
 import { WorkOrderExportButton } from "@/components/work-orders/work-order-export-button";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
+import { useFeature } from "@/hooks/use-feature";
 import { getPartRequirementStatusLabel } from "@shared/constants/part-requirements";
 import { partLineCost, totalLaborHours } from "@shared/work-order-cost";
 import { formatKnownCost, listQueryView, workOrderDisplayCost } from "@/lib/work-order-tires-cost";
@@ -313,6 +314,8 @@ export default function WorkOrderDetails({
   // Hors `WORK_ORDER_COST_READ_ROLES` (chauffeur, client), la route répond 403 : pas d'appel,
   // le coût saisi de l'OT s'affiche seul.
   const canReadLaborRate = canReadWorkOrderCost(user?.role);
+  // Historique : drapeau et rôles de lecture, comme la route (le serveur garde les deux).
+  const showHistoryLink = useFeature("work-order-audit-trail") && canReadLaborRate;
   const {
     data: laborRate = null,
     isLoading: laborRateLoading,
@@ -1266,6 +1269,18 @@ export default function WorkOrderDetails({
                 <Printer className="h-4 w-4 mr-2" />
                 Imprimer
               </Button>
+              {showHistoryLink && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setLocation(`/maintenance/work-orders/${workOrder.id}/history`)}
+                  className="bg-card/70 border-success/30 hover:bg-card text-success"
+                  data-testid="button-work-order-history"
+                >
+                  <Clock className="h-4 w-4 mr-2" />
+                  Historique
+                </Button>
+              )}
               {(canEditWorkOrder || user?.role === "warehouse") && <WorkOrderExportButton workOrderId={workOrder.id} />}
               {canEditWorkOrder && !["completed", "cancelled"].includes(workOrder.status) && (
                 <Dialog>

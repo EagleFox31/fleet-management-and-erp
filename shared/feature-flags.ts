@@ -22,7 +22,7 @@ export type FeatureFlagDefinition = {
 export const FEATURE_FLAGS = {
   exports: { level: "must", defaultEnabled: true, label: "Exports PDF, Excel et Word" },
 
-  "work-order-audit-trail": { level: "should", defaultEnabled: false, label: "Historique d'un ordre de travail" },
+  "work-order-audit-trail": { level: "should", defaultEnabled: true, label: "Historique d'un ordre de travail" },
   "vehicle-cost-summary": { level: "should", defaultEnabled: false, label: "Coût d'un véhicule" },
   "tire-movements": { level: "should", defaultEnabled: true, label: "Mouvements de pneus" },
   "part-requirement-receive": { level: "should", defaultEnabled: false, label: "Réception signée des pièces" },
