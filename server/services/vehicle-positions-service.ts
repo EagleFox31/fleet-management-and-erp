@@ -159,7 +159,7 @@ export async function ingestDriverPositions(
 
   // Plafond par chauffeur et par mission : un compte (ou un téléphone qui boucle) ne remplit pas la table.
   // Ne compte que les points nouveaux : doublons du paquet écartés, puis points déjà en base. Un rejeu
-  // près du plafond répond « doublons », pas 429.
+  // près du plafond répond « doublons », pas une erreur ; un point nouveau au-delà répond 409 GPS_MISSION_CAP_REACHED (définitif : le client retire le paquet).
   const batch = new Map<string, GpsPoint>();
   for (const p of accepted) if (!batch.has(p.clientPointId)) batch.set(p.clientPointId, p);
   const known = await db
@@ -178,7 +178,7 @@ export async function ingestDriverPositions(
       .from(vehiclePositions)
       .where(and(eq(vehiclePositions.missionId, missionId), eq(vehiclePositions.driverId, route.driverId)));
     if (n + fresh > GPS_MISSION_POINTS_CAP) {
-      throw new AppError(429, "Trop de positions enregistrées pour cette mission. Contactez la logistique.");
+      throw new AppError(409, "Trop de positions enregistrées pour cette mission. Contactez la logistique.", { code: "GPS_MISSION_CAP_REACHED" });
     }
   }
 

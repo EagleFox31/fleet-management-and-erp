@@ -162,6 +162,11 @@ export function userBufferKeys(storage: KeyStorage, userId: number): Array<{ key
   return found;
 }
 
+/** Clés de tampon qui n'appartiennent pas à `userId` (autres comptes du même navigateur). */
+export function foreignBufferKeys(storage: KeyStorage, userId: number): string[] {
+  return bufferKeys(storage).filter((key) => missionIdOfBufferKey(key, userId) === null);
+}
+
 let purgeEpoch = 0;
 
 /** Compteur incrémenté à chaque purge : une écriture lancée avant une purge doit s'abstenir. */
