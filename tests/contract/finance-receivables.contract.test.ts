@@ -289,7 +289,13 @@ describe("taux de retenue du client", () => {
 describe("fiche client /api/clients : taux de retenue réservés à la lecture finance", () => {
   const FINANCE_KEYS = ["withholdingVatRate", "withholdingIsRate", "withholdingIsBase", "withholdingUpdatedBy"];
 
-  it.each(["technician", "driver"])("%s : liste et fiche sans les taux", async (role) => {
+  it("driver : liste et fiche refusées (403)", async () => {
+    const clientId = await newClient("ttc");
+    expect((await call("GET", "/api/clients", "driver")).status).toBe(403);
+    expect((await call("GET", `/api/clients/${clientId}`, "driver")).status).toBe(403);
+  });
+
+  it.each(["technician"])("%s : liste et fiche sans les taux", async (role) => {
     const clientId = await newClient("ttc");
     const list = await call("GET", "/api/clients", role);
     expect(list.status).toBe(200);
