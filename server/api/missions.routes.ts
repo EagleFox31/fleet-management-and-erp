@@ -69,6 +69,7 @@ import {
 import type { FuelRecord } from "@shared/schema";
 import { idSchema } from "@shared/contracts/common";
 import { omitMissionBudget, redactMissionBudget, redactMissionPrice } from "../lib/mission-response-scope";
+import { redactMissionClientContact } from "../lib/mission-client-contact-scope";
 
 const log = moduleLogger("missions");
 
@@ -992,12 +993,12 @@ router.get("/:id", async (req, res) => {
       assignmentCompletedAt: assignment?.completedAt,
     });
 
-    return res.json(redactMissionBudget(req.user, {
+    return res.json(redactMissionBudget(req.user, redactMissionClientContact(req.user, {
       ...mission,
       ...executionDates,
       assignment: assignment || null,
       assignments: visibleAssignments,
-    }));
+    })));
   } catch (error) {
     log.error({ err: error, requestId: req.requestId }, "Get mission error");
     return res.status(500).json({ message: "Erreur serveur" });

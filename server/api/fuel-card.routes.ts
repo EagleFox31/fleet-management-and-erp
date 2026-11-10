@@ -5,6 +5,7 @@ import { treasuryService } from "../services/treasury-service";
 import { fuelCardService, toFuelCardAppError } from "../services/fuel-card-service";
 import { moduleLogger } from "../lib/logger";
 import { ownerScopeOf } from "../lib/client-scope";
+import { presentFuelCardBalance } from "../lib/fuel-balance-scope";
 import { withLogContext } from "../lib/error-log-context";
 import { resolveFuelUnitPrice } from "../lib/fuel-unit-price";
 import { AppError } from "../lib/app-error";
@@ -93,18 +94,15 @@ router.get("/source-accounts", authorize([...FUEL_RECHARGE_SOURCE_ROLES]), async
 });
 
 // Solde actuel de la carte carburant
-router.get("/balance", async (_req, res) => {
+router.get("/balance", async (req, res, next) => {
   try {
     const balance = await fuelCardService.getCurrentBalance();
-    return res.status(200).json(balance);
+    return res.status(200).json(presentFuelCardBalance(req.user, balance));
   } catch (error) {
-    console.error("Get fuel card balance error:", error);
-    return res.status(500).json({ message: "Erreur serveur" });
+    next(withLogContext(error, { event: "lecture du solde de la carte carburant en échec" }));
   }
 });
 
-// Recharger la carte carburant (crédit)
-// Rôles autorisés: admin, logistics, secretary
 router.post("/recharge", isFuelCardManager, async (req, res, next) => {
   try {
     const body = rechargeBodySchema.safeParse(req.body ?? {});
@@ -288,7 +286,7 @@ router.get("/stats-by-client", async (req, res, next) => {
 });
 
 // Statistiques mensuelles
-router.get("/monthly-stats", async (req, res) => {
+router.get("/monthly-stats", async (req, res, next) => {
   try {
     const year = parseInt(req.query.year as string) || new Date().getFullYear();
     const month = parseInt(req.query.month as string) || new Date().getMonth() + 1;
@@ -297,8 +295,7 @@ router.get("/monthly-stats", async (req, res) => {
     
     return res.status(200).json(stats);
   } catch (error) {
-    console.error("Get monthly fuel stats error:", error);
-    return res.status(500).json({ message: "Erreur serveur" });
+    next(withLogContext(error, { event: "statistiques mensuelles carburant en échec" }));
   }
 });
 
