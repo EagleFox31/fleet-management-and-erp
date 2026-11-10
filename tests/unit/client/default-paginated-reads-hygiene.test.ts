@@ -39,14 +39,10 @@ const DEFAULT_LIMITS: Record<string, number> = {
 };
 
 const FROZEN: Record<string, number> = {
-  // Lot 2 : sélecteur de véhicule des rotations (sa requête écrit un tableau sous `["/api/vehicles"]`,
-  // clé que d'autres écrans lisent comme `{ vehicles, total }`), inspections récentes et rotations.
-  "client/src/pages/inventory/tires/index.tsx": 4,
-  // Lot 3, tuiles et agrégats : flotte et stock du technicien, OT par technicien, tableaux de bord.
-  "client/src/pages/technician/fleet-status.tsx": 2,
-  "client/src/pages/technicians/index.tsx": 1,
-  "client/src/pages/maintenance/gmao-dashboard.tsx": 1,
-  "client/src/pages/workshop-manager/dashboard.tsx": 1,
+  // Lot 2b : rotations (la route ignore `limit` et rend tout ; lecture sans `limit` à lever avec la route).
+  "client/src/pages/inventory/tires/index.tsx": 1,
+  // Lot 3 restant : pièces (aucun lecteur paginé de pièces encore), stock du technicien.
+  "client/src/pages/technician/fleet-status.tsx": 1,
   "client/src/pages/inventory/parts-database.tsx": 1,
   // `getAll` des services et hooks génériques, sans appelant d'écran repéré : à vérifier, pas supprimé.
   "client/src/lib/api-calls.ts": 4,

@@ -68,6 +68,15 @@ export function createDbRegistry(storage: () => Pick<Storage, "getItem" | "setIt
   }
   return {
     list: read,
+    remove(name: string): void {
+      try {
+        const known = read();
+        if (!known.includes(name)) return;
+        storage()?.setItem(OFFLINE_DB_REGISTRY_KEY, JSON.stringify(known.filter((n) => n !== name)));
+      } catch (err) {
+        clientLogger.warn("Registre des magasins hors ligne non mis à jour", { err, name });
+      }
+    },
     add(name: string): void {
       if (!isOfflineDbName(name)) return;
       try {
@@ -196,6 +205,8 @@ export interface OfflineKv {
   del(db: string, key: string): Promise<void>;
   /** Vide la base nommée (elle reste, sans enregistrement). */
   clearDb(db: string): Promise<void>;
+  /** Supprime la base vidée (et son entrée du registre), pour ne pas laisser de base vide par compte. Facultatif, au mieux. */
+  dropDb?(db: string): Promise<void>;
   /** Noms des bases `fleetos-offline-u*` connues du navigateur. */
   listDbs(): Promise<string[]>;
   /** Supprime une clé du store par défaut (ancien format global). */
@@ -238,6 +249,12 @@ export function createOfflineScope(kv: OfflineKv) {
       await kv.clearDb(db);
     } catch (err) {
       clientLogger.warn("Échec de purge d'un magasin hors ligne", { err, db });
+      return;
+    }
+    try {
+      await kv.dropDb?.(db);
+    } catch (err) {
+      clientLogger.warn("Suppression d'un magasin hors ligne vidé impossible", { err, db });
     }
   }
 
