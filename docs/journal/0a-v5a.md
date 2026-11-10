@@ -2,7 +2,7 @@
 
 ## 2026-11-10 - Préventif par date et papiers chauffeur dans le cycle périodique
 - **Statut** : fait
-- **Quoi** : (1) `checkDateBasedMaintenance` rejoué par l'ordonnanceur ; (2) alertes J-30, J-7 et échu sur le permis, la CNI et la CPC des chauffeurs actifs, adressées à admin et logistique.
+- **Quoi** : (1) `checkDateBasedMaintenance` rejoué par l'ordonnanceur ; (2) alertes J-30, J-7 et échu sur le permis, la CNI et la CPC des chauffeurs actifs, adressées à les rôles de DRIVER_MANAGER_ROLES.
 - **Comment** : `server/jobs/preventive-date-check.ts` (au plus un passage toutes les 6 h, appelé dans `runAlertCycle` après `runAllAlertChecks`, ne lève jamais) ; `server/services/driver-document-expiry.ts` (règle pure) et `AlertService.checkDriverDocumentAlerts`, ajouté à `runAllAlertChecks` ; clé de dédoublonnage `driver_doc:<papier>:<palier>:<chauffeur>:<échéance>`, index unique `(user_id, dedupe_key)` existant, aucune colonne ni contrainte ajoutée.
 - **Faille trouvée** : le garde anti-doublon de `createDateBasedWorkOrder` ne regardait que les OT « en attente ». `vehicles.nextMaintenanceDate` n'avance pas à la clôture : un OT démarré, en attente de pièces ou clos aurait été recréé à chaque passage. Garde alignée sur celle des plans : OT ouvert, ou clos pour une échéance égale ou postérieure (`work_orders.due_date`), bloque ; annulé ne bloque pas (`isDateBasedDueAlreadyHandled`, `server/lib/preventive-due.ts`).
 - **Pourquoi** : audit du 10/11, contrôles lancés à la main ou jamais. Les titres des paliers diffèrent : l'émission écarte une alerte non lue de même titre et même lien, un titre commun aurait fait taire J-7 derrière un J-30 non lu.

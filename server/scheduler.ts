@@ -3,6 +3,7 @@ import { moduleLogger } from "./lib/logger";
 import { backupTick } from "./jobs/backup-production";
 import { idempotencyPurgeTick } from "./jobs/idempotency-purge";
 import { preventiveDateCheckTick } from "./jobs/preventive-date-check";
+import { isPreventiveDateJobEnabled } from "./lib/preventive-date-job-config";
 import { clientBillingService } from "./services/client-billing-service";
 import { CLIENT_BILLING_EVENT_ROLES } from "@shared/constants/roles";
 
@@ -150,4 +151,10 @@ export function startBackgroundJobs(): void {
   }, ALERT_CHECK_INTERVAL_MS);
 
   log.info({ intervalSeconds: ALERT_CHECK_INTERVAL_MS / 1000 }, "cycle d'alertes et sauvegarde planifiés");
+  log.info(
+    { enabled: isPreventiveDateJobEnabled() },
+    isPreventiveDateJobEnabled()
+      ? "préventif par date et alertes papiers chauffeur actifs dans le cycle (PREVENTIVE_DATE_JOB_ENABLED)"
+      : "préventif par date et alertes papiers chauffeur désactivés (PREVENTIVE_DATE_JOB_ENABLED)",
+  );
 }

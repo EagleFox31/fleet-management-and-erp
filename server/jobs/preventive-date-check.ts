@@ -9,6 +9,7 @@
  * doublon), donc un redémarrage ou un second passage le même jour ne crée rien de plus.
  */
 import { moduleLogger } from "../lib/logger";
+import { isPreventiveDateJobEnabled } from "../lib/preventive-date-job-config";
 
 const log = moduleLogger("preventive-date-check");
 
@@ -24,13 +25,25 @@ export function isPreventiveDateCheckDue(
   return lastRunAt === null || now - lastRunAt >= minIntervalMs;
 }
 
+export const PREVENTIVE_DATE_CHECK_LOCK_KEY = "fleetos:preventive-date-check";
+
 export type PreventiveDateCheckDeps = {
   check: () => Promise<ReadonlyArray<{ id: number }>>;
+  /** Verrou inter-instances : sans lui, pas de garde. `tryLock` renvoie vrai si obtenu. */
+  lock?: { tryLock: () => Promise<boolean>; unlock: () => Promise<void> };
 };
 
 /** Un passage. Ne lève jamais : l'échec est journalisé et le cycle d'alertes continue. */
 export async function runPreventiveDateCheck(deps: PreventiveDateCheckDeps): Promise<number> {
+  let locked = false;
   try {
+    if (deps.lock) {
+      if (!(await deps.lock.tryLock())) {
+        log.info("préventif par date déjà en cours sur une autre instance, passage ignoré");
+        return 0;
+      }
+      locked = true;
+    }
     const created = await deps.check();
     if (created.length > 0) {
       log.info({ created: created.length, workOrderIds: created.map((wo) => wo.id) }, "OT préventifs par date créés");
@@ -39,7 +52,49 @@ export async function runPreventiveDateCheck(deps: PreventiveDateCheckDeps): Pro
   } catch (err) {
     log.error({ err }, "préventif par date en échec");
     return 0;
+  } finally {
+    if (locked) {
+      try {
+        await deps.lock!.unlock();
+      } catch (err) {
+        log.error({ err }, "libération du verrou du préventif par date en échec");
+      }
+    }
   }
+}
+
+/** Verrou consultatif Postgres sur une connexion dédiée de la chaîne directe (voir idempotency-purge). */
+async function createProductionLock(): Promise<NonNullable<PreventiveDateCheckDeps["lock"]>> {
+  const { listenerPool } = await import("../db");
+  type Client = { query: (q: string, p: unknown[]) => Promise<{ rows: Array<{ ok?: boolean }> }>; release: () => void };
+  let client: Client | null = null;
+  return {
+    async tryLock() {
+      const c = await (listenerPool as unknown as { connect: () => Promise<Client> }).connect();
+      try {
+        const res = await c.query("SELECT pg_try_advisory_lock(hashtext($1)) AS ok", [PREVENTIVE_DATE_CHECK_LOCK_KEY]);
+        if (res.rows[0]?.ok === true) {
+          client = c;
+          return true;
+        }
+      } catch (err) {
+        c.release();
+        throw err;
+      }
+      c.release();
+      return false;
+    },
+    async unlock() {
+      if (!client) return;
+      const c = client;
+      client = null;
+      try {
+        await c.query("SELECT pg_advisory_unlock(hashtext($1))", [PREVENTIVE_DATE_CHECK_LOCK_KEY]);
+      } finally {
+        c.release();
+      }
+    },
+  };
 }
 
 let lastRunAt: number | null = null;
@@ -47,12 +102,16 @@ let running = false;
 
 /** Point d'entrée de l'ordonnanceur : garde de fréquence et anti-chevauchement. */
 export async function preventiveDateCheckTick(now: number = Date.now()): Promise<void> {
+  if (!isPreventiveDateJobEnabled()) return;
   if (running || !isPreventiveDateCheckDue(lastRunAt, now)) return;
   running = true;
   lastRunAt = now;
   try {
     const { preventiveMaintenanceService } = await import("../services/preventive-maintenance-service");
-    await runPreventiveDateCheck({ check: () => preventiveMaintenanceService.checkDateBasedMaintenance() });
+    await runPreventiveDateCheck({
+      check: () => preventiveMaintenanceService.checkDateBasedMaintenance(),
+      lock: await createProductionLock(),
+    });
   } finally {
     running = false;
   }

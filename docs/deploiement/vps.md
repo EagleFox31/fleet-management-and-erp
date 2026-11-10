@@ -14,6 +14,7 @@ Profils :
 - `SESSION_SECRET` : aléatoire (`openssl rand -hex 32`), distinct par environnement. **Absente, de moins de 32 caractères ou égale à une valeur publique du dépôt, le serveur refuse de démarrer** (`server/lib/session-secret.ts`).
 - `APP_URL` : URL publique de l'environnement (CORS).
 - `BACKUP_ENABLED=0` : la sauvegarde applicative exige `pg_dump` et `BACKUP_KEY`, absents de l'image ; sauvegarde par `pg_dump` depuis l'hôte (§6).
+- `PREVENTIVE_DATE_JOB_ENABLED` (facultative, active par défaut ; `false` ou `0` la coupe) : préventif par date et alertes permis/CNI/CPC dans le cycle du scheduler ; laisser active sur UNE seule instance.
 
 Dans `deploy/.env` : `RECETTE_DB_PASSWORD` et `PROD_DB_PASSWORD` (vides : Postgres refuse de démarrer).
 

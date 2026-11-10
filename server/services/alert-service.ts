@@ -1,5 +1,6 @@
 import type { NotificationTopic } from "@shared/contracts/notification-settings";
-import type { AppRole } from "@shared/constants/roles";
+import { DRIVER_MANAGER_ROLES, type AppRole } from "@shared/constants/roles";
+import { isPreventiveDateJobEnabled } from "../lib/preventive-date-job-config";
 import { filterUsersByTopic } from "./notification-preferences-service";
 import { storage } from "../storage";
 import type { Vehicle, Alert } from "../../shared/schema";
@@ -188,11 +189,8 @@ export class AlertService {
     "warehouse",
   ];
 
-  // Papiers des chauffeurs (permis, CNI, CPC) : les rôles qui gèrent les chauffeurs.
-  private readonly driverDocumentRecipients: AlertRecipientRole[] = [
-    "admin",
-    "logistics",
-  ];
+  // Papiers des chauffeurs (permis, CNI, CPC) : source unique DRIVER_MANAGER_ROLES (admin, logistique, secrétaire).
+  private readonly driverDocumentRecipients: AlertRecipientRole[] = [...DRIVER_MANAGER_ROLES];
 
   // Stock bas : le magasin réapprovisionne, l'admin surveille (décision du 3 novembre 2026).
   private readonly lowStockRecipients: AlertRecipientRole[] = [
@@ -1374,7 +1372,7 @@ export class AlertService {
           await this.checkMissionAlerts();
           await this.checkIncompleteSupplierAlerts();
           await this.checkTypedDocumentExpiryAlerts();
-          await this.checkDriverDocumentAlerts();
+          if (isPreventiveDateJobEnabled()) await this.checkDriverDocumentAlerts();
         });
       } finally {
         const created = await this.emitAlerts(batch);

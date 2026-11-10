@@ -8,14 +8,14 @@ import { createTestUser } from "../support/factories";
 
 /**
  * V5a : alertes d'échéance du permis, de la CNI et de la CPC des chauffeurs (J-30, J-7, échu),
- * adressées à admin et logistique, sans doublon d'un passage à l'autre.
+ * adressées aux DRIVER_MANAGER_ROLES, sans doublon d'un passage à l'autre.
  */
 const ids = createIdBag();
 const driverIds: number[] = [];
 
 // Hors préfixe TEST_ : le passage touche tous les destinataires réels, le ménage global des autres suites ne doit pas les emporter.
 const own = () => Math.random().toString(36).slice(2, 10);
-const ownUser = (role: "admin" | "logistics" | "workshop_manager") =>
+const ownUser = (role: "admin" | "logistics" | "secretary" | "workshop_manager") =>
   createTestUser({ role, username: `v5a-${own()}`, email: `v5a-${own()}@fleet.test` });
 
 function dayOffset(days: number): string {
@@ -52,11 +52,12 @@ afterEach(async () => {
 });
 
 describe("alertes d'échéance des papiers chauffeur (V5a)", { timeout: 120000 }, () => {
-  it("J-30, J-7, échu : une alerte par papier chez admin et logistique, aucune ailleurs, aucune au second passage", async () => {
+  it("J-30, J-7, échu : une alerte par papier chez admin, logistique et secrétaire, aucune ailleurs, aucune au second passage", async () => {
     const admin = await ownUser("admin");
     const logistics = await ownUser("logistics");
+    const secretary = await ownUser("secretary");
     const other = await ownUser("workshop_manager");
-    ids.userIds.push(admin.id, logistics.id, other.id);
+    ids.userIds.push(admin.id, logistics.id, secretary.id, other.id);
     // Formation CPC il y a 731 + 3 jours : échue depuis 3 jours.
     const driver = await addDriver({
       licenseExpiry: dayOffset(30),
@@ -65,7 +66,7 @@ describe("alertes d'échéance des papiers chauffeur (V5a)", { timeout: 120000 }
     });
 
     await alertService.checkDriverDocumentAlerts();
-    for (const user of [admin, logistics]) {
+    for (const user of [admin, logistics, secretary]) {
       const mine = await alertsOf(user.id, driver.id);
       expect(mine).toHaveLength(3);
       const byKind = Object.fromEntries(mine.map((a) => [a.dedupeKey!.split(":")[1], a]));
@@ -81,6 +82,7 @@ describe("alertes d'échéance des papiers chauffeur (V5a)", { timeout: 120000 }
     await alertService.checkDriverDocumentAlerts();
     expect(await alertsOf(admin.id, driver.id)).toHaveLength(3);
     expect(await alertsOf(logistics.id, driver.id)).toHaveLength(3);
+    expect(await alertsOf(secretary.id, driver.id)).toHaveLength(3);
   });
 
   it("une alerte lue ne revient pas, une non lue ne masque pas le palier suivant ; chaque palier (J-30, J-7, échu) crée sa propre alerte", async () => {
