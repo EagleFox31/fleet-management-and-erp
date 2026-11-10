@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate, isDriverManager } from "../middleware/auth";
+import { authenticate, isDriverDirectoryReader, isDriverManager } from "../middleware/auth";
 import { cpcTrainingService } from "../services/cpc-training-service";
 import { AppError } from "../lib/app-error";
 import { parseRouteId } from "../lib/route-id";
@@ -62,7 +62,7 @@ router.use(authenticate);
  * Récupère tous les chauffeurs avec statut CPC
  * Route principale pour l'affichage des chauffeurs
  */
-router.get("/", async (req, res, next) => {
+router.get("/", isDriverDirectoryReader, async (req, res, next) => {
   try {
     const drivers = await cpcTrainingService.getAllDriversStatus();
     return res.status(200).json(await redactDriverPersonalData(req.user, drivers));
@@ -75,7 +75,7 @@ router.get("/", async (req, res, next) => {
  * GET /api/drivers/cpc-status
  * Récupère tous les chauffeurs avec statut CPC (alias de GET /api/drivers)
  */
-router.get("/cpc-status", async (req, res, next) => {
+router.get("/cpc-status", isDriverDirectoryReader, async (req, res, next) => {
   try {
     const statuses = await cpcTrainingService.getAllDriversStatus();
     return res.status(200).json(await redactDriverPersonalData(req.user, statuses));
@@ -88,7 +88,7 @@ router.get("/cpc-status", async (req, res, next) => {
  * GET /api/drivers/expiring-cpc
  * Récupère les chauffeurs nécessitant formation CPC
  */
-router.get("/expiring-cpc", async (req, res, next) => {
+router.get("/expiring-cpc", isDriverDirectoryReader, async (req, res, next) => {
   try {
     const alerts = await cpcTrainingService.getExpiringCPCAlerts();
     return res.status(200).json(await redactDriverPersonalData(req.user, alerts));
@@ -153,7 +153,7 @@ router.post("/:id/update-cpc", (req, res, next) => {
  * GET /api/drivers/cpc-statistics
  * Statistiques formations CPC
  */
-router.get("/cpc-statistics", async (req, res, next) => {
+router.get("/cpc-statistics", isDriverDirectoryReader, async (req, res, next) => {
   try {
     const stats = await cpcTrainingService.getCPCStatistics();
     return res.status(200).json(stats);
@@ -166,7 +166,7 @@ router.get("/cpc-statistics", async (req, res, next) => {
  * GET /api/drivers/:id/cpc-status
  * Récupère statut CPC d'un chauffeur spécifique
  */
-router.get("/:id/cpc-status", async (req, res, next) => {
+router.get("/:id/cpc-status", isDriverDirectoryReader, async (req, res, next) => {
   try {
     const driverId = parseRouteId(req.params.id, "ID de chauffeur invalide");
     
