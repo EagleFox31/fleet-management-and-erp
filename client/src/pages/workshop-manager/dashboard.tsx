@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useAllWorkOrders } from "@/hooks/use-all-work-orders";
 import { Link, useLocation } from "wouter";
 import {
   BarChart3,
@@ -47,7 +48,7 @@ export default function WorkshopManagerDashboard() {
 
   const { data: workOrderStats } = useQuery<any>({ queryKey: ["/api/work-orders/statistics"] });
   const { data: teamMembers = [] } = useQuery<any[]>({ queryKey: ["/api/users/technicians"] });
-  const { data: workOrdersData } = useQuery<any>({ queryKey: ["/api/work-orders"] });
+  const { data: allWorkOrders = [] } = useAllWorkOrders();
   const { data: fleetStats } = useQuery<any>({ queryKey: ["/api/statistics/fleet"] });
   const { data: complianceStats, isError: complianceError } = useQuery<any>({ queryKey: ["/api/statistics/maintenance-compliance"] });
   const { data: cpcStats } = useQuery<any>({ queryKey: ["/api/drivers/cpc-statistics"] });
@@ -84,7 +85,6 @@ export default function WorkshopManagerDashboard() {
   const cpcToTrain = Number(cpcStats?.aFormer || 0);
   const cpcNotFormed = Number(cpcStats?.nonForme || 0);
 
-  const allWorkOrders = Array.isArray(workOrdersData?.workOrders) ? workOrdersData.workOrders : [];
   const techniciansOnly = Array.isArray(teamMembers) ? teamMembers.filter((m: any) => m?.role === "technician") : [];
   const activeOrderStatuses = new Set(["pending", "in_progress", "awaiting_parts"]);
   const workshopInProgressCount =
