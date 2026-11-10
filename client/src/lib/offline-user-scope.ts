@@ -162,7 +162,7 @@ function myWorkOrdersOf(data: unknown): Array<{ id: number; vehicleId: number | 
  * sans donnée n'est jamais retenue. Tout le reste (catalogue de pièces,
  * tableaux de bord, factures, autres OT) est exclu.
  */
-export function selectPersistableQueries<T extends CachedQueryLike>(queries: readonly T[]): T[] {
+export function selectTechnicianQueries<T extends CachedQueryLike>(queries: readonly T[]): T[] {
   const mine = queries.find(
     (q) => q.queryKey.length === 1 && q.queryKey[0] === MY_WORK_ORDERS_PATH && q.state.status === "success",
   );
@@ -183,6 +183,142 @@ export function selectPersistableQueries<T extends CachedQueryLike>(queries: rea
     if (vehicle) return vehicleIds.has(Number(vehicle[1]));
     return false;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Profils de lecture hors ligne (une table, aucun `if role`)
+// ---------------------------------------------------------------------------
+
+/** Statuts de mission lisibles hors ligne pour un chauffeur (décision 3 de V5b). */
+export const DRIVER_OFFLINE_MISSION_STATUSES: readonly string[] = ["in_progress", "delivered"];
+
+export const DRIVER_ME_PATH = "/api/drivers/me";
+export const FUEL_CARD_BALANCE_PATH = "/api/fuel-card/balance";
+const DRIVER_MISSION_PATH = /^\/api\/missions\/(\d+)(?:\/(fuel-records|launch-readiness|pod-files))?$/;
+
+type FlagReader = (flag: string) => boolean;
+
+/**
+ * Un profil dit quelles requêtes sont gardées et sous quels drapeaux. L'ancre (la
+ * requête qui prouve à qui appartient le cache) vient des données du compte, jamais
+ * de l'URL : sans ancre valide, le profil ne retient rien.
+ */
+export interface OfflineReadProfile {
+  id: string;
+  /** Drapeaux qui doivent tous être allumés ; aucun = toujours actif. */
+  flags: readonly string[];
+  select<T extends CachedQueryLike>(queries: readonly T[]): T[];
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function positiveInt(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
+ * Réduction de `/api/drivers/me` à l'identité du chauffeur et à ses missions en cours ou
+ * livrées. La fiche complète (permis, CNI, naissance, CPC, matricule) n'est jamais gardée.
+ */
+export function projectDriverMe(
+  data: unknown,
+): { driver: { id: number; firstName?: string; lastName?: string }; missions: Record<string, unknown>[] } | null {
+  const root = asRecord(data);
+  const driver = asRecord(root?.driver);
+  const driverId = positiveInt(driver?.id);
+  if (!root || !driver || driverId === null || !Array.isArray(root.missions)) return null;
+  const missions = root.missions.flatMap((m) => {
+    const mission = asRecord(m);
+    const id = positiveInt(mission?.id);
+    if (!mission || id === null || !DRIVER_OFFLINE_MISSION_STATUSES.includes(String(mission.status))) return [];
+    return [mission];
+  });
+  return {
+    driver: {
+      id: driverId,
+      ...(typeof driver.firstName === "string" ? { firstName: driver.firstName } : {}),
+      ...(typeof driver.lastName === "string" ? { lastName: driver.lastName } : {}),
+    },
+    missions,
+  };
+}
+
+/** Le détail d'une mission n'est gardé que s'il reste lisible hors ligne et porte une affectation du chauffeur. */
+function missionDataIsOwnedBy(kind: string, data: unknown, missionId: number, driverId: number): boolean {
+  const body = asRecord(data);
+  if (!body) return false;
+  if (kind === "detail") {
+    if (positiveInt(body.id) !== missionId) return false;
+    if (!DRIVER_OFFLINE_MISSION_STATUSES.includes(String(body.status))) return false;
+    const assignments = Array.isArray(body.assignments) ? body.assignments : body.assignment ? [body.assignment] : [];
+    return assignments.some((a) => positiveInt(asRecord(a)?.driverId) === driverId);
+  }
+  if (kind === "fuel-records") {
+    return positiveInt(body.missionId) === missionId && DRIVER_OFFLINE_MISSION_STATUSES.includes(String(body.missionStatus));
+  }
+  return true;
+}
+
+export const DRIVER_READ_PROFILE: OfflineReadProfile = {
+  id: "driver",
+  flags: ["driver-offline", "offline-writes"],
+  select<T extends CachedQueryLike>(queries: readonly T[]): T[] {
+    const anchor = queries.find(
+      (q) => q.queryKey.length === 1 && q.queryKey[0] === DRIVER_ME_PATH && q.state.status === "success",
+    );
+    const me = anchor ? projectDriverMe(anchor.state.data) : null;
+    if (!anchor || !me) return [];
+    const missionIds = new Set(me.missions.flatMap((m) => positiveInt(m.id) ?? []));
+    const result: T[] = [{ ...anchor, state: { ...anchor.state, data: me } }];
+    for (const q of queries) {
+      if (q === anchor || q.state.status !== "success" || q.state.data === undefined) continue;
+      if (q.queryKey.length !== 1 || typeof q.queryKey[0] !== "string") continue;
+      const path = q.queryKey[0];
+      if (path === FUEL_CARD_BALANCE_PATH) {
+        result.push(q);
+        continue;
+      }
+      const match = DRIVER_MISSION_PATH.exec(path);
+      if (!match) continue;
+      const missionId = Number(match[1]);
+      if (!missionIds.has(missionId)) continue;
+      if (missionDataIsOwnedBy(match[2] ?? "detail", q.state.data, missionId, me.driver.id)) result.push(q);
+    }
+    return result;
+  },
+};
+
+export const TECHNICIAN_READ_PROFILE: OfflineReadProfile = {
+  id: "technician",
+  flags: [],
+  select: selectTechnicianQueries,
+};
+
+/** Table des profils : ajouter un profil ici, jamais un test de rôle ailleurs. */
+export const OFFLINE_READ_PROFILES: readonly OfflineReadProfile[] = [TECHNICIAN_READ_PROFILE, DRIVER_READ_PROFILE];
+
+/**
+ * Requêtes à persister : union des profils actifs. Sans lecteur de drapeaux, seuls les
+ * profils sans drapeau (technicien) sont actifs, donc rien ne change drapeaux éteints.
+ */
+export function selectPersistableQueries<T extends CachedQueryLike>(
+  queries: readonly T[],
+  isFlagOn: FlagReader = () => false,
+): T[] {
+  const picked = new Set<T>();
+  const ordered: T[] = [];
+  for (const profile of OFFLINE_READ_PROFILES) {
+    if (!profile.flags.every((flag) => isFlagOn(flag))) continue;
+    for (const q of profile.select(queries)) {
+      if (picked.has(q)) continue;
+      picked.add(q);
+      ordered.push(q);
+    }
+  }
+  return ordered;
 }
 
 // ---------------------------------------------------------------------------
@@ -311,10 +447,15 @@ export function createOfflineScope(kv: OfflineKv) {
     /** Compteur de purge du magasin d'un utilisateur, à relever avant une écriture asynchrone. */
     epochOf: (userId: number) => epochOfDb(offlineDbName(userId)),
 
-    async saveCache(userId: number, queries: readonly CachedQueryLike[], now = Date.now()): Promise<number> {
+    async saveCache(
+      userId: number,
+      queries: readonly CachedQueryLike[],
+      now = Date.now(),
+      isFlagOn?: FlagReader,
+    ): Promise<number> {
       const db = offlineDbName(userId);
       const startedAt = epochOfDb(db);
-      const persistable = selectPersistableQueries(queries).map((q) => ({
+      const persistable = selectPersistableQueries(queries, isFlagOn).map((q) => ({
         queryKey: q.queryKey,
         state: { data: q.state.data, dataUpdatedAt: q.state.dataUpdatedAt },
       }));
@@ -334,7 +475,7 @@ export function createOfflineScope(kv: OfflineKv) {
       return persistable.length;
     },
 
-    async loadCache(userId: number, now = Date.now()): Promise<PersistedQuery[]> {
+    async loadCache(userId: number, now = Date.now(), isFlagOn?: FlagReader): Promise<PersistedQuery[]> {
       const db = offlineDbName(userId);
       const saved = await kv.get<CacheEnvelope>(db, CACHE_RECORD_KEY);
       if (!saved) return [];
@@ -352,6 +493,7 @@ export function createOfflineScope(kv: OfflineKv) {
           queryKey: q.queryKey,
           state: { data: q.state?.data, dataUpdatedAt: q.state?.dataUpdatedAt, status: "success" },
         })),
+        isFlagOn,
       ).map((q) => ({
         queryKey: q.queryKey,
         state: { data: q.state.data, dataUpdatedAt: q.state.dataUpdatedAt },

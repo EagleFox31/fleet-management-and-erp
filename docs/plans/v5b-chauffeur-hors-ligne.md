@@ -82,6 +82,8 @@ V5b-2 livre le cœur commun que #10c technicien doit réutiliser (à coordonner)
 
 Statut V5b-2 (2026-11-10) : livré en PR brouillon `feat/v5b-2-offline-queue-core`. API : `enqueueOfflineWrite`, `replayOfflineQueue`, `useOfflineQueue`, `registerOfflineAction`, `useGuardedLogout`. Reste pour V5b-5 : constructeur multipart (`setOfflineMultipartBuilder`) et magasin de fichiers (préfixe de clé `files:` déjà réservé).
 
+Statut V5b-3 (2026-11-10) : livré en PR brouillon `feat/v5b-3-offline-read` (liste blanche chauffeur par profil, ancre `/api/drivers/me`, fiche personnelle coupée, bandeau sur le tableau de bord chauffeur, derrière `driver-offline` et `offline-writes`). e2e hors ligne reste à faire.
+
 ## 6. Décisions de 0a (2026-11-10)
 
 1. Déconnexion avec envois en attente : blocage + choix « Supprimer N envois » avec confirmation.

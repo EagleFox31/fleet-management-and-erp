@@ -12,9 +12,11 @@ import {
   announceKeptSends,
   cancelScheduledReplay,
   enqueueOfflineWrite,
+  isOfflineFlagEnabled,
   replayOnReconnect,
   startOfflineQueueRuntime,
 } from "@/lib/offline-queue";
+import { FEATURE_FLAGS_PATH, isFeatureKey } from "@shared/feature-flags";
 import { releaseReplayGate } from "@/lib/offline-replay-gate";
 import { OFFLINE_QUEUED_MESSAGE } from "@/lib/offline-queue-core";
 import { toast } from "@/hooks/use-toast";
@@ -110,6 +112,18 @@ export async function expireOfflineSession(queryClient: QueryClient, userId: num
   void announceKeptSends(userId);
 }
 
+/** Lecteur de drapeaux des profils de lecture hors ligne (un drapeau inconnu est éteint). */
+const readFlag = (flag: string): boolean => isFeatureKey(flag) && isOfflineFlagEnabled(flag);
+
+/**
+ * À la restauration, les drapeaux ne sont pas encore connus au démarrage hors ligne (la requête des
+ * drapeaux ne peut pas aboutir) : tant qu'ils sont inconnus, on relit ce qui a été écrit, et cela
+ * n'a été écrit que drapeaux allumés. Une fois connus, ils s'appliquent comme à l'écriture.
+ */
+function restoreFlagReader(queryClient: QueryClient): (flag: string) => boolean {
+  return queryClient.getQueryData([FEATURE_FLAGS_PATH]) === undefined ? () => true : readFlag;
+}
+
 /**
  * Persiste dans IndexedDB les seules requêtes de la liste blanche, dans le
  * magasin de l'utilisateur actif.
@@ -128,6 +142,8 @@ export async function persistQueryClientToIndexedDB(queryClient: QueryClient): P
           dataUpdatedAt: query.state.dataUpdatedAt,
         },
       })),
+      Date.now(),
+      readFlag,
     );
   } catch (err) {
     clientLogger.warn("Échec de sauvegarde du cache dans IndexedDB", { err });
@@ -142,7 +158,7 @@ export async function restoreQueryClientFromIndexedDB(queryClient: QueryClient):
   const userId = getActiveOfflineUserId();
   if (userId === null) return 0;
   try {
-    const queries = await offlineScope.loadCache(userId);
+    const queries = await offlineScope.loadCache(userId, Date.now(), restoreFlagReader(queryClient));
     // L'utilisateur a pu changer pendant la lecture : ne rien appliquer.
     if (getActiveOfflineUserId() !== userId) return 0;
 

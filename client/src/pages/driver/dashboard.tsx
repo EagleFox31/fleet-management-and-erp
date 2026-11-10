@@ -36,6 +36,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { ContextualHelpButton } from "@/components/help";
 import { useGuardedLogout } from "@/components/offline/logout-guard";
+import { OfflineDataBanner } from "@/components/offline/offline-data-banner";
 import { useToast } from "@/hooks/use-toast";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -704,7 +705,7 @@ export default function DriverDashboard() {
   const [showFuelSheet, setShowFuelSheet] = useState(false);
   const [activeTab, setActiveTab] = useState<"mission" | "perf">("mission");
 
-  const { data: driverData, isLoading } = useQuery<DriverMe>({
+  const { data: driverData, isLoading, dataUpdatedAt: driverDataUpdatedAt } = useQuery<DriverMe>({
     queryKey: ["/api/drivers/me"],
     staleTime: 30_000,
   });
@@ -787,6 +788,7 @@ export default function DriverDashboard() {
           </button>
         </div>
       </header>
+      <OfflineDataBanner updatedAt={driverDataUpdatedAt} />
 
       {/* ── Tab bar ─────────────────────────────────────────────── */}
       <div className="sticky top-[56px] z-30 bg-card border-b border-gray-100 flex" style={{ boxShadow: "0 1px 0 #f0f0f0" }}>
