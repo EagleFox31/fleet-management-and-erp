@@ -99,7 +99,7 @@ export const LOT_SCREENS: readonly LotScreen[] = [
   },
   {
     id: "incidents-list", path: "/incidents", title: "Pannes déclarées", task: "T-52", feature: "incidents",
-    description: "Pannes remontées par les chauffeurs, avec création de l'ordre de travail.",
+    description: "Pannes remontées par les chauffeurs.",
     roles: WORKSHOP, menu: { group: "maintenance", label: "Pannes déclarées", icon: AlertTriangle },
   },
   {

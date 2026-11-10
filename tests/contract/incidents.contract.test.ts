@@ -60,10 +60,11 @@ afterAll(async () => {
 
 describe("déclaration de panne", { timeout: 180000 }, () => {
   it("applique le périmètre par rôle", async () => {
-    // Drapeau coupé (défaut): la route n'existe pas.
-    delete process.env.FEATURE_FLAGS;
+    // Drapeau coupé explicitement: la route n'existe pas. Sans surcharge, il est actif par défaut.
+    process.env.FEATURE_FLAGS = "incidents=off";
     expect((await call("GET", null)).status).toBe(404);
-    process.env.FEATURE_FLAGS = "incidents=on";
+    delete process.env.FEATURE_FLAGS;
+    expect((await call("GET", null)).status).toBe(401);
 
     const driverUser = await createTestUser({ role: "driver" });
     const manager = await createTestUser({ role: "workshop_manager" });
@@ -103,6 +104,7 @@ describe("déclaration de panne", { timeout: 180000 }, () => {
     expect(created.status).toBe(201);
     expect(incidentSchema.safeParse(created.body).success).toBe(true);
     expect(created.body.status).toBe("open");
+    expect(created.body.vehicleRegistration).toBe(own.registrationNumber);
     expect((await call("POST", driverCookie, payload(other.id))).status).toBe(403);
 
     // Personnel: n'importe quel véhicule.
@@ -114,6 +116,7 @@ describe("déclaration de panne", { timeout: 180000 }, () => {
     expect(incidentsResponseSchema.safeParse(mine.body).success).toBe(true);
     expect(mine.body.every((i: { reportedBy: number }) => i.reportedBy === driverUser.id)).toBe(true);
     expect(mine.body.some((i: { id: number }) => i.id === created.body.id)).toBe(true);
+    expect(mine.body.find((i: { id: number }) => i.id === created.body.id).vehicleRegistration).toBe(own.registrationNumber);
     const all = await call("GET", managerCookie, undefined, "/api/incidents?status=open");
     expect(all.status).toBe(200);
     expect(all.body.length).toBeGreaterThanOrEqual(2);

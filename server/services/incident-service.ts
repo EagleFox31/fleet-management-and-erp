@@ -7,7 +7,7 @@
  * - insertion avec les champs d'audit (`created_by`, `updated_by`) ;
  * - après l'insertion : alerte au chef d'atelier et à l'admin (dédupliquée par
  *   `dedupe_key`, donc un retry est sans doublon) puis événement
- *   `incident_reported` (roles workshop_manager et admin).
+ *   `incident_reported` (atelier et logistique, voir REALTIME_EVENTS).
  *
  * Le routeur (`server/api/incidents.routes.ts`) est à l'API : il appelle
  * `createIncident(user, body)` et `listIncidents(user, query)`.
@@ -18,6 +18,7 @@ import type { CreateIncidentRequest, Incident, IncidentStatus } from "@shared/co
 import { ACTIVE_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
+import { REALTIME_EVENTS } from "@shared/contracts/realtime-events";
 import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 
 const log = moduleLogger("incidents");
@@ -105,10 +106,11 @@ export async function defaultDeps(): Promise<IncidentDeps> {
   };
 }
 
-function toIncident(row: typeof incidents.$inferSelect, reportedByName: string | null): Incident {
+function toIncident(row: typeof incidents.$inferSelect, reportedByName: string | null, vehicleRegistration: string | null): Incident {
   return {
     id: row.id,
     vehicleId: row.vehicleId,
+    vehicleRegistration,
     reportedBy: row.reportedBy,
     reportedByName,
     description: row.description,
@@ -211,7 +213,8 @@ export async function createIncident(
     entity: "incident",
     entityId: row.id,
     payload: { id: row.id, vehicleId: row.vehicleId, severity: row.severity },
-    scope: { type: "roles", roles: ["workshop_manager", "admin"] },
+    // Même portée que la définition partagée : atelier et logistique (avis de maintenance de mission).
+    scope: REALTIME_EVENTS.incident_reported.scope,
   });
 
   if (workOrder) {
@@ -229,7 +232,12 @@ export async function createIncident(
     });
   }
 
-  return toIncident(row, null);
+  const [plate] = await d.db
+    .select({ registrationNumber: vehicles.registrationNumber })
+    .from(vehicles)
+    .where(eq(vehicles.id, input.vehicleId))
+    .limit(1);
+  return toIncident(row, null, plate?.registrationNumber ?? null);
 }
 
 export async function listIncidents(
@@ -246,10 +254,11 @@ export async function listIncidents(
     actor.role === "driver" ? eq(incidents.reportedBy, actor.id) : undefined,
   ].filter((f) => f !== undefined);
   const rows = await db
-    .select({ incident: incidents, name: users.name })
+    .select({ incident: incidents, name: users.name, plate: vehicles.registrationNumber })
     .from(incidents)
     .leftJoin(users, eq(incidents.reportedBy, users.id))
+    .leftJoin(vehicles, eq(incidents.vehicleId, vehicles.id))
     .where(filters.length ? and(...filters) : undefined)
     .orderBy(desc(incidents.createdAt));
-  return rows.map((r: { incident: typeof incidents.$inferSelect; name: string | null }) => toIncident(r.incident, r.name));
+  return rows.map((r: { incident: typeof incidents.$inferSelect; name: string | null; plate: string | null }) => toIncident(r.incident, r.name, r.plate));
 }

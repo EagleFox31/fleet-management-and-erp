@@ -247,6 +247,7 @@ export const MOCK_ROUTES: MockRoute[] = [
       const incident = {
         id: Math.max(0, ...store.incidents.map((i) => i.id)) + 1,
         ...parsed.data,
+        vehicleRegistration: "TEST-013",
         reportedBy: 21,
         reportedByName: "Ali Sawadogo",
         status: "open" as const,

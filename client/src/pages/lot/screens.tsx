@@ -1,22 +1,19 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { Redirect } from "wouter";
 import { BackupsPanel } from "@/components/admin/backups-panel";
 import { PendingInvoicesTable } from "@/components/billing/pending-invoices-table";
 import { InvoicesAwaitingPaymentTable } from "@/components/finance/invoices-awaiting-payment-table";
 import { WithholdingsSummary } from "@/components/finance/withholdings-summary";
 import { FuelAnomaliesTable } from "@/components/fuel/fuel-anomalies-table";
 import { FuelVouchersTable } from "@/components/fuel/fuel-vouchers-table";
-import { IncidentForm } from "@/components/incidents/incident-form";
 import { IncidentList } from "@/components/incidents/incident-list";
 import { TireMovementsTable } from "@/components/inventory/tire-movements-table";
 import { TimeGrid } from "@/components/time-tracking/time-grid";
 import { Input } from "@/components/ui/input";
-import { LoadingError } from "@/components/ui/loading-error";
 import { TariffGridTable } from "@/components/operations/tariff-grid-table";
 import { MissionOperationsTable } from "@/components/operations/mission-operations-table";
 import { MISSION_OPERATIONS_WRITE_ROLES } from "@shared/constants/roles";
 import { useAuth } from "@/hooks/useAuth";
-import { driverVehicleOptions, fleetVehicleOptions } from "@/lib/incident-vehicles";
 import { canEditTankCapacity, canWriteFinanceReceivable, canWriteFuel, canWriteTariffGrid, canWriteTimeTracking } from "@shared/constants/roles";
 
 /** Écrans du lot : fines enveloppes, la garde de rôle et de drapeau est posée par `lot-routes`. */
@@ -85,48 +82,10 @@ export function TimeTrackingScreen() {
   );
 }
 
+/**
+ * Un seul point d'entrée chauffeur : le tableau de bord (`/driver`), qui envoie à `/api/driver/breakdowns`.
+ * L'ancienne adresse redirige vers lui, sans entrée de menu supplémentaire.
+ */
 export function IncidentDeclareScreen() {
-  const { user } = useAuth();
-  const isDriver = user?.role === "driver";
-  // Chauffeur : ses véhicules via ses missions ; administrateur : la flotte.
-  const me = useQuery<unknown>({ queryKey: ["/api/drivers/me"], enabled: isDriver });
-  const fleet = useQuery<unknown>({ queryKey: ["/api/vehicles"], enabled: !isDriver });
-  const source = isDriver ? me : fleet;
-  const list = isDriver
-    ? driverVehicleOptions(me.data as Parameters<typeof driverVehicleOptions>[0])
-    : fleetVehicleOptions(fleet.data);
-  const [chosen, setChosen] = useState<number | null>(null);
-  const vehicleId = list.some((v) => v.id === chosen) ? chosen : list[0]?.id;
-
-  if (source.isLoading || source.isError) {
-    return (
-      <div className="mx-auto max-w-xl p-4">
-        <LoadingError isLoading={source.isLoading} error={source.error} onRetry={() => source.refetch()} />
-      </div>
-    );
-  }
-  return (
-    <div className="mx-auto max-w-xl space-y-4 p-4">
-      {list.length > 1 && (
-        <select
-          className="h-9 w-full rounded-md border bg-background px-2"
-          value={vehicleId ?? ""}
-          onChange={(e) => setChosen(Number(e.target.value))}
-          aria-label="Véhicule"
-          data-testid="select-incident-vehicle"
-        >
-          {list.map((v) => (
-            <option key={v.id} value={v.id}>
-              {v.label}
-            </option>
-          ))}
-        </select>
-      )}
-      {vehicleId ? (
-        <IncidentForm vehicleId={vehicleId} />
-      ) : (
-        <p className="text-sm text-muted-foreground" data-testid="incident-no-vehicle">Aucun véhicule affecté.</p>
-      )}
-    </div>
-  );
+  return <Redirect to="/driver" />;
 }
