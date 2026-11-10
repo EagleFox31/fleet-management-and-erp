@@ -58,6 +58,6 @@ describe("lot V3 point 3 : incidents", () => {
 
   it("l'alerte temps réel atteint aussi la logistique", () => {
     expect(REALTIME_EVENTS.incident_reported.scope).toMatchObject({ type: "roles" });
-    expect((REALTIME_EVENTS.incident_reported.scope as { roles: string[] }).roles).toEqual(expect.arrayContaining(["logistics", "workshop_manager", "admin"]));
+    expect((REALTIME_EVENTS.incident_reported.scope as unknown as { roles: string[] }).roles).toEqual(expect.arrayContaining(["logistics", "workshop_manager", "admin"]));
   });
 });
