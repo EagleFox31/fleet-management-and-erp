@@ -8,24 +8,29 @@ const idb = vi.hoisted(() => ({
   // Lecture en vol : la valeur est lue, puis rendue après la porte (course avec un logout).
   gate: null as Promise<void> | null,
 }));
+const nameOf = vi.hoisted(() => (store: unknown): string | undefined =>
+  typeof store === "function" ? (store as unknown as { dbName: string }).dbName : (store as string | undefined));
 
 vi.mock("idb-keyval", () => ({
-  createStore: (db: string) => db,
-  get: async (key: string, store?: string) => {
+  // Magasin appelable comme celui d'idb-keyval (dropDb en ferme la connexion) ; `dbName` le nomme.
+  createStore: (db: string) => Object.assign(async (_mode: string, run: (s: unknown) => unknown) => run({ transaction: { db: { close() {} } } }), { dbName: db }),
+  get: async (key: string, rawStore?: unknown) => {
+    const store = nameOf(rawStore);
     const value = idb.dbs.get(store ?? "keyval-store")?.get(key);
     if (idb.gate && store === "fleetos-offline-resume") await idb.gate;
     return value === undefined ? undefined : structuredClone(value);
   },
-  set: async (key: string, value: unknown, store?: string) => {
-    const name = store ?? "keyval-store";
+  set: async (key: string, value: unknown, rawStore?: unknown) => {
+    const name = nameOf(rawStore) ?? "keyval-store";
     if (!idb.dbs.has(name)) idb.dbs.set(name, new Map());
     idb.dbs.get(name)!.set(key, structuredClone(value));
   },
-  del: async (key: string, store?: string) => {
+  del: async (key: string, rawStore?: unknown) => {
+    const store = nameOf(rawStore);
     if (idb.failDelOf !== null && store === idb.failDelOf) throw new Error("IndexedDB indisponible");
     idb.dbs.get(store ?? "keyval-store")?.delete(key);
   },
-  clear: async (store?: string) => void idb.dbs.get(store ?? "keyval-store")?.clear(),
+  clear: async (rawStore?: unknown) => void idb.dbs.get(nameOf(rawStore) ?? "keyval-store")?.clear(),
 }));
 vi.mock("@/hooks/use-toast", () => ({ toast: vi.fn() }));
 vi.mock("@/lib/queryClient", () => ({
@@ -91,8 +96,22 @@ const fakeWindow = {
   },
 };
 
+/** IndexedDB factice : énumère les bases du faux idb-keyval et accepte leur suppression (sans bruit sur stderr). */
+function fakeIndexedDb() {
+  return {
+    databases: async () => Array.from(idb.dbs.keys()).map((name) => ({ name })),
+    deleteDatabase: (name: string) => {
+      idb.dbs.delete(name);
+      const request: { onsuccess?: () => void } = {};
+      queueMicrotask(() => request.onsuccess?.());
+      return request;
+    },
+  };
+}
+
 beforeEach(() => {
   vi.stubGlobal("window", fakeWindow);
+  vi.stubGlobal("indexedDB", fakeIndexedDb());
   lsData.clear();
   idb.failDelOf = null;
   idb.gate = null;
@@ -104,7 +123,7 @@ describe("restauration au démarrage hors ligne", () => {
   it("marqueur valide : le compte devient actif et la copie de lecture est restaurée, marquée périmée", async () => {
     await onlineSession(7);
     const client = coldStart();
-    expect(await resumeOfflineRead(client, T0 + 3600_000)).toBe(true);
+    expect(await resumeOfflineRead(client, T0 + 3600_000)).not.toBeNull();
     expect(getActiveOfflineUserId()).toBe(7);
     expect(client.getQueryData([ME])).toEqual({ driver: { id: 7, firstName: "P" }, missions: [] });
     expect(client.getQueryState([ME])?.isInvalidated).toBe(true);
@@ -123,41 +142,41 @@ describe("restauration au démarrage hors ligne", () => {
   it("marqueur expiré : rien n'est activé ni restauré", async () => {
     await onlineSession(7);
     const client = coldStart();
-    expect(await resumeOfflineRead(client, T0 + RESUME_TTL_MS + 1)).toBe(false);
+    expect(await resumeOfflineRead(client, T0 + RESUME_TTL_MS + 1)).toBeNull();
     expect(getActiveOfflineUserId()).toBeNull();
     expect(client.getQueryCache().getAll()).toEqual([]);
     expect(markerRaw()).toBeUndefined();
   });
 
   it("aucun marqueur : rien", async () => {
-    expect(await resumeOfflineRead(coldStart(), T0)).toBe(false);
+    expect(await resumeOfflineRead(coldStart(), T0)).toBeNull();
     expect(getActiveOfflineUserId()).toBeNull();
   });
 
   it("marqueur valide mais driver-offline éteint au dernier contact : rien", async () => {
     await onlineSession(7, { "driver-offline": false, "offline-writes": true });
     const client = coldStart();
-    expect(await resumeOfflineRead(client, T0 + 1000)).toBe(false);
+    expect(await resumeOfflineRead(client, T0 + 1000)).toBeNull();
     expect(getActiveOfflineUserId()).toBeNull();
     expect(client.getQueryCache().getAll()).toEqual([]);
   });
 
   it("drapeaux jamais lus (absents du cache) : éteints, rien n'est restauré", async () => {
     await onlineSession(7, null);
-    expect(await resumeOfflineRead(coldStart(), T0 + 1000)).toBe(false);
+    expect(await resumeOfflineRead(coldStart(), T0 + 1000)).toBeNull();
   });
 
   it("un compte déjà actif en mémoire n'est pas remplacé", async () => {
     await onlineSession(7);
     setActiveOfflineUserId(9);
-    expect(await resumeOfflineRead(new QueryClient(), T0 + 1000)).toBe(false);
+    expect(await resumeOfflineRead(new QueryClient(), T0 + 1000)).toBeNull();
     expect(getActiveOfflineUserId()).toBe(9);
   });
 
   it("plusieurs relances hors ligne : l'échéance ne bouge pas", async () => {
     await onlineSession(7);
     for (const h of [1, 10, 30, 60]) {
-      expect(await resumeOfflineRead(coldStart(), T0 + h * 3600_000)).toBe(true);
+      expect(await resumeOfflineRead(coldStart(), T0 + h * 3600_000)).not.toBeNull();
       expect(markerRaw()).toMatchObject({ lastOnlineAt: T0, expiresAt: T0 + RESUME_TTL_MS });
     }
   });
@@ -182,6 +201,38 @@ describe("restauration au démarrage hors ligne", () => {
     const client = coldStart();
     await resumeOfflineRead(client, T0 + 1000);
     expect(JSON.stringify(client.getQueryCache().getAll().map((q) => q.state.data))).not.toContain('"id":7');
+  });
+});
+
+describe("restauration : propriétaire", () => {
+  describe("propriétaire du cache avant tout affichage (V5b-3c)", () => {
+    it("magasin du compte 7 dont l'enveloppe porte un autre propriétaire : purge locale, aucun grant", async () => {
+      await onlineSession(7);
+      const store = idb.dbs.get("fleetos-offline-u7")!;
+      const envelope = store.get("query-cache") as Record<string, unknown>;
+      store.set("query-cache", { ...envelope, userId: 9 });
+      const client = coldStart();
+      expect(await resumeOfflineRead(client, T0 + 1000)).toBeNull();
+      expect(getActiveOfflineUserId()).toBeNull();
+      expect(markerRaw()).toBeUndefined();
+      expect(idb.dbs.get("fleetos-offline-u7")?.get("query-cache")).toBeUndefined();
+      expect(client.getQueryCache().getAll()).toHaveLength(0);
+    });
+
+    it("copie de lecture d'un autre compte (9) présente sur l'appareil : purge locale, aucun grant", async () => {
+      await onlineSession(7);
+      idb.dbs.set("fleetos-offline-u9", new Map([["query-cache", { version: 1, userId: 9, timestamp: T0, queries: [] }]]));
+      expect(await resumeOfflineRead(coldStart(), T0 + 1000)).toBeNull();
+      expect(getActiveOfflineUserId()).toBeNull();
+      expect(markerRaw()).toBeUndefined();
+      expect(idb.dbs.get("fleetos-offline-u9")?.get("query-cache")).toBeUndefined();
+    });
+
+    it("propriétaire conforme : le grant porte userId, profil et échéance, jamais un rôle", async () => {
+      await onlineSession(7);
+      const grant = await resumeOfflineRead(coldStart(), T0 + 1000);
+      expect(grant).toEqual({ userId: 7, profile: "driver", expiresAt: T0 + RESUME_TTL_MS });
+    });
   });
 });
 
@@ -213,7 +264,7 @@ describe("écriture et rafraîchissement du marqueur", () => {
     client.setQueryData([FLAGS], { "driver-offline": false, "offline-writes": true });
     await refreshOfflineResume(client, T0 + 1000);
     expect(markerRaw()).toBeUndefined();
-    expect(await resumeOfflineRead(coldStart(), T0 + 2000)).toBe(false);
+    expect(await resumeOfflineRead(coldStart(), T0 + 2000)).toBeNull();
   });
 });
 
@@ -304,7 +355,7 @@ describe("pierre tombale : suppression IndexedDB en échec à la déconnexion", 
     expect(markerRaw()).toBeDefined();
     expect(JSON.parse(lsData.get(RESUME_REVOKED_KEY)!)).toEqual({ userId: 7 });
     const cold = coldStart();
-    expect(await resumeOfflineRead(cold, T0 + 1000)).toBe(false);
+    expect(await resumeOfflineRead(cold, T0 + 1000)).toBeNull();
     expect(getActiveOfflineUserId()).toBeNull();
     expect(cold.getQueryCache().getAll()).toEqual([]);
   });
@@ -313,10 +364,10 @@ describe("pierre tombale : suppression IndexedDB en échec à la déconnexion", 
     const client = await onlineSession(7);
     idb.failDelOf = RESUME_DB;
     await purgeOfflineSession(client);
-    expect(await resumeOfflineRead(coldStart(), T0 + 1000)).toBe(false);
+    expect(await resumeOfflineRead(coldStart(), T0 + 1000)).toBeNull();
     expect(lsData.has(RESUME_REVOKED_KEY)).toBe(true);
     idb.failDelOf = null;
-    expect(await resumeOfflineRead(coldStart(), T0 + 2000)).toBe(false);
+    expect(await resumeOfflineRead(coldStart(), T0 + 2000)).toBeNull();
     expect(markerRaw()).toBeUndefined();
     expect(lsData.has(RESUME_REVOKED_KEY)).toBe(false);
   });
@@ -337,7 +388,7 @@ describe("pierre tombale : suppression IndexedDB en échec à la déconnexion", 
     await onlineSession(8);
     expect(lsData.has(RESUME_REVOKED_KEY)).toBe(false);
     expect(markerRaw()).toMatchObject({ userId: 8 });
-    expect(await resumeOfflineRead(coldStart(), T0 + 1000)).toBe(true);
+    expect(await resumeOfflineRead(coldStart(), T0 + 1000)).not.toBeNull();
     expect(getActiveOfflineUserId()).toBe(8);
   });
 
@@ -353,7 +404,7 @@ describe("pierre tombale : suppression IndexedDB en échec à la déconnexion", 
     idb.failDelOf = RESUME_DB;
     await expireOfflineSession(client, 7);
     expect(JSON.parse(lsData.get(RESUME_REVOKED_KEY)!)).toEqual({ userId: 7 });
-    expect(await resumeOfflineRead(coldStart(), T0 + 1000)).toBe(false);
+    expect(await resumeOfflineRead(coldStart(), T0 + 1000)).toBeNull();
   });
 
   it("pierre tombale : aucun rafraîchissement d'échéance", async () => {
@@ -379,7 +430,7 @@ describe("audit : course avec une déconnexion et double échec de purge", () =>
     onSessionChannelMessage(client, { type: "logout" });
     await tick(5);
     release();
-    expect(await pending).toBe(false);
+    expect(await pending).toBeNull();
     expect(getActiveOfflineUserId()).toBeNull();
     expect(client.getQueryCache().getAll()).toEqual([]);
   });

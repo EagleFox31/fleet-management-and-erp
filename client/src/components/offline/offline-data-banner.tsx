@@ -1,7 +1,9 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { WifiOff } from "lucide-react";
 import { useFeature } from "@/hooks/use-feature";
-import { offlineBannerText, resumeDeadlineFor } from "@/lib/offline-data-banner";
+import { useAuth } from "@/hooks/useAuth";
+import { isOfflineReadOnly } from "@/lib/offline-read-only";
+import { offlineBannerText, offlineReadOnlyBannerText, resumeDeadlineFor } from "@/lib/offline-data-banner";
 import { getActiveOfflineUserId, subscribeActiveOfflineUser } from "@/lib/offline-user-scope";
 import { offlineResume } from "@/lib/offline-kv";
 import { clientLogger } from "@/lib/logger";
@@ -100,7 +102,17 @@ export function OfflineDataBanner({ updatedAt, className }: { updatedAt: number 
   const offlineWrites = useFeature("offline-writes");
   const online = useOnline();
   const resumeUntil = useOfflineResumeUntil(online);
+  const { user, offlineGrant } = useAuth();
   const enabled = (driverOffline && offlineWrites) || resumeUntil !== null;
+  // Consultation seule (reprise sans utilisateur confirmé) : toujours annoncée, réseau « en ligne » ou non.
+  if (offlineGrant && isOfflineReadOnly({ user, offlineGrant })) {
+    return (
+      <OfflineDataBannerView
+        text={offlineReadOnlyBannerText({ updatedAt, expiresAt: offlineGrant.expiresAt })}
+        className={className}
+      />
+    );
+  }
   return (
     <OfflineDataBannerView
       text={enabled ? offlineBannerText({ online, updatedAt, expiresAt: resumeUntil }) : null}
