@@ -291,6 +291,43 @@ describe("plafond de points par mission", { timeout: 120000 }, () => {
   });
 });
 
+describe("débit plafonné par chauffeur et par mission", { timeout: 120000 }, () => {
+  it("au-delà de la rafale : 429 GPS_RATE_LIMITED + Retry-After, rien d'écrit ; une autre mission reste ouverte", async () => {
+    const saved = { burst: process.env.GPS_BATCH_BURST, refill: process.env.GPS_BATCH_REFILL_SECONDS };
+    process.env.GPS_BATCH_BURST = "3";
+    process.env.GPS_BATCH_REFILL_SECONDS = "3600";
+    try {
+      const fresh = async () => {
+        const [m] = await db.insert(missions).values({ orderNumber: uniqueTestToken("MIS"), pickupAddress: "TEST A", deliveryAddress: "TEST B", status: "in_progress" } as any).returning();
+        missionIds.push(m.id);
+        await db.insert(assignments).values({ missionId: m.id, vehicleId, driverId: driverAId, status: "in_progress", startedAt: new Date(Date.now() - 30 * 60_000) } as any);
+        return m.id;
+      };
+      const limited = await fresh();
+      for (let i = 0; i < 3; i++) {
+        const ok = await session.call("POST", `/api/driver/missions/${limited}/positions`, { actor: "driverA", body: { points: [point()] } });
+        expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+      }
+      const blocked = await session.call("POST", `/api/driver/missions/${limited}/positions`, { actor: "driverA", body: { points: [point()] } });
+      expect(blocked.status, JSON.stringify(blocked.body)).toBe(429);
+      expect(blocked.body).toMatchObject({ code: "GPS_RATE_LIMITED" });
+      expect(blocked.body.message).toMatch(/restent sur le téléphone/);
+      expect(Number(blocked.headers.get("retry-after"))).toBeGreaterThan(0);
+      const rows = await db.select({ id: vehiclePositions.id }).from(vehiclePositions).where(eq(vehiclePositions.missionId, limited));
+      expect(rows).toHaveLength(3);
+
+      const other = await fresh();
+      const open = await session.call("POST", `/api/driver/missions/${other}/positions`, { actor: "driverA", body: { points: [point()] } });
+      expect(open.status, JSON.stringify(open.body)).toBe(201);
+    } finally {
+      if (saved.burst === undefined) delete process.env.GPS_BATCH_BURST;
+      else process.env.GPS_BATCH_BURST = saved.burst;
+      if (saved.refill === undefined) delete process.env.GPS_BATCH_REFILL_SECONDS;
+      else process.env.GPS_BATCH_REFILL_SECONDS = saved.refill;
+    }
+  });
+});
+
 describe("mission annulée en route", { timeout: 120000 }, () => {
   it("points relevés avant l'annulation (+ 2 min) acceptés, après rejetés ; chauffeur retiré d'une mission qui continue : 403", async () => {
     const mk = async (missionStatus: string, assignmentStatus: string, cancelledMinAgo: number | null) => {

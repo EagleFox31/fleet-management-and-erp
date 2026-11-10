@@ -4,6 +4,7 @@ import { requireFeature } from "../lib/feature-flags";
 import { gpsBatchSchema, parseOsmandReport, toGpsPoint } from "../lib/gps-points";
 import { AppError } from "../lib/app-error";
 import { authorize } from "../middleware/auth";
+import { createKeyedRateLimiter } from "../middleware/keyed-rate-limit";
 import { activeMissionIdOf, ingestDriverPositions } from "../services/vehicle-positions-service";
 
 /**
@@ -24,8 +25,42 @@ import { activeMissionIdOf, ingestDriverPositions } from "../services/vehicle-po
  * avec le jeton d'appareil (lot balises).
  *
  * Les positions sont exclues du journal d'audit (server/lib/audit-config.ts).
+ *
+ * Débit plafonné (seau à jetons, server/middleware/keyed-rate-limit.ts), au-delà : 429 `GPS_RATE_LIMITED`
+ * avec Retry-After ; le client garde le paquet en tampon (`shouldDropBatch`) et le renvoie au vidage suivant.
+ * - Paquets : par chauffeur et par mission. Le téléphone vide son tampon toutes les 2 min ; la rafale
+ *   (20 par défaut = tampon plein de 1 000 points / 50 par paquet) laisse partir d'un coup un tampon
+ *   accumulé hors ligne, puis un paquet toutes les 10 s.
+ * - OsmAnd : par chauffeur seulement, la mission n'étant connue que dans le handler (un chauffeur n'a
+ *   qu'une mission en route). Un relevé par requête : rafale 30, puis un relevé toutes les 5 s.
+ * Réglages : GPS_BATCH_BURST, GPS_BATCH_REFILL_SECONDS, GPS_OSMAND_BURST, GPS_OSMAND_REFILL_SECONDS.
  */
 const router = Router();
+
+export const GPS_RATE_DEFAULTS = { batchBurst: 20, batchRefillSeconds: 10, osmandBurst: 30, osmandRefillSeconds: 5 };
+
+const positive = (raw: string | undefined, fallback: number) => {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
+const RATE_MESSAGE = "Positions envoyées trop souvent. Elles restent sur le téléphone et repartiront automatiquement.";
+
+const batchRateLimit = createKeyedRateLimiter({
+  keyOf: (req) => `${req.user!.id}:${req.params.id}`,
+  capacity: () => Math.max(1, Math.floor(positive(process.env.GPS_BATCH_BURST, GPS_RATE_DEFAULTS.batchBurst))),
+  refillMs: () => positive(process.env.GPS_BATCH_REFILL_SECONDS, GPS_RATE_DEFAULTS.batchRefillSeconds) * 1000,
+  code: "GPS_RATE_LIMITED",
+  message: RATE_MESSAGE,
+});
+
+const osmandRateLimit = createKeyedRateLimiter({
+  keyOf: (req) => String(req.user!.id),
+  capacity: () => Math.max(1, Math.floor(positive(process.env.GPS_OSMAND_BURST, GPS_RATE_DEFAULTS.osmandBurst))),
+  refillMs: () => positive(process.env.GPS_OSMAND_REFILL_SECONDS, GPS_RATE_DEFAULTS.osmandRefillSeconds) * 1000,
+  code: "GPS_RATE_LIMITED",
+  message: RATE_MESSAGE,
+});
 
 const jsonOnly: RequestHandler = (req, _res, next) => {
   if (!req.is("application/json")) {
@@ -60,7 +95,7 @@ const postOsmand: RequestHandler = async (req, res, next) => {
   }
 };
 
-router.post("/driver/missions/:id/positions", requireFeature("gps"), authorize(["driver"]), jsonOnly, postBatch);
-router.post("/driver/positions", requireFeature("gps"), authorize(["driver"]), jsonOnly, postOsmand);
+router.post("/driver/missions/:id/positions", requireFeature("gps"), authorize(["driver"]), jsonOnly, batchRateLimit, postBatch);
+router.post("/driver/positions", requireFeature("gps"), authorize(["driver"]), jsonOnly, osmandRateLimit, postOsmand);
 
 export default router;

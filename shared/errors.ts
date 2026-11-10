@@ -25,6 +25,8 @@ export type ApiErrorCode =
   | "INCIDENT_VEHICLE_NOT_FOUND"
   /** 409 du plafond de positions par mission : définitif pour ce paquet, le client le retire du tampon (pas de réessai). */
   | "GPS_MISSION_CAP_REACHED"
+  /** 429 de l'envoi de positions GPS trop fréquent : le client garde le paquet en tampon et le renvoie au vidage suivant. */
+  | "GPS_RATE_LIMITED"
   | "RATE_LIMITED"
   /** 400 : cible de requête que l'app et un routeur monté liraient différemment (`\` dans le chemin, forme absolue). */
   | "NON_CANONICAL_TARGET"
@@ -51,6 +53,7 @@ export const STATUS_MESSAGES: Record<ApiErrorCode, string> = {
   INCIDENT_WRITE_FAILED: "La déclaration n'a pas pu être enregistrée. Réessayez dans un instant.",
   INCIDENT_VEHICLE_NOT_FOUND: "Véhicule introuvable.",
   GPS_MISSION_CAP_REACHED: "Trop de positions enregistrées pour cette mission. Contactez la logistique.",
+  GPS_RATE_LIMITED: "Positions envoyées trop souvent. Elles restent sur le téléphone et repartiront automatiquement.",
   RATE_LIMITED: "Trop de tentatives. Patientez un instant avant de réessayer.",
   NON_CANONICAL_TARGET: "Adresse de requête invalide.",
   INTERNAL: "Une erreur technique est survenue. Réessayez dans un instant.",
