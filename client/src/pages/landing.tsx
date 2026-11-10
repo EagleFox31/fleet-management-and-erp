@@ -253,7 +253,7 @@ const userProfiles = [
 // Matrice des permissions granulaire par profil
 const permissionsMatrix: Record<string, Record<string, boolean>> = {
   "Gestion véhicules & flotte": { admin: true, workshop_manager: true, technician: false, secretary: true, accountant: false, logistics: true, warehouse: false, viewer: true, management: true, client: false, driver: false },
-  "Maintenance & Ordres de Travail": { admin: true, workshop_manager: true, technician: true, secretary: false, accountant: false, logistics: false, warehouse: false, viewer: true, management: true, client: false, driver: false },
+  "Maintenance & Ordres de Travail": { admin: true, workshop_manager: true, technician: true, secretary: false, accountant: false, logistics: false, warehouse: false, viewer: false, management: true, client: false, driver: false },
   "Stock & Pièces détachées": { admin: true, workshop_manager: true, technician: true, secretary: true, accountant: false, logistics: false, warehouse: true, viewer: false, management: false, client: false, driver: false },
   "Pneumatiques (Stock & Montage)": { admin: true, workshop_manager: true, technician: true, secretary: false, accountant: false, logistics: false, warehouse: true, viewer: false, management: false, client: false, driver: false },
   "Commandes & Fournisseurs": { admin: true, workshop_manager: true, technician: false, secretary: true, accountant: true, logistics: true, warehouse: true, viewer: false, management: false, client: false, driver: false },
@@ -1056,7 +1056,7 @@ function StorytellingTransformationSection() {
                 <p className="text-slate-300 text-sm sm:text-base mt-3 leading-relaxed">
                   {tab === "before"
                     ? "Sans synchronisation en direct entre l'atelier, la route et la direction, chaque imprévu entraîne des retards coûteux, des litiges fournisseurs et une usure prématurée de la flotte."
-                    : "Grâce à la synchronisation WebSocket temps réel, les 9 profils collaborent sur la même vérité. Les pannes sont anticipées, le carburant est maîtrisé et la rentabilité est visible en direct."}
+                    : "Grâce à la synchronisation WebSocket temps réel, les 11 profils collaborent sur la même vérité. Les pannes sont anticipées, le carburant est maîtrisé et la rentabilité est visible en direct."}
                 </p>
               </div>
 
@@ -1320,7 +1320,7 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* Grille des 9 cartes de profils avec effets glassmorphism */}
+          {/* Grille des 11 cartes de profils avec effets glassmorphism */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-6 mb-20">
             {userProfiles.map((profile, idx) => {
               const Icon = profile.icon;

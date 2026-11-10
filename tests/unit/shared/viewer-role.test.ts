@@ -29,7 +29,8 @@ describe("rôle lecteur (viewer)", () => {
       .filter(([name, value]) => name.endsWith("_ROLES") && Array.isArray(value) && (value as readonly string[]).includes("viewer"))
       .map(([name]) => name)
       .sort();
-    expect(groupsWithViewer).toEqual(STAFF_DERIVED_GROUPS);
+    // READ_ONLY_ROLES est le groupe propre du lecteur, pas un groupe de droits.
+    expect(groupsWithViewer).toEqual([...STAFF_DERIVED_GROUPS, "READ_ONLY_ROLES"].sort());
   });
 
   it("ne lit pas les données personnelles des chauffeurs (CNI, permis)", () => {
@@ -44,7 +45,29 @@ describe("rôle lecteur (viewer)", () => {
     }
   });
 
-  it("seule la fermeture de session reste ouverte en écriture", () => {
-    expect(roles.VIEWER_WRITE_ALLOWED).toEqual([{ method: "POST", path: "/auth/logout" }]);
+  it("en écriture, seuls la session et le libre-service sur sa propre ligne restent ouverts", () => {
+    expect(roles.VIEWER_WRITE_ALLOWED.map((a) => `${a.method} ${a.path}`)).toEqual([
+      "POST /auth/login",
+      "POST /auth/pin-login",
+      "POST /auth/logout",
+      "POST /users/change-password",
+      "PATCH /onboarding/step",
+      "PATCH /onboarding/complete",
+      "PATCH /onboarding/mascot",
+      "PATCH /notifications/settings",
+      "PATCH /alerts/:id/read",
+    ]);
+    expect(roles.matchesAllowedWrite("PATCH", "/alerts/12/read")).toBe(true);
+    expect(roles.matchesAllowedWrite("PATCH", "/alerts/12/read/")).toBe(true);
+    expect(roles.matchesAllowedWrite("PATCH", "/alerts//read")).toBe(false);
+    expect(roles.matchesAllowedWrite("DELETE", "/alerts/12")).toBe(false);
+    expect(roles.matchesAllowedWrite("POST", "/alerts/read-all")).toBe(false);
+    expect(roles.matchesAllowedWrite("post", "/auth/logout")).toBe(true);
+  });
+
+  it("est le seul rôle en lecture seule", () => {
+    expect(roles.READ_ONLY_ROLES).toEqual(["viewer"]);
+    expect(roles.isReadOnlyRole("viewer")).toBe(true);
+    for (const role of roles.ALL_APP_ROLES.filter((r) => r !== "viewer")) expect(roles.isReadOnlyRole(role)).toBe(false);
   });
 });

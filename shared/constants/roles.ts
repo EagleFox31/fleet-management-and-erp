@@ -45,11 +45,43 @@ export function canReadDriverPersonalData(role: string | null | undefined): bool
 }
 
 /**
+ * Rôles en lecture seule : aucune écriture métier, les écrans masquent leurs boutons d'action
+ * (`isReadOnlyRole`, côté client comme serveur).
+ */
+export const READ_ONLY_ROLES = ["viewer"] as const satisfies readonly AppRole[];
+
+export function isReadOnlyRole(role: string | null | undefined): boolean {
+  return (READ_ONLY_ROLES as readonly string[]).includes(String(role ?? ""));
+}
+
+/**
  * Lecteur (`viewer`) : lecture seule sur tout le personnel. La garde `viewerReadOnlyGuard`
  * (server/middleware) refuse toute écriture ; seules ces routes lui restent ouvertes, parce
- * qu'elles n'écrivent rien de métier. Chemins tels qu'Express les voit sous `/api`.
+ * qu'elles n'écrivent rien de métier : session (ouvrir, fermer), libre-service sur sa propre
+ * ligne (mot de passe, parcours d'accueil, préférences de notification, lecture d'une alerte).
+ * Chemins tels qu'Express les voit sous `/api` ; un segment `:x` accepte toute valeur.
  */
-export const VIEWER_WRITE_ALLOWED = [{ method: "POST", path: "/auth/logout" }] as const;
+export const VIEWER_WRITE_ALLOWED = [
+  { method: "POST", path: "/auth/login" },
+  { method: "POST", path: "/auth/pin-login" },
+  { method: "POST", path: "/auth/logout" },
+  { method: "POST", path: "/users/change-password" },
+  { method: "PATCH", path: "/onboarding/step" },
+  { method: "PATCH", path: "/onboarding/complete" },
+  { method: "PATCH", path: "/onboarding/mascot" },
+  { method: "PATCH", path: "/notifications/settings" },
+  { method: "PATCH", path: "/alerts/:id/read" },
+] as const;
+
+/** `/alerts/:id/read` accepte `/alerts/12/read` : comparaison segment par segment. */
+export function matchesAllowedWrite(method: string, path: string): boolean {
+  const target = path.replace(/\/+$/, "").split("/");
+  return VIEWER_WRITE_ALLOWED.some((a) => {
+    if (a.method !== method.toUpperCase()) return false;
+    const pattern = a.path.split("/");
+    return pattern.length === target.length && pattern.every((seg, i) => (seg.startsWith(":") ? target[i].length > 0 : seg === target[i]));
+  });
+}
 
 /**
  * Rôle applicatif — dérivé du schéma, jamais recopié.

@@ -1,9 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { getContractApp } from "../support/app";
 import { startContractSession } from "../support/contract-session";
 import { collectRoutes, mountPath, type Layer } from "../support/express-routes";
+import { TEST_USER_PASSWORD } from "../support/factories";
+import { db } from "../../server/db";
+import { alerts, users } from "../../shared/schema";
 import { VIEWER_READ_ONLY_MESSAGE, viewerReadOnlyGuard } from "../../server/middleware/viewer-read-only-guard";
-import { VIEWER_WRITE_ALLOWED } from "@shared/constants/roles";
+import { matchesAllowedWrite } from "@shared/constants/roles";
 
 /**
  * Lecteur (`viewer`) : toute route d'écriture de l'API, telle qu'Express la déclare, répond 403
@@ -17,11 +21,12 @@ import { VIEWER_WRITE_ALLOWED } from "@shared/constants/roles";
  * requête `/api/*`, y compris celles qui aboutissent dans `routes.ts`. Deux assertions le figent :
  * l'ordre de montage, et l'absence de route d'écriture hors `/api` (qu'aucune garde ne couvrirait).
  * L'upgrade WebSocket et les fichiers statiques ne sont pas des routes Express : hors périmètre.
+ *
+ * Les décomptes sont figés en valeur exacte : toute route d'écriture ajoutée ou retirée met à jour
+ * `EXPECTED` ci-dessous, en conscience, dans la même PR.
  */
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
-// Ouvrent la session : sans session, la garde laisse la route répondre.
-const SESSION_OPENERS = new Set(["POST /api/auth/login", "POST /api/auth/pin-login"]);
-const ALLOWED = new Set(VIEWER_WRITE_ALLOWED.map((a) => `${a.method} /api${a.path}`));
+const EXPECTED = { apiRouter: 143, registerRoutes: 38, horsApi: 0, total: 177 };
 
 /** `/api/x/:id(\d+)/y` → `/api/x/1/y` : la garde refuse avant toute lecture de l'objet. */
 const concrete = (path: string) => path.replace(/:[A-Za-z_]+(\([^)]*\))?\??/g, "1");
@@ -39,9 +44,10 @@ describe("lecteur (viewer) : lecture seule sur toute l'API", { timeout: 180000 }
     const app = (await getContractApp()) as unknown as { _router: { stack: Layer[] } };
     const routes: { key: string; guarded: boolean }[] = [];
     collectRoutes(app._router.stack, "", [], routes);
+    // Allowlist jouée sur le chemin concret, comme la garde (`/api/alerts/:id/read` → `/alerts/1/read`).
     const isWrite = (key: string) => {
-      const [method] = key.split(" ");
-      return WRITE_METHODS.has(method) && !SESSION_OPENERS.has(key) && !ALLOWED.has(key);
+      const [method, path] = key.split(" ");
+      return WRITE_METHODS.has(method) && !matchesAllowedWrite(method, concrete(path).replace(/^\/api/, ""));
     };
     writes = [...new Set(routes.map((r) => r.key))].filter((key) => isWrite(key) && key.split(" ")[1].startsWith("/api"));
 
@@ -78,18 +84,10 @@ describe("lecteur (viewer) : lecture seule sur toute l'API", { timeout: 180000 }
   });
 
   it("le parcours couvre les routeurs de server/api et routes.ts ; aucune écriture hors /api", () => {
-    // Décompte par origine figé en plancher, pas en valeur exacte : une route ajoutée ne casse rien.
-    expect({ ...origin, total: writes.length }).toMatchObject({ horsApi: 0 });
-    expect(origin.apiRouter).toBeGreaterThan(20);
-    expect(origin.registerRoutes).toBeGreaterThan(20);
-    // Quelques chemins sont déclarés des deux côtés (le routeur server/api masque routes.ts) : le total
-    // unique est entre le plus grand des deux et leur somme.
-    expect(writes.length).toBeGreaterThanOrEqual(Math.max(origin.apiRouter, origin.registerRoutes));
-    expect(writes.length).toBeLessThanOrEqual(origin.apiRouter + origin.registerRoutes);
+    expect({ ...origin, total: writes.length }).toEqual(EXPECTED);
   });
 
   it("toutes les routes d'écriture répondent 403 avec le message de lecture seule", async () => {
-    expect(writes.length).toBeGreaterThan(100);
     const failures: string[] = [];
     for (const key of writes) {
       const [method, path] = key.split(" ");
@@ -103,6 +101,42 @@ describe("lecteur (viewer) : lecture seule sur toute l'API", { timeout: 180000 }
 
   it("lit la flotte", async () => {
     const res = await session.call("GET", "/api/vehicles", { actor: "viewer" });
+    expect(res.status).toBe(200);
+  });
+
+  describe("libre-service sur sa propre ligne", () => {
+    it("avance son parcours d'accueil", async () => {
+      const res = await session.call("PATCH", "/api/onboarding/complete", { actor: "viewer", body: {} });
+      expect(res.status).toBe(200);
+    });
+
+    it("règle ses préférences de notification", async () => {
+      const res = await session.call("PATCH", "/api/notifications/settings", { actor: "viewer", body: [{ topic: "maintenance", inApp: true }] });
+      expect(res.status).toBe(200);
+    });
+
+    it("marque lue une alerte qui lui est adressée", async () => {
+      const [alert] = await db
+        .insert(alerts)
+        .values({ userId: session.userId("viewer"), title: "Lecteur", message: "Alerte de test", type: "maintenance", priority: "medium" })
+        .returning({ id: alerts.id });
+      const res = await session.call("PATCH", `/api/alerts/${alert.id}/read`, { actor: "viewer", body: {} });
+      expect(res.status).toBe(200);
+    });
+
+    it("change son mot de passe", async () => {
+      const res = await session.call("POST", "/api/users/change-password", {
+        actor: "viewer",
+        body: { currentPassword: TEST_USER_PASSWORD, newPassword: `${TEST_USER_PASSWORD}-lecteur-1` },
+      });
+      expect(res.status).toBe(200);
+    });
+  });
+
+  // En dernier : une reconnexion régénère la session, le cookie du harnais devient obsolète.
+  it("rouvre une session sans être refusé alors qu'il est déjà connecté", async () => {
+    const [me] = await db.select({ username: users.username }).from(users).where(eq(users.id, session.userId("viewer")));
+    const res = await session.call("POST", "/api/auth/login", { actor: "viewer", body: { username: me.username, password: `${TEST_USER_PASSWORD}-lecteur-1` } });
     expect(res.status).toBe(200);
   });
 
