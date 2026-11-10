@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useState } from "react";
 import { formatPrice } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import { SUPPLIER_INVOICE_VALIDATION_ROLES_BY_SCOPE, SUPPLIER_INVOICE_PAYMENT_ROLES } from "@shared/constants/roles";
 import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 
@@ -375,13 +376,12 @@ export default function SupplierInvoiceDetailsPage() {
 
   const canValidate = (() => {
     if (!currentRole) return false;
-    if (scope === "parts") return ["admin", "warehouse"].includes(currentRole);
-    if (scope === "non_parts") return ["admin", "secretary", "logistics"].includes(currentRole);
-    return ["admin", "secretary"].includes(currentRole);
+    const byScope = SUPPLIER_INVOICE_VALIDATION_ROLES_BY_SCOPE as Record<string, readonly string[]>;
+    return (byScope[scope] ?? byScope.mixed).includes(currentRole);
   })();
 
-  const canApprove = !!currentRole && ["admin", "secretary"].includes(currentRole);
-  const canPay = !!currentRole && ["admin", "secretary"].includes(currentRole);
+  const canApprove = !!currentRole && (SUPPLIER_INVOICE_PAYMENT_ROLES as readonly string[]).includes(currentRole);
+  const canPay = !!currentRole && (SUPPLIER_INVOICE_PAYMENT_ROLES as readonly string[]).includes(currentRole);
   const numericBalance = Number(invoice.balance || 0);
   const remainingToRecord = Math.max(numericBalance - pendingReconciliationAmount, 0);
   const hasRecordedSettlement = settlements.some((s) => s.status === "recorded");

@@ -6,6 +6,7 @@ import { FUEL_CARD_MANAGER_ROLES, FUEL_RECHARGE_SOURCE_ROLES, TREASURY_WRITE_ROL
 // La liste ne bouge que sur décision explicite, consignée dans docs/journal/tresorerie-t2t3-journal.md.
 
 describe("FUEL_RECHARGE_SOURCE_ROLES : dérogation nommée", () => {
+  // 10 novembre 2026 : le comptable (`accountant`) n'y entre pas, la recharge reste une opération carburant.
   it("admin, secrétariat, logistique, et rien d'autre", () => {
     expect([...FUEL_RECHARGE_SOURCE_ROLES].sort()).toEqual(["admin", "logistics", "secretary"]);
   });
