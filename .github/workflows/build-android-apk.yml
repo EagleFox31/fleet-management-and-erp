@@ -99,6 +99,11 @@ jobs:
               echo "::error::Keystore présent mais variable FLEETOS_APP_URL absente : une APK signée sur le bundle local ne joindrait aucun serveur. Poser FLEETOS_APP_URL (voir docs/deploiement/android-apk.md)."
               exit 1
             fi
+            # Release : jamais de trafic en clair (cleartext n'est activé que pour une origine http).
+            case "$CAP_SERVER_URL" in
+              https://*) ;;
+              *) echo "::error::APK signée : l'origine doit être en https (reçu une origine non https)."; exit 1 ;;
+            esac
             echo "Keystore de signature détecté dans les secrets GitHub."
             echo "$KEYSTORE_BASE64" | base64 --decode > android/app/release.keystore
             echo "has_keystore=true" >> $GITHUB_OUTPUT

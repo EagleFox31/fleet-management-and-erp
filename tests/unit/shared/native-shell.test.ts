@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderNativeOfflinePage, resolveNativeServer } from "../../../shared/native-shell";
 
 describe("coquille native : origine du serveur (CAP_SERVER_URL)", () => {
@@ -33,5 +33,27 @@ describe("coquille native : origine du serveur (CAP_SERVER_URL)", () => {
     expect(html).not.toMatch(/\p{Extended_Pictographic}/u);
     const hostile = renderNativeOfflinePage({ url: 'https://x.example"><script>', cleartext: false });
     expect(hostile).not.toContain("<script>");
+  });
+});
+
+describe("capacitor.config.ts : verrous de la coquille", () => {
+  const loadConfig = async (url: string | undefined) => {
+    vi.resetModules();
+    if (url === undefined) vi.stubEnv("CAP_SERVER_URL", "");
+    else vi.stubEnv("CAP_SERVER_URL", url);
+    return (await import("../../../capacitor.config")).default;
+  };
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("origine https : pas de trafic en clair, page hors ligne, aucune autre origine navigable", async () => {
+    const config = await loadConfig("https://fleet.example.com");
+    expect(config.server).toMatchObject({ url: "https://fleet.example.com", cleartext: false, errorPath: "offline.html" });
+    // Sans allowNavigation, Capacitor ouvre toute autre origine dans le navigateur externe.
+    expect(config.server?.allowNavigation).toBeUndefined();
+  });
+
+  it("sans origine : configuration de développement inchangée", async () => {
+    const config = await loadConfig(undefined);
+    expect(config.server).toEqual({ androidScheme: "https", cleartext: true });
   });
 });

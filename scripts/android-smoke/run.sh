@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # Test de fumée de l'APK sur émulateur (job `smoke` de build-android-apk.yml).
 # L'APK debug est construite avec CAP_SERVER_URL=http://10.0.2.2:<port> (10.0.2.2 = l'hôte vu
-# de l'émulateur). On vérifie qu'elle charge l'origine, que le bridge natif est injecté et que
-# /api, le cookie et /ws marchent en même origine, puis que la page hors ligne s'affiche.
+# de l'émulateur). Trois temps :
+#   1. en ligne : bridge natif, /api, cookie et /ws en même origine, service worker aux
+#      commandes, donnée écrite dans IndexedDB ;
+#   2. serveur coupé, APK fermée puis relancée : la coque doit venir du service worker (pas de
+#      « Serveur injoignable ») et la donnée IndexedDB rester lisible ;
+#   3. données de l'APK effacées, serveur toujours coupé : page hors ligne embarquée.
 set -euo pipefail
 
 PORT="${SMOKE_PORT:-8080}"
@@ -17,15 +21,33 @@ node scripts/android-smoke/server.mjs "$PORT" "$REPORT" > "$OUT/server.log" 2>&1
 SERVER_PID=$!
 trap 'kill $SERVER_PID 2>/dev/null || true; adb logcat -d > "$OUT/logcat.txt" 2>/dev/null || true' EXIT
 
+# Attend qu'un des motifs apparaisse à l'écran (arbre d'accessibilité), affiche celui trouvé.
+wait_for_screen() {
+  local tries="$1"; shift
+  for _ in $(seq 1 "$tries"); do
+    sleep 2
+    adb shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1 || continue
+    adb shell cat /sdcard/ui.xml > "$OUT/ui.xml" 2>/dev/null || continue
+    for pattern in "$@"; do
+      if grep -q "$pattern" "$OUT/ui.xml"; then echo "$pattern"; return 0; fi
+    done
+  done
+  echo "aucun"
+}
+
+relaunch() {
+  adb shell am force-stop "$APP"
+  adb shell am start -W -n "$APP/.MainActivity" > /dev/null
+}
+
+# --- 1. En ligne ---------------------------------------------------------------------------
 adb install -r "$APK"
 adb shell am start -W -n "$APP/.MainActivity"
-
 for _ in $(seq 1 60); do
   [ -s "$REPORT" ] && break
   sleep 2
 done
 adb exec-out screencap -p > "$OUT/1-en-ligne.png" || true
-
 if [ ! -s "$REPORT" ]; then
   echo "::error::L'APK n'a envoyé aucun rapport au serveur témoin en 120 s."
   cat "$OUT/server.log"
@@ -40,29 +62,47 @@ node -e '
     "GET /api en même origine": r.ping === true,
     "cookie de session renvoyé": r.cookieSeen === true,
     "WebSocket /ws": r.ws === true,
+    "service worker aux commandes (navigator.serviceWorker.controller)": r.swControlled === true,
+    "donnée écrite dans IndexedDB": r.idbWritten === true,
   };
   let ok = true;
   for (const [label, pass] of Object.entries(checks)) {
-    console.log(`${pass ? "OK  " : "ÉCHEC"} ${label}`);
+    console.log(`${pass ? "OK   " : "ÉCHEC"} ${label}`);
     ok = ok && pass;
   }
   if (!ok) process.exit(1);
 ' "$REPORT"
+sleep 3 # laisse le service worker finir sa revalidation en arrière-plan
 
-# Serveur coupé : au redémarrage, Capacitor doit afficher la page hors ligne embarquée.
+# --- 2. Serveur coupé, relance : coque du service worker -----------------------------------
 kill "$SERVER_PID"
 wait "$SERVER_PID" 2>/dev/null || true
-adb shell am force-stop "$APP"
-adb shell am start -W -n "$APP/.MainActivity"
-FOUND=0
-for _ in $(seq 1 15); do
-  sleep 2
-  adb shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1 || continue
-  if adb shell cat /sdcard/ui.xml | grep -q "Serveur injoignable"; then FOUND=1; break; fi
-done
-adb exec-out screencap -p > "$OUT/2-hors-ligne.png" || true
-if [ "$FOUND" != 1 ]; then
-  echo "::error::Page hors ligne absente après coupure du serveur."
+relaunch
+SEEN=$(wait_for_screen 15 "SONDE-HORS-LIGNE" "Serveur injoignable")
+adb exec-out screencap -p > "$OUT/2-relance-hors-ligne.png" || true
+if [ "$SEEN" != "SONDE-HORS-LIGNE" ]; then
+  echo "::error::Relance serveur coupé : la coque n'est pas servie par le service worker (écran : $SEEN)."
+  grep -i -E "serviceworker|service worker|Capacitor|chromium" "$OUT/ui.xml" 2>/dev/null | head -5 || true
   exit 1
 fi
-echo "OK   page hors ligne affichée"
+DETAIL=$(grep -o 'sw=[a-z]* idb=[a-z]* bridge=[a-z]*' "$OUT/ui.xml" | head -1 || true)
+echo "Relance hors ligne : $DETAIL"
+case "$DETAIL" in
+  *"sw=oui idb=oui"*) echo "OK    coque du service worker et donnée IndexedDB lisibles hors ligne" ;;
+  *) echo "::error::Relance hors ligne incomplète : $DETAIL"; exit 1 ;;
+esac
+case "$DETAIL" in
+  *"bridge=oui"*) echo "OK    bridge natif présent hors ligne" ;;
+  *) echo "::warning::Hors ligne, la coque en cache n'a pas le bridge natif : plugins indisponibles jusqu'au retour du réseau." ;;
+esac
+
+# --- 3. Premier lancement sans réseau : page hors ligne embarquée --------------------------
+adb shell pm clear "$APP" > /dev/null
+relaunch
+SEEN=$(wait_for_screen 15 "Serveur injoignable" "SONDE-HORS-LIGNE")
+adb exec-out screencap -p > "$OUT/3-premier-lancement-hors-ligne.png" || true
+if [ "$SEEN" != "Serveur injoignable" ]; then
+  echo "::error::Premier lancement sans réseau : page hors ligne absente (écran : $SEEN)."
+  exit 1
+fi
+echo "OK    page hors ligne au premier lancement sans réseau"
