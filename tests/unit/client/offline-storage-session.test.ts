@@ -87,7 +87,7 @@ describe("mise en file hors ligne et déconnexion", () => {
     activateOfflineUser(client, 5);
 
     // La déconnexion s'exécute pendant la lecture de la file par l'ajout.
-    let logout: Promise<void> | null = null;
+    let logout: Promise<boolean> | null = null;
     idb.gates.push(async () => {
       if (!logout) {
         idb.gates.length = 0;
