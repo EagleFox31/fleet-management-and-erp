@@ -11,6 +11,7 @@ import {
   createLaunchableVehicle,
   creditFuelCard,
   FAR,
+  depositPodInBrowser,
   purgeJourneyRows,
 } from "./helpers/mission-journey";
 import { newE2EContext } from "./helpers/contexts";
@@ -147,7 +148,7 @@ test.describe("MIS1 : cycle de vie d'une mission au navigateur", () => {
       // Affectation : écran « Modifier », véhicule et chauffeur réels.
       await page.goto(`/missions/${mission.id}`, { waitUntil: "domcontentloaded" });
       await expect(page.getByRole("heading", { name: orderNumber })).toBeVisible({ timeout: 60_000 });
-      await page.getByRole("button", { name: "Modifier", exact: true }).click();
+      await page.getByTestId("button-edit-mission").click();
       const vehicleSelect = page.getByTestId("select-edit-vehicle");
       await expect(vehicleSelect.locator(`option[value="${vehicle.id}"]`)).toHaveCount(1, { timeout: 30_000 });
       await vehicleSelect.selectOption(String(vehicle.id));
@@ -199,6 +200,10 @@ test.describe("MIS1 : cycle de vie d'une mission au navigateur", () => {
         .poll(() => sawStatusFrame(frames, orderNumber, "delivered"), { timeout: 15_000 })
         .toBe(true);
       await expect(watcher.getByText("Livrée", { exact: true }).first()).toBeVisible({ timeout: 5_000 });
+
+      // Preuve de livraison : sans POD la facture est fermée ; le dépôt à l'écran la rouvre.
+      await expect(page.getByTestId("button-open-generate-invoice-dialog")).toBeDisabled();
+      await depositPodInBrowser(page);
 
       // Clôture : aucun plein rattaché, motif obligatoire, puis FDR réels.
       await page.getByTestId("button-transition-mission-status-header").click();

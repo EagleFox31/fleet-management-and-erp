@@ -10,6 +10,7 @@ import { createTestClient, createTestUser, TEST_USER_PASSWORD, type TestUserRole
 import { uniqueTestToken } from "../support/ids";
 import { waitForBlockedBy } from "../support/lock-wait";
 import { deleteClientInvoicesWhere } from "../support/money-override";
+import { cleanupPodFiles, seedPodFile } from "../support/pod";
 
 /** O3 lot 3b : correction du prix convenu (rôle x statut, facture, motif, historique, événement sans prix). */
 let server: Server;
@@ -52,6 +53,8 @@ async function mission(status: string, extra: Record<string, unknown> = {}) {
   expect(res.status, JSON.stringify(res.body)).toBe(201);
   missionIds.push(res.body.id);
   if (status !== "planned") await db.update(missions).set({ status: status as never }).where(eq(missions.id, res.body.id));
+  // Une mission livrée se facture : elle porte sa preuve de livraison.
+  if (status === "delivered") await seedPodFile(res.body.id, ids.userIds[0]);
   return res.body.id as number;
 }
 const historyOf = (id: number) => db.select().from(missionPriceHistory).where(eq(missionPriceHistory.missionId, id));
@@ -75,6 +78,7 @@ beforeAll(async () => {
   tariffId = t.id;
 }, 180000);
 afterAll(async () => {
+  await cleanupPodFiles(missionIds);
   if (missionIds.length > 0) {
     await deleteClientInvoicesWhere(inArray(clientInvoices.missionId, missionIds));
     await db.delete(missions).where(inArray(missions.id, missionIds));

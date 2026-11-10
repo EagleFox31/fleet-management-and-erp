@@ -1,8 +1,8 @@
 import type { AuditConfig, AuditRule } from "../middleware/audit-writes";
 
 /** Regle pour une ressource : collection (creation) et element (+ sous-chemins) avec id numerique. */
-const resource = (segment: string, entityType: string): AuditRule[] => [
-  { pattern: new RegExp(`^/${segment}$`), entityType },
+const resource = (segment: string, entityType: string, options: { idFromResponse?: boolean } = {}): AuditRule[] => [
+  { pattern: new RegExp(`^/${segment}$`), entityType, ...options },
   { pattern: new RegExp(`^/${segment}/(\\d+)(?:/.*)?$`), entityType },
 ];
 
@@ -12,7 +12,10 @@ const resource = (segment: string, entityType: string): AuditRule[] => [
  */
 export const AUDIT_CONFIG: AuditConfig = {
   rules: [
-    ...resource("work-orders", "work_order"),
+    // Creation : l'id du nouvel OT n'est connu que dans la reponse (historique de l'OT).
+    ...resource("work-orders", "work_order", { idFromResponse: true }),
+    // Statut change par le technicien (demarrage, fin) : meme entite, id dans le chemin.
+    { pattern: /^\/technician\/work-orders\/(\d+)\/status$/, entityType: "work_order" },
     ...resource("parts", "part"),
     ...resource("tires", "tire"),
     ...resource("vehicles", "vehicle"),
