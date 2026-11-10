@@ -48,6 +48,19 @@ export function missionsOfDriversFilter(driverIds: number[]) {
 }
 
 /**
+ * Missions lisibles par un chauffeur : celles où l'une de ses fiches a une affectation vivante (même
+ * règle que la lecture des missions, `missionsOfDriversFilter`). `undefined` hors chauffeur ;
+ * ensemble vide pour un chauffeur sans fiche ou sans mission.
+ */
+export async function driverMissionIdsOf(reader: DriverScopeReader | undefined): Promise<Set<number> | undefined> {
+  const scope = await driverScopeOf(reader);
+  if (scope === undefined) return undefined;
+  if (scope.length === 0) return new Set();
+  const rows = await db.select({ missionId: assignments.missionId }).from(assignments).where(driverLiveAssignmentFilter(scope));
+  return new Set(rows.map((r) => r.missionId).filter((id): id is number => id !== null));
+}
+
+/**
  * Vrai si `reader` peut agir sur la mission : personnel libre, chauffeur seulement s'il y est affecté.
  * Une affectation annulée ou refusée ne compte pas : le chauffeur retiré de la mission n'y a plus accès.
  * Une affectation terminée garde l'accès (historique de ses missions).
