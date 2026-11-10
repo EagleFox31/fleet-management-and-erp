@@ -22,6 +22,7 @@ export const users = pgTable("users", {
       "technician",        // Technicien/Maintenancier - Interventions, pneumatiques
       "secretary",         // Secrétaire - Saisie, documentation, facturation
       "accountant",        // Comptable - Règlements, trésorerie, encaissements, carte carburant (consultation)
+      "viewer",        // Lecteur - Lecture seule sur le personnel, aucune saisie
       "logistics",         // Logisticien - Planification missions, FDR
       "warehouse",         // Magasinier - Stock, alertes CDE
       "management",        // Direction - Vue exécutive lecture seule

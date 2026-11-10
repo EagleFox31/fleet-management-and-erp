@@ -30,7 +30,8 @@ import {
   KeyRound,
   Lightbulb,
   PlayCircle,
-  Calculator
+  Calculator,
+  Eye,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useState, useEffect, useRef, type ElementType } from "react";
@@ -135,7 +136,7 @@ function VideoBackground({ opacity = 0.85 }: { opacity?: number }) {
   );
 }
 
-// Types de profils utilisateurs (10 profils métier)
+// Types de profils utilisateurs (11 profils métier)
 /** Vidéo de démonstration par profil (client/public/demos), données de démonstration uniquement. */
 const PROFILE_DEMO_VIDEOS: Partial<Record<string, string>> = {
   workshop_manager: "/demos/workshop_manager.mp4",
@@ -221,6 +222,15 @@ const userProfiles = [
     permissions: ["Factures fournisseurs", "Facturation client", "Trésorerie & traites", "Carte carburant (consultation)"],
   },
   {
+    id: "viewer",
+    name: "Lecteur",
+    icon: Eye,
+    color: "text-muted-foreground",
+    bgColor: "bg-muted/30",
+    description: "Consultation seule de la flotte et des rapports, sans aucune saisie",
+    permissions: ["Véhicules & documents", "Rapports d'activité", "Aucune saisie", "Aucune donnée personnelle"],
+  },
+  {
     id: "client",
     name: "Client",
     icon: Users,
@@ -242,15 +252,15 @@ const userProfiles = [
 
 // Matrice des permissions granulaire par profil
 const permissionsMatrix: Record<string, Record<string, boolean>> = {
-  "Gestion véhicules & flotte": { admin: true, workshop_manager: true, technician: false, secretary: true, accountant: false, logistics: true, warehouse: false, management: true, client: false, driver: false },
-  "Maintenance & Ordres de Travail": { admin: true, workshop_manager: true, technician: true, secretary: false, accountant: false, logistics: false, warehouse: false, management: true, client: false, driver: false },
-  "Stock & Pièces détachées": { admin: true, workshop_manager: true, technician: true, secretary: true, accountant: false, logistics: false, warehouse: true, management: false, client: false, driver: false },
-  "Pneumatiques (Stock & Montage)": { admin: true, workshop_manager: true, technician: true, secretary: false, accountant: false, logistics: false, warehouse: true, management: false, client: false, driver: false },
-  "Commandes & Fournisseurs": { admin: true, workshop_manager: true, technician: false, secretary: true, accountant: true, logistics: true, warehouse: true, management: false, client: false, driver: false },
-  "Facturation & Finances": { admin: true, workshop_manager: false, technician: false, secretary: true, accountant: true, logistics: false, warehouse: false, management: true, client: true, driver: false },
-  "Missions & Carburant": { admin: true, workshop_manager: false, technician: false, secretary: true, accountant: true, logistics: true, warehouse: false, management: true, client: true, driver: true },
-  "Rapports & Analytics": { admin: true, workshop_manager: true, technician: false, secretary: true, accountant: true, logistics: true, warehouse: true, management: true, client: false, driver: false },
-  "Utilisateurs & Sécurité": { admin: true, workshop_manager: false, technician: false, secretary: false, accountant: false, logistics: false, warehouse: false, management: false, client: false, driver: false },
+  "Gestion véhicules & flotte": { admin: true, workshop_manager: true, technician: false, secretary: true, accountant: false, logistics: true, warehouse: false, viewer: true, management: true, client: false, driver: false },
+  "Maintenance & Ordres de Travail": { admin: true, workshop_manager: true, technician: true, secretary: false, accountant: false, logistics: false, warehouse: false, viewer: true, management: true, client: false, driver: false },
+  "Stock & Pièces détachées": { admin: true, workshop_manager: true, technician: true, secretary: true, accountant: false, logistics: false, warehouse: true, viewer: false, management: false, client: false, driver: false },
+  "Pneumatiques (Stock & Montage)": { admin: true, workshop_manager: true, technician: true, secretary: false, accountant: false, logistics: false, warehouse: true, viewer: false, management: false, client: false, driver: false },
+  "Commandes & Fournisseurs": { admin: true, workshop_manager: true, technician: false, secretary: true, accountant: true, logistics: true, warehouse: true, viewer: false, management: false, client: false, driver: false },
+  "Facturation & Finances": { admin: true, workshop_manager: false, technician: false, secretary: true, accountant: true, logistics: false, warehouse: false, viewer: false, management: true, client: true, driver: false },
+  "Missions & Carburant": { admin: true, workshop_manager: false, technician: false, secretary: true, accountant: true, logistics: true, warehouse: false, viewer: false, management: true, client: true, driver: true },
+  "Rapports & Analytics": { admin: true, workshop_manager: true, technician: false, secretary: true, accountant: true, logistics: true, warehouse: true, viewer: true, management: true, client: false, driver: false },
+  "Utilisateurs & Sécurité": { admin: true, workshop_manager: false, technician: false, secretary: false, accountant: false, logistics: false, warehouse: false, viewer: false, management: false, client: false, driver: false },
 };
 
 type FeatureStoryChapter = {
@@ -1046,7 +1056,7 @@ function StorytellingTransformationSection() {
                 <p className="text-slate-300 text-sm sm:text-base mt-3 leading-relaxed">
                   {tab === "before"
                     ? "Sans synchronisation en direct entre l'atelier, la route et la direction, chaque imprévu entraîne des retards coûteux, des litiges fournisseurs et une usure prématurée de la flotte."
-                    : "Grâce à la synchronisation WebSocket temps réel, les 9 profils collaborent sur la même vérité. Les pannes sont anticipées, le carburant est maîtrisé et la rentabilité est visible en direct."}
+                    : "Grâce à la synchronisation WebSocket temps réel, les 11 profils collaborent sur la même vérité. Les pannes sont anticipées, le carburant est maîtrisé et la rentabilité est visible en direct."}
                 </p>
               </div>
 
@@ -1302,7 +1312,7 @@ export default function LandingPage() {
               </span>
             </h2>
             <p className="text-slate-400 text-base md:text-lg mb-4 leading-relaxed">
-              Des accès sur mesure et une séparation rigoureuse des responsabilités pour les 9 rôles clés de votre organisation.
+              Des accès sur mesure et une séparation rigoureuse des responsabilités pour les 11 rôles clés de votre organisation.
             </p>
             <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-xs text-slate-300">
               <Info className="h-3.5 w-3.5 text-emerald-400" />
@@ -1310,7 +1320,7 @@ export default function LandingPage() {
             </div>
           </div>
 
-          {/* Grille des 9 cartes de profils avec effets glassmorphism */}
+          {/* Grille des 11 cartes de profils avec effets glassmorphism */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-6 mb-20">
             {userProfiles.map((profile, idx) => {
               const Icon = profile.icon;
@@ -1493,7 +1503,7 @@ export default function LandingPage() {
                 </Button>
               </Link>
               <Button size="lg" variant="outline" className="rounded-full h-12 sm:h-13 px-7 text-sm sm:text-base font-medium text-white border-white/20 bg-white/5 hover:bg-white/10 hover:border-white/30 backdrop-blur-md transition-all duration-200 active:scale-[0.98] min-w-[200px]" asChild>
-                <a href="#profiles">Explorer les 9 rôles</a>
+                <a href="#profiles">Explorer les 11 rôles</a>
               </Button>
             </div>
 
@@ -1501,7 +1511,7 @@ export default function LandingPage() {
             <div className="pt-6 border-t border-white/10 flex flex-wrap items-center justify-center gap-6 text-xs sm:text-sm text-slate-400">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                <span>9 profils métier prêts à l'emploi</span>
+                <span>11 profils métier prêts à l'emploi</span>
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 text-emerald-400" />
