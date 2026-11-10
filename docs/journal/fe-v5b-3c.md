@@ -21,3 +21,11 @@
 - Pourquoi : hors ligne il n'existe aucune heure de confiance. Risque assumé : la lecture ne donne que la copie locale du compte, et `/api/auth/me` (cookie) revalide au retour du réseau.
 - Comment : commentaire de `CLOCK_SKEW_MS` dans `client/src/lib/offline-resume.ts` corrigé ; le comportement est figé par un test.
 - Tester : `node node_modules/vitest/vitest.mjs run tests/unit/client/offline-resume.test.ts` (cas « risque assumé »).
+
+## V5b-3c : e2e 21 sur build avec service worker
+
+- Quoi : `e2e/21-driver-offline-resume.spec.ts`, 4 cas : rechargement sous `context.setOffline(true)` (tableau, bandeau « Consultation seule », zéro bouton d'écriture, pas de voile, autre URL renvoyée à l'accueil, retour du réseau qui rend les écritures), déconnexion puis rechargement hors ligne (rien du compte lisible), marqueur expiré (`page.clock` à +73 h : pas de reprise, voile), rôle sans reprise (chef d'atelier : voile, aucun tableau).
+- Comment : `vite build` + bundle serveur, serveur de production local sur le port 5050 (`APP_URL` en http pour le cookie), base locale dédiée `fleet_test_v5b3c` (Postgres fm-pod, schéma poussé par drizzle-kit), `FEATURE_FLAGS=driver-offline=on,offline-writes=on`, `E2E_BASE_URL=http://127.0.0.1:5050`. Le spec est ignoré sans `E2E_BASE_URL` : une variante dev avec `page.route` ne prouve rien du service worker.
+- Pourquoi : la reprise hors ligne dépend de ce que le service worker sert au rechargement ; seul un build de production l'enregistre.
+- Constats : (1) seules les missions `in_progress` et `delivered` sont lisibles hors ligne (décision 3 de V5b) : une mission `assigned` donne « Aucune mission assignée » ; (2) les ressources chargées avant la prise de contrôle du service worker ne sont pas dans son cache : le spec recharge une fois en ligne avant de couper le réseau, sinon le rechargement hors ligne reste blanc (comportement de la coquille, hors périmètre 3c).
+- Tester : `npm run build`, serveur de production avec les variables ci-dessus, puis `E2E_SKIP_ACCOUNT_CHECK=1 E2E_BASE_URL=http://127.0.0.1:5050 DATABASE_URL=... node node_modules/@playwright/test/cli.js test e2e/21-driver-offline-resume.spec.ts` (écritures sous `node ../lot-tools/db-lock.mjs`).
