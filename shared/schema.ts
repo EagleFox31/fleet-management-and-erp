@@ -1736,6 +1736,9 @@ export const insertMissionSchema = createInsertSchema(missions).omit({
   updatedAt: true,
   completedAt: true,
   cancelledAt: true,
+  // Preuve de livraison : posée par le dépôt de fichier (mission_pod_files), jamais par le corps d'une requête.
+  podUrl: true,
+  podUploadedAt: true,
 }).extend({
   pickupDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),
   deliveryDate: z.string().optional().transform((val) => val ? new Date(val) : undefined),
