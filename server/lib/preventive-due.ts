@@ -23,3 +23,19 @@ export async function stampPreventiveDue(tx: Executor, workOrderId: number, due:
     .where(eq(workOrderPlanning.id, workOrderId));
   await tx.execute(sql`SELECT set_config('fleetos.suppress_side_effects', '', true)`);
 }
+
+const OPEN_STATUSES = ["pending", "in_progress", "awaiting_parts"] as const;
+
+/**
+ * Une échéance par date (véhicule) est déjà prise en charge si un OT de même titre est ouvert,
+ * ou clos (hors annulé) avec une échéance égale ou postérieure. Un OT clos sans échéance
+ * enregistrée ne bloque pas : il ne dit rien de l'échéance qu'il a traitée.
+ */
+export function isDateBasedDueAlreadyHandled(
+  existing: ReadonlyArray<{ status: string; dueDate: string | null }>,
+  dueDay: string,
+): boolean {
+  return existing.some((ot) =>
+    (OPEN_STATUSES as readonly string[]).includes(ot.status) ||
+    (ot.status !== "cancelled" && ot.dueDate != null && ot.dueDate >= dueDay));
+}

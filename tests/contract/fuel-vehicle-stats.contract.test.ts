@@ -6,6 +6,7 @@ import { createTestVehicle } from "../support/factories";
 import { startContractSession } from "../support/contract-session";
 import { uniqueTestToken } from "../support/ids";
 import { leakText } from "../support/api-error";
+import { deleteFuelRecordsWhere } from "../support/money-override";
 
 /**
  * FUEL2, consommation par véhicule : `GET /api/fuel-card/vehicle/:id/stats`.
@@ -35,7 +36,7 @@ beforeAll(async () => {
 }, 60000);
 
 afterAll(async () => {
-  if (recordIds.length > 0) await db.delete(fuelRecords).where(inArray(fuelRecords.id, recordIds));
+  if (recordIds.length > 0) await deleteFuelRecordsWhere(inArray(fuelRecords.id, recordIds));
   await session.stop();
 });
 

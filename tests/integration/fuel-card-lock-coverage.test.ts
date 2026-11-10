@@ -9,6 +9,7 @@ import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestFuelRecord, createTestUser, createTestVehicle } from "../support/factories";
 import { expectWaitsForLock, holdsAdvisoryLock } from "../support/fuel-card-lock";
 import { uniqueTestToken } from "../support/ids";
+import { deleteFuelRecordsWhere } from "../support/money-override";
 
 /**
  * Toute écriture touchant debit_amount / credit_amount prend le verrou de la carte
@@ -23,7 +24,7 @@ const fuelService = new FuelService();
 afterEach(async () => {
   // Un plein créé par un test en échec n'est pas dans le sac : il bloquerait la suppression du véhicule.
   if (ids.vehicleIds.length > 0) {
-    await db.delete(fuelRecords).where(inArray(fuelRecords.vehicleId, ids.vehicleIds));
+    await deleteFuelRecordsWhere(inArray(fuelRecords.vehicleId, ids.vehicleIds));
   }
   await cleanupCreated(ids);
   ids.userIds.length = 0;

@@ -4,6 +4,7 @@ import { db } from "../../server/db";
 import { assignments, clientInvoices, drivers, missions, vehicleDocuments, vehicles } from "../../shared/schema";
 import type { CreatedIds } from "../../tests/support/cleanup";
 import { createTestFuelRecord, createTestVehicle } from "../../tests/support/factories";
+import { deleteClientInvoicesWhere } from "../../tests/support/money-override";
 
 /**
  * Parcours d'une mission jusqu'à « livrée » sans écrire son statut en base : affectation,
@@ -92,7 +93,7 @@ export async function purgeJourneyRows(prefix: string) {
   const rows = await db.select({ id: missions.id }).from(missions).where(like(missions.orderNumber, `${prefix}%`));
   const missionIds = rows.map((row) => row.id);
   if (missionIds.length > 0) {
-    await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, missionIds));
+    await deleteClientInvoicesWhere(inArray(clientInvoices.missionId, missionIds));
     await db.delete(assignments).where(inArray(assignments.missionId, missionIds));
     await db.delete(missions).where(inArray(missions.id, missionIds));
   }

@@ -8,6 +8,7 @@ import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestFuelRecord, createTestVehicle } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { deleteFuelRecordsWhere, deleteClientInvoicesWhere } from "../support/money-override";
 
 /**
  * Plusieurs chauffeurs par mission, côté écriture (suite de #227) :
@@ -120,7 +121,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   (global as any).broadcastUpdate = previousBroadcast;
-  if (ids.vehicleIds.length > 0) await db.delete(fuelRecords).where(inArray(fuelRecords.vehicleId, ids.vehicleIds));
+  if (ids.vehicleIds.length > 0) await deleteFuelRecordsWhere(inArray(fuelRecords.vehicleId, ids.vehicleIds));
   if (missionIds.length > 0) {
     await db.delete(assignments).where(inArray(assignments.missionId, missionIds));
     await db.delete(missions).where(inArray(missions.id, missionIds));
@@ -434,7 +435,7 @@ describe("plusieurs affectations : statut, annulation et modification n'écriven
       expect(items.find((i) => i.vehicleId === vehicleA1)).toBeUndefined();
       expect(items.find((i) => i.vehicleId === vehicleA2)).toMatchObject({ revenueHT: amountHT });
     } finally {
-      await db.delete(clientInvoices).where(eq(clientInvoices.id, invoice.id));
+      await deleteClientInvoicesWhere(eq(clientInvoices.id, invoice.id));
     }
   });
 

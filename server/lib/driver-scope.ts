@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, notInArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, notInArray, or } from "drizzle-orm";
 import { db } from "../db";
 import { assignments, drivers, missions } from "@shared/schema";
 import { canReadDriverPersonalData } from "@shared/constants/roles";
@@ -191,4 +191,28 @@ export async function redactDriverPersonalData<T extends { id: number } & Record
   const own = new Set((await driverScopeOf(reader)) ?? []);
   const apply = (row: T): T => (own.has(row.id) ? row : stripDriverPersonalData(row));
   return Array.isArray(data) ? data.map(apply) : apply(data);
+}
+
+/**
+ * Lecteur dédié des échéances de papiers (permis, CNI, formation CPC) des chauffeurs actifs, pour les
+ * alertes d'échéance (V5a). Les dates restent dans ce module de lecture autorisé : l'appelant n'en tire
+ * que des paliers et un message (nom et échéance), jamais un numéro de pièce.
+ */
+export async function readActiveDriverDocumentExpiries() {
+  return db
+    .select({
+      id: drivers.id,
+      firstName: drivers.firstName,
+      lastName: drivers.lastName,
+      licenseExpiry: drivers.licenseExpiry,
+      cniExpiry: drivers.cniExpiry,
+      cpcTrainingDate: drivers.cpcTrainingDate,
+    })
+    .from(drivers)
+    .where(
+      and(
+        eq(drivers.isActive, true),
+        or(isNotNull(drivers.licenseExpiry), isNotNull(drivers.cniExpiry), isNotNull(drivers.cpcTrainingDate)),
+      ),
+    );
 }

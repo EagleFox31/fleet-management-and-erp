@@ -10,6 +10,7 @@ import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestClient, createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
 import { waitForBlockedBy } from "../support/lock-wait";
+import { deleteClientInvoicesWhere } from "../support/money-override";
 
 /** O3 lot 3b : correction du prix convenu (rôle x statut, facture, motif, historique, événement sans prix). */
 let server: Server;
@@ -79,7 +80,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await cleanupPodFiles(missionIds);
   if (missionIds.length > 0) {
-    await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, missionIds));
+    await deleteClientInvoicesWhere(inArray(clientInvoices.missionId, missionIds));
     await db.delete(missions).where(inArray(missions.id, missionIds));
   }
   await db.delete(tariffGrid).where(eq(tariffGrid.origin, origin));

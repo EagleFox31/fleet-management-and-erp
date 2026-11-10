@@ -40,6 +40,7 @@ import {
   workOrders,
 } from "../../shared/schema";
 import { TEST_PREFIX } from "./ids";
+import { deleteFuelRecordsWhere, deleteClientInvoicesWhere } from "./money-override";
 
 export type CreatedIds = {
   userIds: number[];
@@ -67,10 +68,10 @@ export function createIdBag(): CreatedIds {
 
 export async function cleanupCreated(ids: CreatedIds): Promise<void> {
   if (ids.fuelRecordIds.length > 0) {
-    await db.delete(fuelRecords).where(inArray(fuelRecords.id, ids.fuelRecordIds));
+    await deleteFuelRecordsWhere(inArray(fuelRecords.id, ids.fuelRecordIds));
   }
   if (ids.clientInvoiceIds.length > 0) {
-    await db.delete(clientInvoices).where(inArray(clientInvoices.id, ids.clientInvoiceIds));
+    await deleteClientInvoicesWhere(inArray(clientInvoices.id, ids.clientInvoiceIds));
   }
   if (ids.invoiceIds.length > 0) {
     await db.delete(supplierInvoices).where(inArray(supplierInvoices.id, ids.invoiceIds));
@@ -220,8 +221,8 @@ function isBackgroundAlertRace(err: unknown): boolean {
 }
 
 async function deleteOrphanTestRows(): Promise<void> {
-  await db.delete(fuelRecords).where(orphan(fuelRecords.notes, fuelRecords.createdAt));
-  await db.delete(clientInvoices).where(orphan(clientInvoices.invoiceNumber, clientInvoices.createdAt));
+  await deleteFuelRecordsWhere(orphan(fuelRecords.notes, fuelRecords.createdAt));
+  await deleteClientInvoicesWhere(orphan(clientInvoices.invoiceNumber, clientInvoices.createdAt));
   await db.delete(clients).where(orphan(clients.name, clients.createdAt));
   await db.delete(supplierInvoices).where(orphan(supplierInvoices.invoiceNumber, supplierInvoices.createdAt));
   // Les OT d'un véhicule orphelin bloquaient sa suppression (FK) et faisaient
@@ -233,7 +234,7 @@ async function deleteOrphanTestRows(): Promise<void> {
   const orphanWorkOrders = db.select({ id: workOrders.id }).from(workOrders).where(inArray(workOrders.vehicleId, orphanVehicles));
   // Pleins d'un véhicule orphelin dont les notes ne portent pas le préfixe : fuel_records_vehicle_id_vehicles_id_fk
   // bloquait la suppression du véhicule et faisait échouer le hook global de chaque fichier de contrat.
-  await db.delete(fuelRecords).where(inArray(fuelRecords.vehicleId, orphanVehicles));
+  await deleteFuelRecordsWhere(inArray(fuelRecords.vehicleId, orphanVehicles));
   await db.delete(partsUsed).where(inArray(partsUsed.workOrderId, orphanWorkOrders));
   await db.delete(qhseInspections).where(inArray(qhseInspections.vehicleId, orphanVehicles));
   await db.delete(partRequirements).where(inArray(partRequirements.workOrderId, orphanWorkOrders));
@@ -280,7 +281,7 @@ async function deleteOrphanTestRows(): Promise<void> {
   const testMissions = db.select({ id: missions.id }).from(missions).where(inArray(missions.createdBy, testUsers));
   // Fichiers POD (lot POD) : FK vers la mission et vers l'auteur du dépôt, sans cascade ; supprimés avant la mission.
   await db.delete(missionPodFiles).where(or(inArray(missionPodFiles.missionId, testMissions), inArray(missionPodFiles.uploadedBy, testUsers)));
-  await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, testMissions));
+  await deleteClientInvoicesWhere(inArray(clientInvoices.missionId, testMissions));
   // Budget de mission (L1) : FK vers la mission et vers ses auteurs, sans cascade.
   const testBudgetFilter = or(
     inArray(missionBudgets.missionId, testMissions),

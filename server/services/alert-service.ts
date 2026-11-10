@@ -1,5 +1,6 @@
 import type { NotificationTopic } from "@shared/contracts/notification-settings";
-import type { AppRole } from "@shared/constants/roles";
+import { DRIVER_MANAGER_ROLES, type AppRole } from "@shared/constants/roles";
+import { isPreventiveDateJobEnabled } from "../lib/preventive-date-job-config";
 import { filterUsersByTopic } from "./notification-preferences-service";
 import { storage } from "../storage";
 import type { Vehicle, Alert } from "../../shared/schema";
@@ -21,6 +22,8 @@ import {
 } from "../../shared/schema";
 import { and, asc, eq, inArray, isNotNull, isNull, lt, max, or, sql, type SQL } from "drizzle-orm";
 import { classifyDocumentExpiry, documentExpiryDedupeKey } from "./document-expiry-rule";
+import { driverExpiryFindings } from "./driver-document-expiry";
+import { readActiveDriverDocumentExpiries } from "../lib/driver-scope";
 import { daysBetweenDateOnly, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { moduleLogger } from "../lib/logger";
 import { broadcastAlertCreated } from "../lib/alert-broadcast";
@@ -39,7 +42,8 @@ export function emitLossContext(
   failed: readonly AlertCandidate[],
   abandonedFrom: number,
 ) {
-  const describe = (c: AlertCandidate) => ({ title: c.title, type: c.type });
+  // dedupeKey et non title : le titre d'une alerte chauffeur porte son nom et son échéance.
+  const describe = (c: AlertCandidate) => ({ dedupeKey: c.dedupeKey, type: c.type });
   const abandoned = candidates.length - abandonedFrom;
   return {
     err,
@@ -185,6 +189,9 @@ export class AlertService {
     "admin",
     "warehouse",
   ];
+
+  // Papiers des chauffeurs (permis, CNI, CPC) : source unique DRIVER_MANAGER_ROLES (admin, logistique, secrétaire).
+  private readonly driverDocumentRecipients: AlertRecipientRole[] = [...DRIVER_MANAGER_ROLES];
 
   // Stock bas : le magasin réapprovisionne, l'admin surveille (décision du 3 novembre 2026).
   private readonly lowStockRecipients: AlertRecipientRole[] = [
@@ -878,6 +885,37 @@ export class AlertService {
   }
 
   /**
+   * Papiers des chauffeurs actifs (V5a) : permis, CNI et CPC (date de formation + 731 jours).
+   * Une alerte par document, par palier (J-30, J-7, échu) et par échéance : la clé de
+   * dédoublonnage porte le palier et la date, donc un passage rejoué ne recrée rien et un
+   * renouvellement réarme. Destinataires : DRIVER_MANAGER_ROLES (admin, logistique, secrétaire). Retourne le nombre de
+   * candidates produites (l'émission dédoublonne ensuite).
+   */
+  async checkDriverDocumentAlerts(now: Date = new Date()): Promise<number> {
+    const rows = await readActiveDriverDocumentExpiries();
+
+    let emitted = 0;
+    for (const driver of rows) {
+      for (const finding of driverExpiryFindings(driver, now)) {
+        await this.createAlertIfNotExists({
+          type: "mission",
+          topic: "documents",
+          title: finding.title,
+          message: finding.message,
+          priority: finding.priority,
+          link: `/drivers/${finding.driverId}`,
+          entityType: "driver",
+          entityId: finding.driverId,
+          targetRoles: this.driverDocumentRecipients,
+          dedupeKey: finding.dedupeKey,
+        });
+        emitted++;
+      }
+    }
+    return emitted;
+  }
+
+  /**
    * Vérifie les alertes de kilométrage pour un véhicule
    */
   private async checkVehicleMileageAlerts(vehicle: Vehicle): Promise<void> {
@@ -1021,7 +1059,7 @@ export class AlertService {
       return await this.emitAlertBatch(candidates);
     } catch (error) {
       if (candidates.length === 1) {
-        log.error({ err: error, title: candidates[0].title, type: candidates[0].type }, "création d'alerte en échec");
+        log.error({ err: error, dedupeKey: candidates[0].dedupeKey, type: candidates[0].type }, "création d'alerte en échec");
         return 0;
       }
       // Base injoignable : la reprise unitaire échouerait pareil, tout le lot est perdu.
@@ -1320,6 +1358,7 @@ export class AlertService {
           await this.checkMissionAlerts();
           await this.checkIncompleteSupplierAlerts();
           await this.checkTypedDocumentExpiryAlerts();
+          if (isPreventiveDateJobEnabled()) await this.checkDriverDocumentAlerts();
         });
       } finally {
         const created = await this.emitAlerts(batch);

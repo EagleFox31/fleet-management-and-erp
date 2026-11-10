@@ -8,6 +8,7 @@ import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestSupplier } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { deleteFuelRecordsWhere } from "../support/money-override";
 
 /**
  * Portée des trames temps réel des écrans d'argent : factures fournisseur, commandes fournisseur,
@@ -68,7 +69,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   (global as any).broadcastUpdate = previousBroadcast;
-  if (fuelIds.length > 0) await db.delete(fuelRecords).where(inArray(fuelRecords.id, fuelIds));
+  if (fuelIds.length > 0) await deleteFuelRecordsWhere(inArray(fuelRecords.id, fuelIds));
   if (orderIds.length > 0) {
     await db.delete(purchaseOrderLines).where(inArray(purchaseOrderLines.purchaseOrderId, orderIds));
     await db.delete(purchaseOrders).where(inArray(purchaseOrders.id, orderIds));

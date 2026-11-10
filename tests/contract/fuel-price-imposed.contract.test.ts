@@ -8,6 +8,7 @@ import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestFuelRecord, createTestVehicle } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { deleteFuelRecordsWhere } from "../support/money-override";
 
 /**
  * Prix du litre d'un débit de carte carburant : imposé côté serveur.
@@ -63,7 +64,7 @@ beforeAll(async () => {
 }, 120000);
 
 afterAll(async () => {
-  if (ids.vehicleIds.length > 0) await db.delete(fuelRecords).where(inArray(fuelRecords.vehicleId, ids.vehicleIds));
+  if (ids.vehicleIds.length > 0) await deleteFuelRecordsWhere(inArray(fuelRecords.vehicleId, ids.vehicleIds));
   if (missionIds.length > 0) {
     await db.delete(assignments).where(inArray(assignments.missionId, missionIds));
     await db.delete(missions).where(inArray(missions.id, missionIds));
