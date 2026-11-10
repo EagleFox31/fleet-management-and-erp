@@ -15,7 +15,7 @@ import { uniqueTestToken } from "../support/ids";
  * aucun, drapeau `finance` actif comme coupé : chaque montant est une sentinelle cherchée dans
  * `JSON.stringify(body)` entier. La logistique, lectrice, les voit.
  */
-const ACTORS = { logistics: "logistics", technician: "technician", driver: "driver" } as const;
+const ACTORS = { logistics: "logistics", technician: "technician", warehouse: "warehouse", driver: "driver" } as const;
 type Actor = keyof typeof ACTORS;
 
 const ESTIMATED_FUEL_COST = 7319531;
@@ -132,12 +132,16 @@ for (const flag of ["on", "off"] as const) {
       }
     });
 
-    it("GET /:id/fuel-records et /:id/launch-readiness : technicien sans montant ni solde, verdicts conservés", async () => {
+    it("GET /:id/fuel-records (technicien) et /:id/launch-readiness (magasinier) : sans montant ni solde, verdicts conservés", async () => {
       const fuel = await call("GET", `/api/missions/${missionId}/fuel-records`, { actor: "technician" });
       // Liste des pleins fermée au technicien (moindre donnée) : aucun montant ni solde, 403.
       expect(fuel.status).toBe(403);
       expect(leaked(fuel.body), "fuel-records").toEqual([]);
-      const ready = await call("GET", `/api/missions/${missionId}/launch-readiness`, { actor: "technician" });
+      // Contrôle de lancement fermé au technicien (MISSION_READ_ROLES) : le magasinier, personnel non lecteur du budget, porte le masquage.
+      const refused = await call("GET", `/api/missions/${missionId}/launch-readiness`, { actor: "technician" });
+      expect(refused.status).toBe(403);
+      expect(leaked(refused.body), "launch-readiness refusé").toEqual([]);
+      const ready = await call("GET", `/api/missions/${missionId}/launch-readiness`, { actor: "warehouse" });
       expect(ready.status, JSON.stringify(ready.body)).toBe(200);
       expect(leaked(ready.body), "launch-readiness").toEqual([]);
       expect(ready.body.fuel.balance).toBeNull();

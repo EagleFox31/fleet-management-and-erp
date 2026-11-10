@@ -3,7 +3,7 @@ import * as XLSX from "xlsx";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { assignments, drivers, fuelRecords, missions, tires, vehicleTires, vehicles } from "../../shared/schema";
-import { ALL_APP_ROLES, VEHICLE_PURCHASE_PRICE_READ_ROLES, type AppRole } from "../../shared/constants/roles";
+import { ALL_APP_ROLES, MISSION_READ_ROLES, OPERATIONS_COST_READ_ROLES, VEHICLE_PURCHASE_PRICE_READ_ROLES, type AppRole } from "../../shared/constants/roles";
 import { startContractSession } from "../support/contract-session";
 import { createTestVehicle } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
@@ -21,8 +21,9 @@ const PRICE_DIGITS = "15000000";
 const ALLOWED: readonly string[] = VEHICLE_PURCHASE_PRICE_READ_ROLES;
 const ROLES = [...ALL_APP_ROLES] as AppRole[];
 const DENIED: readonly string[] = ROLES.filter((role) => !ALLOWED.includes(role));
-// Le chauffeur n'est pas du personnel de plein droit ici : la jointure de mission le concerne s'il est affecté.
-const OPERATIONS_ROLES = ROLES.filter((role) => role !== "client");
+// Lecteurs des listes d'exploitation (MISSION_READ_ROLES) : le chauffeur y est, filtré à ses missions
+// (la jointure le concerne s'il est affecté) ; le technicien en est exclu (moindre donnée).
+const OPERATIONS_ROLES = ROLES.filter((role) => MISSION_READ_ROLES.includes(role));
 
 type Actor = AppRole;
 let session: Awaited<ReturnType<typeof startContractSession<Actor>>>;
@@ -103,6 +104,11 @@ describe("GET /api/vehicles/all", () => {
 });
 
 describe("GET /api/operations/missions (jointure mission, affectation, véhicule)", () => {
+  it.each(ROLES.filter((role) => !OPERATIONS_ROLES.includes(role)))("%s : 403, aucun prix", async (role) => {
+    const res = await session.call("GET", "/api/operations/missions", { actor: role });
+    expect(res.status).toBe(403);
+    expect(leaks(res.body)).toBe(false);
+  });
   it.each(OPERATIONS_ROLES)("%s", async (role) => {
     const res = await session.call("GET", "/api/operations/missions", { actor: role });
     expect(res.status).toBe(200);
@@ -196,8 +202,9 @@ describe("GET /api/operations/missions/:id/costs (prix / 1000 récupérable)", (
   const derived = String(Number(PRICE) / 1000);
   it.each(ROLES)("%s", async (role) => {
     const res = await session.call("GET", `/api/operations/missions/${missionId}/costs`, { actor: role });
-    if (role === "driver" || role === "client") {
+    if (!OPERATIONS_COST_READ_ROLES.includes(role)) {
       expect(res.status).toBe(403);
+      expect(JSON.stringify(res.body)).not.toContain(derived);
       return;
     }
     expect(res.status).toBe(200);
