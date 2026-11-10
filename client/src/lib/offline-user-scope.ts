@@ -25,6 +25,12 @@ export const OFFLINE_DB_PREFIX = "fleetos-offline-u";
 export const OFFLINE_SCHEMA_VERSION = 2;
 export const CACHE_RECORD_KEY = "query-cache";
 export const QUEUE_RECORD_KEY = "queue";
+/**
+ * Préfixe des enregistrements de fichiers en attente d'envoi (Blob), dans la même base
+ * par compte que la file. Réservé : rien n'est écrit avant le lot V5b-5 (photos POD).
+ * Une purge de la base les emporte avec la file.
+ */
+export const FILES_RECORD_PREFIX = "files:";
 /** Clés globales de l'ancien format (store par défaut d'idb-keyval), à détruire. */
 export const LEGACY_RECORD_KEYS = ["fleetos-query-cache-v1", "fleetos-offline-queue-v1"] as const;
 /** Une copie plus ancienne est jetée à la lecture. */
@@ -268,6 +274,9 @@ export function createOfflineScope(kv: OfflineKv) {
   }
 
   return {
+    /** Nombre d'écritures en file (tous états) d'un compte, sans exiger qu'il soit actif. */
+    queuedCount: (userId: number) => countQueued(offlineDbName(userId)),
+
     /** Compteur de purge du magasin d'un utilisateur, à relever avant une écriture asynchrone. */
     epochOf: (userId: number) => epochOfDb(offlineDbName(userId)),
 
@@ -341,14 +350,28 @@ export function createOfflineScope(kv: OfflineKv) {
      * Déconnexion : le magasin du compte qui se déconnecte est vidé, file comprise ; les
      * autres comptes perdent leur cache de lecture mais gardent leur file (même règle que
      * `purgeOthers` : tablette partagée). L'ancien format global est détruit.
-     * Renvoie le nombre d'écritures du compte sortant détruites (journalisé ; avertissement : lot #10c).
+     * Avec `dropOtherQueues`, les magasins des autres comptes sont vidés entièrement, file
+     * comprise (décision V5b : purge complète à la déconnexion).
+     * Renvoie le nombre d'écritures du compte sortant détruites (journalisé).
      */
-    async purgeAll(activeUserId: number | null = getActiveOfflineUserId()): Promise<number> {
+    async purgeAll(
+      activeUserId: number | null = getActiveOfflineUserId(),
+      options: { dropOtherQueues?: boolean } = {},
+    ): Promise<number> {
       const own = activeUserId !== null ? offlineDbName(activeUserId) : null;
       const others = ((await listOfflineDbs()) ?? []).filter((name) => name !== own);
       const lost = own ? await countQueued(own) : 0;
-      await Promise.all([...(own ? [clearDb(own)] : []), ...others.map(dropReadCache)]);
+      const lostOthers = options.dropOtherQueues
+        ? (await Promise.all(others.map(countQueued))).reduce((a, b) => a + b, 0)
+        : 0;
+      await Promise.all([
+        ...(own ? [clearDb(own)] : []),
+        ...others.map(options.dropOtherQueues ? clearDb : dropReadCache),
+      ]);
       await purgeLegacy();
+      if (lostOthers > 0) {
+        clientLogger.warn("Écritures hors ligne d'autres comptes détruites à la déconnexion", { lost: lostOthers });
+      }
       if (lost > 0) {
         clientLogger.warn("Écritures hors ligne non synchronisées détruites à la déconnexion", {
           lost,
@@ -360,13 +383,20 @@ export function createOfflineScope(kv: OfflineKv) {
 
     /**
      * Changement d'utilisateur sans déconnexion (tablette partagée) : le cache de lecture
-     * des autres comptes est supprimé, leur file d'écritures est gardée pour leur
-     * prochaine connexion. Elle reste illisible ici : `readQueue` exige le même userId.
+     * des autres comptes est supprimé ; leur file d'écritures est gardée pour leur
+     * prochaine connexion, sauf avec `dropQueues` (purge complète, décision V5b).
+     * Gardée, elle reste illisible ici : `readQueue` exige le même userId.
      */
-    async purgeOthers(keepUserId: number): Promise<number> {
+    async purgeOthers(keepUserId: number, options: { dropQueues?: boolean } = {}): Promise<number> {
       const keep = offlineDbName(keepUserId);
       const others = ((await listOfflineDbs()) ?? []).filter((name) => name !== keep);
-      await Promise.all(others.map(dropReadCache));
+      if (options.dropQueues) {
+        const lost = (await Promise.all(others.map(countQueued))).reduce((a, b) => a + b, 0);
+        if (lost > 0) {
+          clientLogger.warn("Écritures hors ligne d'un autre compte détruites au changement de compte", { lost });
+        }
+      }
+      await Promise.all(others.map(options.dropQueues ? clearDb : dropReadCache));
       return others.length;
     },
 

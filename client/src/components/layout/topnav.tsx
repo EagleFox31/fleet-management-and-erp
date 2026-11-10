@@ -17,6 +17,7 @@ import { Bell, Settings, User, LogOut, ChevronDown, ChevronRight, Wrench, Packag
 import { roleLabelOf } from "@/lib/contextual-help/roles";
 import { ContextualHelpButton } from "@/components/help";
 import { LOT_SCREENS } from "@/config/lot-screens";
+import { useGuardedLogout } from "@/components/offline/logout-guard";
 
 interface TopnavProps {
   className?: string;
@@ -24,7 +25,7 @@ interface TopnavProps {
 }
 
 export const Topnav: React.FC<TopnavProps> = ({ className, onMenuClick }) => {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const [location, setLocation] = useLocation();
 
   const getBreadcrumbs = (path: string): string[] => {
@@ -137,10 +138,7 @@ export const Topnav: React.FC<TopnavProps> = ({ className, onMenuClick }) => {
     return `${Math.floor(h / 24)}j`;
   };
 
-  const handleLogout = async () => {
-    await logout();
-    setLocation("/login");
-  };
+  const { requestLogout: handleLogout, guardDialog } = useGuardedLogout(() => setLocation("/login"));
 
   const getInitials = (name: string) => {
     return name
@@ -155,6 +153,7 @@ export const Topnav: React.FC<TopnavProps> = ({ className, onMenuClick }) => {
     <div
       className={`px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between sticky top-0 z-20 border-b border-gray-100 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm max-w-full overflow-hidden ${className}`}
     >
+      {guardDialog}
       {/* Hamburger mobile (masqué pour le technicien qui utilise la Bottom App Bar PWA) */}
       {user?.role !== "technician" && (
         <Button

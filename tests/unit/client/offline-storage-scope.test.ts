@@ -196,6 +196,39 @@ describe("cloison entre deux comptes sur le même appareil", () => {
     expect((await scope.loadCache(22)).length).toBe(1);
   });
 
+  it("changement de compte avec dropQueues : la file des autres comptes est détruite et comptée (S1)", async () => {
+    const { kv } = memoryKv();
+    const scope = createOfflineScope(kv);
+    await scope.writeQueue(11, [{ id: "a" }, { id: "b" }], scope.epochOf(11));
+    await scope.saveCache(22, [myWorkOrders({ id: 70, vehicleId: 15 })]);
+
+    await scope.purgeOthers(22, { dropQueues: true });
+
+    expect(await scope.readQueue(11)).toEqual([]);
+    expect((await scope.loadCache(22)).length).toBe(1);
+  });
+
+  it("déconnexion avec dropOtherQueues : la file de tous les comptes est détruite (S1)", async () => {
+    const { kv } = memoryKv();
+    const scope = createOfflineScope(kv);
+    await scope.writeQueue(11, [{ id: "a" }], scope.epochOf(11));
+    await scope.writeQueue(22, [{ id: "c" }], scope.epochOf(22));
+
+    await scope.purgeAll(11, { dropOtherQueues: true });
+
+    expect(await scope.readQueue(11)).toEqual([]);
+    expect(await scope.readQueue(22)).toEqual([]);
+  });
+
+  it("queuedCount compte les envois du compte sans toucher aux autres", async () => {
+    const { kv } = memoryKv();
+    const scope = createOfflineScope(kv);
+    await scope.writeQueue(11, [{ id: "a" }, { id: "b" }], scope.epochOf(11));
+    await scope.writeQueue(22, [{ id: "c" }], scope.epochOf(22));
+    expect(await scope.queuedCount(11)).toBe(2);
+    expect(await scope.queuedCount(22)).toBe(1);
+  });
+
   it("déconnexion : file du compte sortant détruite et comptée, file des autres comptes gardée", async () => {
     const { kv } = memoryKv();
     const scope = createOfflineScope(kv);
