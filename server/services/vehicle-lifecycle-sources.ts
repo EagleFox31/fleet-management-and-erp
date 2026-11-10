@@ -24,6 +24,8 @@ export const VEHICLE_ACTIVITY_SOURCES: readonly { table: string; column: string;
   { table: "incidents", column: "vehicle_id", label: "incidents" },
   { table: "qhse_inspections", column: "vehicle_id", label: "inspections QHSE" },
   { table: "payment_instruments", column: "vehicle_id", label: "traites et effets" },
+  // Un camion qui a roulé (téléphone en mission ou balise) a eu une action ; purgées après la rétention.
+  { table: "vehicle_positions", column: "vehicle_id", label: "positions GPS" },
   // La création du véhicule pose une première ligne (storage.createVehicle) : seul un vrai
   // changement de statut, au-delà de celle-ci, compte comme une action.
   { table: "status_history", column: "vehicle_id", label: "changements de statut", minRows: 2 },
