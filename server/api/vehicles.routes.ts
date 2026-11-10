@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { authenticate, isAdmin, isAnyUser, isStaff } from "../middleware/auth";
+import { isVehicleOperationWriter, authenticate, isAdmin, isAnyUser, isStaff } from "../middleware/auth";
 import { vehicleDocumentationService } from "../services/vehicle-documentation-service";
 import { db } from "../db";
 import { vehicleDocuments, vehicles } from "@shared/schema";
@@ -287,7 +287,7 @@ router.get("/documents/all", isAnyUser, async (req, res, next) => {
  * PUT /api/vehicles/:id/mileage
  * Mise à jour kilométrage véhicule
  */
-router.put("/:id/mileage", isStaff, async (req, res, next) => {
+router.put("/:id/mileage", isVehicleOperationWriter, async (req, res, next) => {
   try {
     const vehicleId = parseRouteId(req.params.id, "ID de véhicule invalide");
     const { kilometers } = req.body;
@@ -331,7 +331,7 @@ router.put("/:id/mileage", isStaff, async (req, res, next) => {
  * PUT /api/vehicles/:id/maintenance-position
  * Mise à jour position maintenance véhicule
  */
-router.put("/:id/maintenance-position", isStaff, async (req, res, next) => {
+router.put("/:id/maintenance-position", isVehicleOperationWriter, async (req, res, next) => {
   try {
     const vehicleId = parseRouteId(req.params.id, "ID de véhicule invalide");
     const { position } = req.body;

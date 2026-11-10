@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
+import { PROCUREMENT_ROLES } from "@shared/constants/roles";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -23,8 +24,8 @@ export default function SuppliersListPage() {
   const [activeFilter, setActiveFilter] = useState<string>("all");
   const [tutorialOpen, setTutorialOpen] = useState(false);
 
-  const hasWritePermission =
-    user?.role === "admin" || user?.role === "secretary" || user?.role === "logistics";
+  // Comptable et chef d'atelier consultent (SUPPLIER_READ_ROLES) ; seul l'approvisionnement écrit.
+  const hasWritePermission = (PROCUREMENT_ROLES as readonly string[]).includes(user?.role || "");
 
   const { data: suppliers, isLoading } = useQuery<Supplier[]>({
     queryKey: ["/api/suppliers", {

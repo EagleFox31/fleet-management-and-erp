@@ -125,7 +125,7 @@ const normalizeInvoiceItems = (value: unknown): InvoicePdfItem[] | undefined => 
 // Logistics: créer, consulter
 const canAccessBilling = authorize([...CLIENT_BILLING_EVENT_ROLES]);
 const canReadBillingStatistics = authorize([...CLIENT_BILLING_STATS_ROLES]);
-const canRecordPayment = authorize(['admin', 'secretary']);
+const canRecordPayment = authorize(['admin', 'secretary', 'accountant']);
 
 const broadcastClientInvoiceUpdate = (
   eventType: string,
