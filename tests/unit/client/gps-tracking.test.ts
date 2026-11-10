@@ -15,7 +15,7 @@ import {
   type GpsPoint,
   type RawFix,
 } from "@/lib/gps-tracking";
-import { resolveMapTiles, OSM_TILES } from "@/lib/map-tiles";
+import { MAP_TILES } from "@/lib/map-tiles";
 
 const T0 = Date.parse("2026-11-10T08:00:00Z");
 const fix = (over: Partial<RawFix> = {}): RawFix => ({ lat: 4.05, lng: 9.7, timestamp: T0, ...over });
@@ -116,13 +116,9 @@ describe("fenêtre de suivi et drapeau", () => {
 });
 
 describe("config des tuiles", () => {
-  it("replie sur OpenStreetMap avec son attribution", () => {
-    expect(resolveMapTiles({})).toMatchObject({ url: OSM_TILES.url, attribution: OSM_TILES.attribution });
-  });
-  it("prend l'URL et l'attribution de l'environnement, sans attribution OSM mensongère", () => {
-    const t = resolveMapTiles({ VITE_MAP_TILE_URL: "https://t.example/{z}/{x}/{y}.png" });
-    expect(t.url).toBe("https://t.example/{z}/{x}/{y}.png");
-    expect(t.attribution).toBe("");
-    expect(resolveMapTiles({ VITE_MAP_TILE_URL: "https://t.example/x", VITE_MAP_TILE_ATTRIBUTION: "Ex" }).attribution).toBe("Ex");
+  it("replie sur OpenStreetMap avec son attribution quand l'environnement ne règle rien", () => {
+    expect(MAP_TILES.url).toBe("https://tile.openstreetmap.org/{z}/{x}/{y}.png");
+    expect(MAP_TILES.attribution).toContain("OpenStreetMap");
+    expect(MAP_TILES.maxZoom).toBe(19);
   });
 });

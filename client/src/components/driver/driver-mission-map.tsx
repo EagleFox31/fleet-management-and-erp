@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { mapTiles } from "@/lib/map-tiles";
+import { MAP_TILES } from "@/lib/map-tiles";
 
 export interface MapPoint {
   lat: number;
@@ -42,7 +42,7 @@ export function DriverMissionMap({ origin, destination, trace, current, classNam
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
     const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true }).setView([4.05, 9.77], 6);
-    L.tileLayer(mapTiles.url, { attribution: mapTiles.attribution, maxZoom: mapTiles.maxZoom }).addTo(map);
+    L.tileLayer(MAP_TILES.url, { attribution: MAP_TILES.attribution, maxZoom: MAP_TILES.maxZoom }).addTo(map);
     layerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
     return () => {

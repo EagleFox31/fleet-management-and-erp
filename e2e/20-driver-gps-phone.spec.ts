@@ -3,8 +3,9 @@ import { eq, inArray, like } from "drizzle-orm";
 import { db } from "../server/db";
 import { assignments, clients, drivers, missions, users, vehiclePositions, vehicles } from "../shared/schema";
 import { cleanupCreated, createIdBag } from "../tests/support/cleanup";
-import { createTestClient, createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../tests/support/factories";
-import { loginWithSession, type E2ECredentials } from "./helpers/auth";
+import { createTestClient, createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../tests/support/factories";
+import { apiLogin, loginWithSession, type E2ECredentials } from "./helpers/auth";
+import { createLaunchableDriver, createLaunchableVehicle, creditFuelCard, LAUNCH_BUDGETS } from "./helpers/mission-journey";
 import { newE2EContext } from "./helpers/contexts";
 
 /**
@@ -55,12 +56,10 @@ async function createAccount(role: TestUserRole, label: string): Promise<E2ECred
 /** Chauffeur, véhicule et mission affectée Douala -> Yaoundé, avec points A/B. */
 async function createCrew(label: string, clientId: number): Promise<Crew> {
   const user = await createAccount("driver", label);
-  const [driver] = await db
-    .insert(drivers)
-    .values({ userId: user.id, firstName: "Chauffeur", lastName: token(label), employeeNumber: token(`EMP${label}`), isActive: true })
-    .returning();
-  const vehicle = await createTestVehicle({ registrationNumber: `${PREFIX}${label}${Date.now().toString(36)}`.slice(0, 32) });
-  ids.vehicleIds.push(vehicle.id);
+  // Papiers valides, CPC formé : le lancement passe par les vraies gardes métier.
+  const driver = await createLaunchableDriver(token(label), token(`EMP${label}`));
+  await db.update(drivers).set({ userId: user.id }).where(eq(drivers.id, driver.id));
+  const vehicle = await createLaunchableVehicle(ids, `${PREFIX}${label}${Date.now().toString(36)}`.slice(0, 32));
   const orderNumber = token(`MIS${label}`);
   const [mission] = await db
     .insert(missions)
@@ -77,12 +76,18 @@ async function createCrew(label: string, clientId: number): Promise<Crew> {
     })
     .returning();
   await db.insert(assignments).values({ missionId: mission.id, vehicleId: vehicle.id, driverId: driver.id, status: "accepted" });
+  // Budgets du lancement saisis par la logistique, comme à l'écran.
+  const api = await apiLogin(logistics);
+  if (!api) throw new Error("connexion logistique refusée");
+  const budget = await api.patch(`/api/missions/${mission.id}`, { data: { budget: LAUNCH_BUDGETS } });
+  expect(budget.status(), await budget.text()).toBeLessThan(300);
+  await api.dispose();
   return { user, missionId: mission.id, orderNumber };
 }
 
 async function driverPage(browser: Browser, crew: Crew, options: { geolocation?: { latitude: number; longitude: number }; flags?: boolean } = {}): Promise<Page> {
   const context = await newE2EContext(browser, "chauffeur", {
-    viewport: { width: 390, height: 844 },
+    viewport: process.env.GPS_E2E_DESKTOP ? { width: 1280, height: 800 } : { width: 390, height: 844 },
     ...(options.geolocation ? { geolocation: options.geolocation, permissions: ["geolocation"] } : {}),
   });
   const page = await context.newPage();
@@ -104,10 +109,12 @@ const positionCount = async (missionId: number) =>
 
 /** Clique sur le bouton de statut et exige que le serveur accepte le changement (corps joint en cas d'échec). */
 async function changeStatus(page: Page, name: RegExp): Promise<void> {
-  const answer = page.waitForResponse((r) => r.request().method() === "PUT" && //api/missions/d+/status/.test(r.url()), { timeout: 60_000 });
+  const answer = page.waitForResponse((r) => r.request().method() === "PUT" && /\/api\/missions\/\d+\/status/.test(r.url()), { timeout: 60_000 });
   await page.getByRole("button", { name }).click();
   const response = await answer;
-  expect(response.ok(), `statut mission : ${response.status()} ${(await response.text()).slice(0, 300)}`).toBeTruthy();
+  // Le corps n'est lu qu'en cas d'échec : le lire sur un succès peut rester suspendu derrière le service worker.
+  const detail = response.ok() ? "" : (await response.text()).slice(0, 300);
+  expect(response.ok(), `statut mission : ${response.status()} ${detail}`).toBeTruthy();
 }
 
 /** Le paquet part toutes les 2 min ; l'événement `online` déclenche le même envoi tout de suite. */
@@ -117,10 +124,11 @@ test.beforeAll(async () => {
   await purge();
   const client = await createTestClient({ name: token("CLIENT") });
   ids.clientIds.push(client.id);
+  logistics = await createAccount("logistics", "LOGI");
+  await creditFuelCard(ids);
   crewMain = await createCrew("A", client.id);
   crewDenied = await createCrew("B", client.id);
   crewFlag = await createCrew("C", client.id);
-  logistics = await createAccount("logistics", "LOGI");
 });
 
 test.afterAll(async () => {
@@ -168,7 +176,7 @@ test.describe("GPS V1 téléphone : espace chauffeur", () => {
     await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("fleetos-gps-buffer-")).length), { timeout: 30_000 }).toBeGreaterThan(0);
     await triggerFlush(page);
     await expect.poll(() => positionCount(crewMain.missionId), { timeout: 30_000 }).toBe(2);
-    await page.screenshot({ path: testInfo.outputPath("en-route-mobile.png") });
+    await page.screenshot({ path: testInfo.outputPath(process.env.GPS_E2E_DESKTOP ? "en-route-bureau.png" : "en-route-mobile.png") });
 
     await changeStatus(page, /CONFIRMER LA LIVRAISON/);
     await expect(page.getByTestId("driver-gps-sharing")).toHaveCount(0, { timeout: 30_000 });
