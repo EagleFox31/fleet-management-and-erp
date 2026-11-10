@@ -1989,10 +1989,10 @@ const createMissionSchema = insertMissionSchema
     status: true,
     actualFuelCost: true,
     workflowData: true,
-    // Posés par le cycle de vie (validation, POD, clôture, étape), jamais à la création.
+    // Posés par le cycle de vie (validation, clôture, étape), jamais à la création. Le POD (podUrl,
+    // podUploadedAt) est déjà retiré de insertMissionSchema : seul le dépôt de fichier le pose.
     validatedBy: true,
     validatedAt: true,
-    podUploadedAt: true,
     actualDistance: true,
     actualFuelQuantity: true,
     currentStep: true,

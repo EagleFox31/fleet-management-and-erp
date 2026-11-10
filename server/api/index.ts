@@ -8,6 +8,7 @@ import driversRoutes from "./drivers.routes";
 import driversManagementRoutes from "./drivers-management.routes";
 import missionsRoutes from "./missions.routes";
 import missionPriceRoutes from "./mission-price.routes";
+import missionPodRoutes from "./mission-pod.routes";
 import fuelRecordsRoutes from "./fuel-records.routes";
 import vehicleHistoryRoutes from "./vehicle-history.routes";
 import clientsRoutes from "./clients.routes";
@@ -202,6 +203,8 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   apiRouter.use("/drivers", isStaff, driversRoutes);
   apiRouter.use("/drivers", isStaff, driversManagementRoutes);
   // Garde au montage: aucune route du routeur missions ne se protégeait seule.
+  // POD avant missions.routes : mêmes middlewares, sa propre garde chauffeur (router.param).
+  apiRouter.use("/missions", authenticate, isStaff, missionPodRoutes);
   apiRouter.use("/missions", authenticate, isStaff, missionPriceRoutes);
   apiRouter.use("/missions", authenticate, isStaff, missionsRoutes);
   // Relevé client : avant /clients (isStaff), la cloison client et les rôles finance sont posés sur la route.
