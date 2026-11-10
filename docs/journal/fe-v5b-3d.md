@@ -68,3 +68,10 @@
 - Pourquoi : la vérification à chaque tour (`auth-bootstrap.ts`, branche `state.offlineGrant && now >= expiresAt`) n'avait aucun test.
 - Preuve du rouge : branche neutralisée (mutation temporaire) : le cas « appareil endormi » échoue ; code restauré : 10 verts. Aucun changement de code produit.
 - Tester : `node node_modules/vitest/vitest.mjs run tests/unit/client/auth-bootstrap.test.ts`.
+
+## WIP : audit de #687, constat 1 (listDbs / registre local)
+
+- Quoi : `OfflineKv.listDbs` peut rendre `{ names, complete }`. Quand `indexedDB.databases()` échoue, `offline-kv` rend les noms du registre local avec `complete: false` (au lieu de lever). `purgeOthers` et `purgeAll` purgent ces noms puis signalent l'incomplétude (`purgeOthers` rend `false`, `purgeAll` lève) ; `cacheOwnership` trouve « foreign » si un nom du registre porte une copie, sinon « unknown » ; `activateOfflineUser` journalise et efface le marqueur de reprise du nouveau compte quand `purgeOthers` rend `false`.
+- Appelants de `listOfflineDbs` : `cacheOwnership` (lecture seule, unknown si incomplet), `purgeAll` (purge les noms, lève si incomplet), `purgeOthers` (purge les noms, `false` si incomplet). Seul `offline-kv.listDbs` implémente l'énumération réelle.
+- Rouge avant correctif : 3 échecs ("expected +0 to be false", "expected [ { …(2) } ] to deeply equal []", "expected 'unknown' to be 'foreign'").
+- Reste (non fait) : 2 échecs à examiner dans `offline-resume-replay.test.ts` (C1, vus sous `--pool=vmThreads`, car le pool par défaut échoue ici sur "Vitest failed to find the runner" pour une raison d'environnement), constat 2 (update() du SW, controllerchange, bandeau), mineur decodeURIComponent, notes polices/5,5 Mo, specs 21 et 33 sur base locale.

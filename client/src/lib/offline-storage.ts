@@ -87,6 +87,12 @@ export function activateOfflineUser(
   cancelScheduledReplay();
   // Changement de compte : les copies et les envois en attente de l'autre compte sont détruits (S1).
   void offlineScope.purgeOthers(userId, { dropQueues: true }).then((count) => {
+    if (count === false) {
+      // Énumération impossible : purge incomplète, donc pas de reprise hors ligne pour ce compte.
+      clientLogger.warn("Purge des données hors ligne d'autres comptes incomplète : reprise hors ligne refusée");
+      void offlineResume.clear(userId).catch(logResumeFailure);
+      return;
+    }
     if (count > 0) {
       clientLogger.warn("Données hors ligne d'un autre compte supprimées", { count });
     }

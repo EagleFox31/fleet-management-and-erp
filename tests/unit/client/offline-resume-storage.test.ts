@@ -496,3 +496,37 @@ describe("audit : énumération des magasins impossible (mineur 1 de l'audit de 
     expect(await offlineScope.loadCache(7, T0 + 1000, flagOn)).toEqual([]);
   });
 });
+
+describe("audit de #687 : énumération impossible, le registre local sert de repli", () => {
+  const breakListing = () => {
+    vi.stubGlobal("indexedDB", {
+      ...fakeIndexedDb(),
+      databases: async () => {
+        throw new Error("énumération refusée");
+      },
+    });
+  };
+
+  it("changement de compte : le registre contient A, purgeOthers(B) vide A puis signale l'incomplétude (false)", async () => {
+    await onlineSession(7);
+    expect(await offlineScope.loadCache(7, T0 + 1000, flagOn)).not.toEqual([]);
+    breakListing();
+    expect(await offlineScope.purgeOthers(8, { dropQueues: true })).toBe(false);
+    expect(await offlineScope.loadCache(7, T0 + 1000, flagOn)).toEqual([]);
+  });
+
+  it("déconnexion : le registre contient A, purgeAll vide A puis lève", async () => {
+    await onlineSession(7);
+    breakListing();
+    await expect(offlineScope.purgeAll(8, { dropOtherQueues: true })).rejects.toThrow();
+    expect(await offlineScope.loadCache(7, T0 + 1000, flagOn)).toEqual([]);
+  });
+
+  it("reprise : un compte du registre est trouvé étranger, sinon propriétaire inconnu", async () => {
+    await onlineSession(7);
+    breakListing();
+    expect(await offlineScope.cacheOwnership(8)).toBe("foreign");
+    await offlineScope.purgeOthers(8, { dropQueues: true });
+    expect(await offlineScope.cacheOwnership(8)).toBe("unknown");
+  });
+});
