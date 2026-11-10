@@ -14,6 +14,7 @@ import "leaflet/dist/leaflet.css";
 
 import { CardShell } from "@/components/design-system";
 import { escapeHtml } from "@/lib/escape-html";
+import { MAP_TILES } from "@/lib/map-tiles";
 import {
   CEMAC_CORRIDORS,
   LOGISTICS_HUBS,
@@ -126,12 +127,12 @@ export function ExecutiveCorridorMap({ fleet, isLoading }: ExecutiveCorridorMapP
       center: [7.3697, 12.3547], // Centre Cameroun
       zoom: 6,
       zoomControl: true,
-      attributionControl: false,
+      attributionControl: true,
     });
 
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-      maxZoom: 18,
-      subdomains: "abcd",
+    L.tileLayer(MAP_TILES.url, {
+      maxZoom: MAP_TILES.maxZoom,
+      attribution: MAP_TILES.attribution,
     }).addTo(map);
 
     const layerGroup = L.layerGroup().addTo(map);
