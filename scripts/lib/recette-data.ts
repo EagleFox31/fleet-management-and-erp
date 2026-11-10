@@ -171,6 +171,8 @@ export async function deleteRecetteData(c: Queryable): Promise<void> {
   const rv = `(SELECT id FROM vehicles WHERE registration_number LIKE 'RCT-%')`;
   const ru = `(SELECT id FROM users WHERE username LIKE 'recette\\_%')`;
   const stmts = [
+    // Portée de la transaction (recette-reset ouvre BEGIN) : lève les verrous d'argent pour ce reset seul.
+    `select set_config('fleetos.allow_money_override', 'on', true)`,
     `DELETE FROM client_payments WHERE invoice_id IN (SELECT id FROM client_invoices WHERE invoice_number LIKE 'RCT-%')`,
     `DELETE FROM client_invoices WHERE invoice_number LIKE 'RCT-%'`,
     `DELETE FROM missions WHERE order_number LIKE 'RCT-%'`,

@@ -4,6 +4,7 @@ import { db } from "../../server/db";
 import { fuelRecords } from "../../shared/schema";
 import { startContractSession } from "../support/contract-session";
 import { createTestVehicle } from "../support/factories";
+import { deleteFuelRecordsWhere } from "../support/money-override";
 
 /**
  * Lectures carburant du personnel sur tout le parc. `storage.getVehicles()` sans
@@ -39,7 +40,7 @@ beforeAll(async () => {
 }, 120000);
 
 afterAll(async () => {
-  if (recordIds.length > 0) await db.delete(fuelRecords).where(inArray(fuelRecords.id, recordIds));
+  if (recordIds.length > 0) await deleteFuelRecordsWhere(inArray(fuelRecords.id, recordIds));
   await session.stop();
 });
 

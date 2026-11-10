@@ -38,6 +38,7 @@ import {
   vehicles,
   workOrders,
 } from "../../shared/schema";
+import { deleteClientInvoicesWhere } from "../../tests/support/money-override";
 
 export const DEMO_ACCOUNTS = {
   technician: { username: "tech1", password: "tech123", name: "Paul Mbarga", role: "technician" },
@@ -246,7 +247,7 @@ export const DEMO_INVOICE = {
 
 /** Factures de la période : purgées (paiements en cascade) puis recréées, donc rejeu sans doublon. */
 async function seedClientInvoices(): Promise<void> {
-  await db.delete(clientInvoices).where(like(clientInvoices.invoiceNumber, "DEMO-FAC-%"));
+  await deleteClientInvoicesWhere(like(clientInvoices.invoiceNumber, "DEMO-FAC-%"));
   const [client] = await db.select({ id: clients.id }).from(clients).where(eq(clients.name, DEMO_INVOICE.clientName));
   const today = isoDayFromNow(0);
   const due = isoDayFromNow(30);
@@ -283,7 +284,7 @@ async function seedFleetAudit(vehicleId: number): Promise<void> {
   const old = await db.select({ id: missions.id }).from(missions).where(eq(missions.orderNumber, DEMO_TCO.orderNumber));
   if (old.length > 0) {
     const ids = old.map((m) => m.id);
-    await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, ids));
+    await deleteClientInvoicesWhere(inArray(clientInvoices.missionId, ids));
     await db.delete(assignments).where(inArray(assignments.missionId, ids));
     await db.delete(missions).where(inArray(missions.id, ids));
   }
@@ -371,7 +372,7 @@ async function seedLogistics(): Promise<void> {
   const old = await db.select({ id: missions.id }).from(missions).where(like(missions.orderNumber, `${DEMO_MISSION.orderPrefix}%`));
   if (old.length > 0) {
     const oldIds = old.map((m) => m.id);
-    await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, oldIds));
+    await deleteClientInvoicesWhere(inArray(clientInvoices.missionId, oldIds));
     await db.delete(assignments).where(inArray(assignments.missionId, oldIds));
     await db.delete(missions).where(inArray(missions.id, oldIds));
   }

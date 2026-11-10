@@ -6,6 +6,7 @@ import { fuelRecords } from "../../shared/schema";
 import { createTestVehicle } from "../support/factories";
 import { startContractSession } from "../support/contract-session";
 import { uniqueTestToken } from "../support/ids";
+import { deleteFuelRecordsWhere } from "../support/money-override";
 
 /**
  * DIR2 / DIR3, export carburant par période : contenu exact du classeur et
@@ -51,7 +52,7 @@ beforeAll(async () => {
 }, 60000);
 
 afterAll(async () => {
-  if (recordIds.length > 0) await db.delete(fuelRecords).where(inArray(fuelRecords.id, recordIds));
+  if (recordIds.length > 0) await deleteFuelRecordsWhere(inArray(fuelRecords.id, recordIds));
   await session.stop();
 });
 

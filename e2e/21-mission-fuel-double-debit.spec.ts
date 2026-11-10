@@ -6,6 +6,7 @@ import { cleanupCreated, createIdBag } from "../tests/support/cleanup";
 import { createTestClient, createTestFuelRecord, createTestUser, createTestVehicle, TEST_USER_PASSWORD } from "../tests/support/factories";
 import { fuelCardService } from "../server/services/fuel-card-service";
 import { loginWithSession, type E2ECredentials } from "./helpers/auth";
+import { deleteFuelRecordsWhere } from "../tests/support/money-override";
 
 /**
  * FUEL-DBL, niveau E : un plein de mission dont la réponse est perdue ne débite la carte qu'une fois.
@@ -38,9 +39,9 @@ async function purge(): Promise<void> {
   const missionIds = missionRows.map((row) => row.id);
   const vehicleRows = await db.select({ id: vehicles.id }).from(vehicles).where(like(vehicles.registrationNumber, `${PREFIX}%`));
   const vehicleIds = vehicleRows.map((row) => row.id);
-  if (vehicleIds.length > 0) await db.delete(fuelRecords).where(inArray(fuelRecords.vehicleId, vehicleIds));
+  if (vehicleIds.length > 0) await deleteFuelRecordsWhere(inArray(fuelRecords.vehicleId, vehicleIds));
   if (missionIds.length > 0) {
-    await db.delete(fuelRecords).where(inArray(fuelRecords.missionId, missionIds));
+    await deleteFuelRecordsWhere(inArray(fuelRecords.missionId, missionIds));
     await db.delete(assignments).where(inArray(assignments.missionId, missionIds));
     await db.delete(missions).where(inArray(missions.id, missionIds));
   }

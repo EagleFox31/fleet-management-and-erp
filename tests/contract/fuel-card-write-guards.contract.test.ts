@@ -9,6 +9,7 @@ import { cleanupCreated, createIdBag, deleteTreasuryEntriesOfMissions } from "..
 import { startContractActors } from "../support/contract-actors";
 import { createTestFuelRecord, createTestVehicle } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { deleteFuelRecordsWhere } from "../support/money-override";
 
 /**
  * Écritures qui débitent la carte carburant de l'entreprise :
@@ -96,7 +97,7 @@ beforeAll(async () => {
 }, 120000);
 
 afterAll(async () => {
-  if (ids.vehicleIds.length > 0) await db.delete(fuelRecords).where(inArray(fuelRecords.vehicleId, ids.vehicleIds));
+  if (ids.vehicleIds.length > 0) await deleteFuelRecordsWhere(inArray(fuelRecords.vehicleId, ids.vehicleIds));
   if (missionIds.length > 0) {
     await deleteTreasuryEntriesOfMissions(missionIds);
     await db.delete(assignments).where(inArray(assignments.missionId, missionIds));
