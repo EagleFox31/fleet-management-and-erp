@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
+  adoptStoredGeo,
   ageSecondsOf,
   canViewPositions,
   canViewTrack,
   canEditMissionGeo,
   formatPositionAge,
+  geoInputOf,
+  geoSelectionOf,
   groupByVehicle,
+  NO_GEO,
   positionFreshness,
+  sameGeoPair,
+  type GeoPair,
   splitTrack,
 } from "@/lib/gps-display";
 import type { MissionTrackPoint } from "@shared/contracts/gps";
@@ -56,6 +62,36 @@ describe("gps-display", () => {
   });
 });
 
+describe("hydratation des points A/B", () => {
+  const hubs: GeoPair = { pickup: { kind: "hub", hubCode: "douala" }, delivery: { kind: "hub", hubCode: "yaounde" } };
+  const empty: GeoPair = { pickup: NO_GEO, delivery: NO_GEO };
+
+  it("un point stocké devient la saisie de départ (le formulaire démarre sur les hubs, pas sur « aucun »)", () => {
+    const stored: GeoPair = {
+      pickup: geoSelectionOf({ lat: null, lng: null, hubCode: "douala" }),
+      delivery: geoSelectionOf({ lat: 3.87, lng: 11.52, hubCode: null }),
+    };
+    expect(stored.pickup).toEqual({ kind: "hub", hubCode: "douala" });
+    expect(stored.delivery).toEqual({ kind: "map", lat: 3.87, lng: 11.52 });
+    expect(geoInputOf(stored.pickup)).toEqual({ hubCode: "douala" });
+  });
+
+  it("saisie égale à l'ancienne valeur stockée : la nouvelle valeur serveur est adoptée", () => {
+    expect(adoptStoredGeo(empty, empty, hubs)).toEqual(hubs);
+    expect(adoptStoredGeo(hubs, hubs, empty)).toEqual(empty);
+  });
+
+  it("saisie modifiée : la valeur serveur ne l'écrase pas", () => {
+    const edited: GeoPair = { ...hubs, pickup: { kind: "map", lat: 4.05, lng: 9.7 } };
+    expect(adoptStoredGeo(edited, hubs, empty)).toBe(edited);
+  });
+
+  it("l'état de départ égal au stocké n'est pas modifié (bouton Enregistrer inactif)", () => {
+    expect(sameGeoPair(hubs, { ...hubs })).toBe(true);
+    expect(sameGeoPair(hubs, empty)).toBe(false);
+  });
+});
+
 describe("hygiène : tuiles", () => {
   it("aucune URL de tuiles en dur hors de map-tiles.ts", async () => {
     const { readFileSync, readdirSync, statSync } = await import("node:fs");
@@ -66,7 +102,7 @@ describe("hygiène : tuiles", () => {
         return statSync(p).isDirectory() ? walk(p) : /\.(ts|tsx)$/.test(n) ? [p] : [];
       });
     const offenders = walk(join(process.cwd(), "client", "src")).filter(
-      (f) => !f.split("\\").join("/").endsWith("lib/map-tiles.ts") && /basemaps\.cartocdn|tile\.openstreetmap/.test(readFileSync(f, "utf8")),
+      (f) => !f.split("\\").join("/").endsWith("lib/map-tiles.ts") && /\{z\}\/\{x\}\/\{y\}/.test(readFileSync(f, "utf8")),
     );
     expect(offenders).toEqual([]);
   });

@@ -23,6 +23,8 @@ function latLngOf(selection: GeoSelection | undefined): [number, number] | null 
 export default function GeoPointMap({ value, letter, color, other, onPick }: Props) {
   const { containerRef, map } = useLeafletMap({ scrollWheelZoom: true });
   const layerRef = useRef<L.LayerGroup | null>(null);
+  // Cadrage initial une seule fois : un clic ne doit pas changer le zoom choisi par l'utilisateur.
+  const fittedRef = useRef(false);
   const onPickRef = useRef(onPick);
   onPickRef.current = onPick;
 
@@ -59,7 +61,13 @@ export default function GeoPointMap({ value, letter, color, other, onPick }: Pro
       L.marker(here, { icon: letterIcon(letter, color) }).addTo(layer);
       bounds.push(here);
     }
-    if (bounds.length > 0) map.fitBounds(L.latLngBounds(bounds), { padding: [32, 32], maxZoom: 9 });
+    if (!fittedRef.current && bounds.length > 0) {
+      map.fitBounds(L.latLngBounds(bounds), { padding: [32, 32], maxZoom: 9 });
+      fittedRef.current = true;
+    } else if (here && !map.getBounds().contains(here)) {
+      // Après un clic ou un changement de point : on garde le zoom de l'utilisateur, on recentre seulement si besoin.
+      map.panTo(here);
+    }
     // `hereKey` / `thereKey` : dépendances par valeur, les tableaux changent d'identité à chaque rendu.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, hereKey, thereKey, letter, color]);

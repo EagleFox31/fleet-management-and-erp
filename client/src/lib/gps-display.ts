@@ -135,6 +135,21 @@ export function sameGeoSelection(a: GeoSelection, b: GeoSelection): boolean {
   return true;
 }
 
+export type GeoPair = { pickup: GeoSelection; delivery: GeoSelection };
+
+export function sameGeoPair(a: GeoPair, b: GeoPair): boolean {
+  return sameGeoSelection(a.pickup, b.pickup) && sameGeoSelection(a.delivery, b.delivery);
+}
+
+/**
+ * Saisie à afficher après une nouvelle valeur serveur : on l'adopte seulement si l'utilisateur n'a
+ * rien modifié depuis la précédente (saisie égale à l'ancienne valeur stockée). Une saisie en cours
+ * n'est jamais écrasée, et une valeur stockée identique ne change rien.
+ */
+export function adoptStoredGeo(local: GeoPair, previousStored: GeoPair, nextStored: GeoPair): GeoPair {
+  return sameGeoPair(local, previousStored) ? nextStored : local;
+}
+
 /** Points fiables regroupés par véhicule (ordre d'apparition), un tracé par groupe ; sans vehicleId, un seul groupe. */
 export function groupByVehicle(points: readonly MissionTrackPoint[]): MissionTrackPoint[][] {
   const groups = new Map<number | null, MissionTrackPoint[]>();

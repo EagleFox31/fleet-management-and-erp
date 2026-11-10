@@ -23,9 +23,9 @@ function invalidateSatellites(event: string, payload?: SatellitePayload): void {
   }
 }
 
-/** Couche 3 des événements du lot : invalide les clés déclarées au catalogue (`invalidates`). */
 const TRACK_KEY_PATTERN = /^\/api\/missions\/\d+\/track$/;
 
+/** Couche 3 des événements du lot : invalide les clés déclarées au catalogue (`invalidates`). */
 function invalidateCatalogEvent(name: RealtimeEventName): void {
   for (const key of REALTIME_EVENTS[name].invalidates) {
     queryClient.invalidateQueries({ queryKey: [key] });

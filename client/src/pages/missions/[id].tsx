@@ -34,9 +34,10 @@ import { createSubmissionKeyStore, isIndeterminateOutcome, missionFuelKeyScope }
 import { Skeleton } from "@/components/ui/skeleton";
 import { MissionPodPanel, PodDepositButton } from "@/components/missions/mission-pod-panel";
 
-const MissionGpsPanel = lazy(() => import("@/components/gps/mission-gps-panel").then((m) => ({ default: m.MissionGpsPanel })));
 import { useMissionPodFiles } from "@/hooks/use-mission-pod";
 import { invoiceGate } from "@/lib/mission-pod";
+
+const MissionGpsPanel = lazy(() => import("@/components/gps/mission-gps-panel").then((m) => ({ default: m.MissionGpsPanel })));
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-100 text-gray-800",

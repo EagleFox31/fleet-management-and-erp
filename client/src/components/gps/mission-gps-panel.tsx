@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { AlertTriangle, Clock, MapPinOff, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { appToast } from "@/lib/app-toast";
 import { userMessageOf } from "@/lib/api-error";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
+  adoptStoredGeo,
   ageSecondsOf,
   canEditMissionGeo,
   canViewTrack,
@@ -20,11 +21,11 @@ import {
   geoSelectionOf,
   missionGeoEditable,
   positionFreshness,
-  sameGeoSelection,
+  sameGeoPair,
   splitTrack,
-  type GeoSelection,
+  type GeoPair,
 } from "@/lib/gps-display";
-import { missionGeoPath, missionTrackPath, type VehiclePosition } from "@shared/contracts/gps";
+import { missionGeoPath, missionTrackPath, type MissionTrackResponse, type VehiclePosition } from "@shared/contracts/gps";
 
 const MissionTrackMap = lazy(() => import("./mission-track-map"));
 
@@ -55,39 +56,9 @@ export function MissionGpsPanel({ missionId, status, role }: { missionId: number
   const age = lastPosition ? ageSecondsOf(lastPosition.recordedAt, now) : null;
   const freshness = age === null ? null : positionFreshness(age);
 
-  const canEdit = canEditMissionGeo(role) && missionGeoEditable(status ?? track?.status);
-  const stored = useMemo(
-    () => ({ pickup: geoSelectionOf(track?.pickup), delivery: geoSelectionOf(track?.delivery) }),
-    [track?.pickup, track?.delivery],
-  );
-  const [pickup, setPickup] = useState<GeoSelection>(stored.pickup);
-  const [delivery, setDelivery] = useState<GeoSelection>(stored.delivery);
-  const dirty = !sameGeoSelection(pickup, stored.pickup) || !sameGeoSelection(delivery, stored.delivery);
-
-  // Une mise à jour serveur (temps réel) ne remplace pas une saisie en cours.
-  useEffect(() => {
-    if (!dirty) {
-      setPickup(stored.pickup);
-      setDelivery(stored.delivery);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stored]);
-
-  const save = useMutation({
-    mutationFn: async (vars: { id: number; pickup: GeoSelection; delivery: GeoSelection }) =>
-      apiRequest("PATCH", missionGeoPath(vars.id), { pickup: geoInputOf(vars.pickup), delivery: geoInputOf(vars.delivery) }),
-    onSuccess: (_data, vars) => {
-      appToast({ title: "Points enregistrés", description: "Le départ et la livraison sont à jour sur la carte.", variant: "success" });
-      // Le serveur n'émet aucun événement pour /geo : la resynchronisation est locale (détail, liste, trace).
-      queryClient.invalidateQueries({ queryKey: [`/api/missions/${vars.id}`] });
-      queryClient.invalidateQueries({ queryKey: ["/api/missions"] });
-      queryClient.invalidateQueries({ queryKey: [missionTrackPath(vars.id)] });
-    },
-    onError: (error: unknown) => {
-      appToast({ title: "Enregistrement impossible", description: userMessageOf(error, "Les points n'ont pas pu être enregistrés."), variant: "destructive" });
-    },
-  });
-
+  // Le formulaire n'existe qu'une fois la trace chargée : sinon il s'initialiserait « sans point » et
+  // un enregistrement effacerait les points A/B déjà saisis.
+  const canEdit = !!track && canEditMissionGeo(role) && missionGeoEditable(status ?? track.status);
   if (positionsQuery.error || (showTrack && trackQuery.error)) {
     return (
       <LoadingError
@@ -145,6 +116,7 @@ export function MissionGpsPanel({ missionId, status, role }: { missionId: number
                 delivery={track?.delivery ?? null}
                 points={track?.points ?? null}
                 lastPosition={lastPosition}
+                lastPositionAgeSeconds={age}
               />
             </Suspense>
           </div>
@@ -159,27 +131,64 @@ export function MissionGpsPanel({ missionId, status, role }: { missionId: number
         </CardContent>
       </Card>
 
-      {canEdit && (
-        <Card data-testid="mission-geo-edit">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Points de départ et de livraison</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <MissionGeoField which="pickup" value={pickup} onChange={setPickup} other={delivery} disabled={save.isPending} />
-            <MissionGeoField which="delivery" value={delivery} onChange={setDelivery} other={pickup} disabled={save.isPending} />
-            <Button
-              type="button"
-              size="sm"
-              disabled={!dirty || save.isPending}
-              onClick={() => save.mutate({ id: missionId, pickup, delivery })}
-              data-testid="geo-save"
-            >
-              <Save className="mr-2 h-4 w-4" aria-hidden="true" />
-              Enregistrer les points
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+      {canEdit && track && <MissionGeoEditor key={missionId} missionId={missionId} track={track} />}
     </div>
+  );
+}
+
+/** Formulaire des points A/B ; monté seulement quand la trace (donc les points stockés) est connue. */
+function MissionGeoEditor({ missionId, track }: { missionId: number; track: MissionTrackResponse }) {
+  const storedPickup = track.pickup;
+  const storedDelivery = track.delivery;
+  const stored = useMemo<GeoPair>(
+    () => ({ pickup: geoSelectionOf(storedPickup), delivery: geoSelectionOf(storedDelivery) }),
+    [storedPickup, storedDelivery],
+  );
+  const [local, setLocal] = useState<GeoPair>(stored);
+  const previousStored = useRef<GeoPair>(stored);
+  const dirty = !sameGeoPair(local, stored);
+
+  // Une mise à jour serveur (temps réel) ne remplace pas une saisie en cours.
+  useEffect(() => {
+    const before = previousStored.current;
+    previousStored.current = stored;
+    setLocal((current) => adoptStoredGeo(current, before, stored));
+  }, [stored]);
+
+  const save = useMutation({
+    mutationFn: async (vars: { id: number; pickup: GeoPair["pickup"]; delivery: GeoPair["delivery"] }) =>
+      apiRequest("PATCH", missionGeoPath(vars.id), { pickup: geoInputOf(vars.pickup), delivery: geoInputOf(vars.delivery) }),
+    onSuccess: (_data, vars) => {
+      appToast({ title: "Points enregistrés", description: "Le départ et la livraison sont à jour sur la carte.", variant: "success" });
+      // Le serveur n'émet aucun événement pour /geo : la resynchronisation est locale (détail, liste, trace).
+      queryClient.invalidateQueries({ queryKey: [`/api/missions/${vars.id}`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/missions"] });
+      queryClient.invalidateQueries({ queryKey: [missionTrackPath(vars.id)] });
+    },
+    onError: (error: unknown) => {
+      appToast({ title: "Enregistrement impossible", description: userMessageOf(error, "Les points n'ont pas pu être enregistrés."), variant: "destructive" });
+    },
+  });
+
+  return (
+    <Card data-testid="mission-geo-edit">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">Points de départ et de livraison</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <MissionGeoField which="pickup" value={local.pickup} onChange={(pickup) => setLocal((c) => ({ ...c, pickup }))} other={local.delivery} disabled={save.isPending} />
+        <MissionGeoField which="delivery" value={local.delivery} onChange={(delivery) => setLocal((c) => ({ ...c, delivery }))} other={local.pickup} disabled={save.isPending} />
+        <Button
+          type="button"
+          size="sm"
+          disabled={!dirty || save.isPending}
+          onClick={() => save.mutate({ id: missionId, pickup: local.pickup, delivery: local.delivery })}
+          data-testid="geo-save"
+        >
+          <Save className="mr-2 h-4 w-4" aria-hidden="true" />
+          Enregistrer les points
+        </Button>
+      </CardContent>
+    </Card>
   );
 }

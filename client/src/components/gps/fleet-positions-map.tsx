@@ -30,12 +30,17 @@ function popupOf(position: VehiclePosition): string {
   return `<div style="font-family:sans-serif;min-width:150px"><strong>${plate}</strong>${order}${speed}<div>Position ${escapeHtml(formatPositionAge(position.ageSeconds))}</div></div>`;
 }
 
-/** Carte de flotte : un repère par véhicule, couleur selon l'âge de la dernière position. */
+/**
+ * Carte de flotte : un repère par véhicule, couleur selon l'âge de la dernière position.
+ * `positions[].ageSeconds` doit être l'âge réel (horloge locale), pas celui de la réponse serveur.
+ */
 export default function FleetPositionsMap({ positions, selectedVehicleId, onSelect }: Props) {
   const { containerRef, map } = useLeafletMap({ scrollWheelZoom: true });
   const layerRef = useRef<L.LayerGroup | null>(null);
   const markersRef = useRef<Map<number, L.Marker>>(new Map());
   const fittedRef = useRef(false);
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
 
   useEffect(() => {
     if (!map) return;
@@ -49,27 +54,42 @@ export default function FleetPositionsMap({ positions, selectedVehicleId, onSele
     };
   }, [map]);
 
+  // Mise à jour sur place : un repère existant change de position, d'icône et de contenu sans être
+  // recréé, pour ne pas fermer la bulle ouverte à chaque tick de l'horloge ou trame temps réel.
   useEffect(() => {
     const layer = layerRef.current;
     if (!map || !layer) return;
-    layer.clearLayers();
-    markersRef.current.clear();
+    const markers = markersRef.current;
+    const seen = new Set<number>();
     for (const position of positions) {
-      const marker = L.marker([position.lat, position.lng], {
-        icon: positionIcon(position, position.vehicleId === selectedVehicleId),
-        title: position.registrationNumber ?? undefined,
-      });
+      seen.add(position.vehicleId);
+      const latLng: [number, number] = [position.lat, position.lng];
+      const icon = positionIcon(position, position.vehicleId === selectedVehicleId);
+      const existing = markers.get(position.vehicleId);
+      if (existing) {
+        existing.setLatLng(latLng);
+        existing.setIcon(icon);
+        existing.setPopupContent(popupOf(position));
+        continue;
+      }
+      const marker = L.marker(latLng, { icon, title: position.registrationNumber ?? undefined });
       marker.bindPopup(popupOf(position));
-      marker.on("click", () => onSelect(position.vehicleId));
+      marker.on("click", () => onSelectRef.current(position.vehicleId));
       marker.addTo(layer);
-      markersRef.current.set(position.vehicleId, marker);
+      markers.set(position.vehicleId, marker);
+    }
+    for (const [vehicleId, marker] of Array.from(markers)) {
+      if (!seen.has(vehicleId)) {
+        marker.remove();
+        markers.delete(vehicleId);
+      }
     }
     // Cadrage une seule fois : un rafraîchissement temps réel ne doit pas déplacer la vue.
     if (!fittedRef.current && positions.length > 0) {
       map.fitBounds(L.latLngBounds(positions.map((p) => [p.lat, p.lng] as [number, number])), { padding: [40, 40], maxZoom: 9 });
       fittedRef.current = true;
     }
-  }, [map, positions, selectedVehicleId, onSelect]);
+  }, [map, positions, selectedVehicleId]);
 
   useEffect(() => {
     if (!map || selectedVehicleId === null) return;

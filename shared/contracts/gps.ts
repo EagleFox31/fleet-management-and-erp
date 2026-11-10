@@ -7,7 +7,7 @@
  * (écriture des points A/B). Tout est derrière le drapeau `gps`.
  */
 import { z } from "zod";
-import { bodyIdSchema, MAX_DB_INTEGER_ID } from "./common";
+import { bodyIdSchema } from "./common";
 
 /** Dernière position connue de chaque véhicule (points suspects exclus par le serveur). */
 export const VEHICLE_POSITIONS_PATH = "/api/vehicle-positions";
@@ -47,8 +47,9 @@ const trackEndSchema = z.object({
 export type MissionTrackEnd = z.infer<typeof trackEndSchema>;
 
 export const missionTrackPointSchema = z.object({
-  // bigserial côté base : borné à l'int4 comme les autres ids du contrat (purge à 30 jours, la séquence reste loin de 2 milliards).
-  id: z.number().int().positive().max(MAX_DB_INTEGER_ID),
+  // bigserial côté base : un int4 serait faux à terme, on borne à la limite des entiers exacts de JavaScript.
+  // Exception documentée dans tests/unit/server/zod-id-range-hygiene.test.ts (BIGSERIAL_RESPONSE_IDS).
+  id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   recordedAt: z.string(),
   lat: z.number(),
   lng: z.number(),

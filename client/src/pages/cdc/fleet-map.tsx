@@ -34,7 +34,11 @@ export default function FleetMapPage() {
 
   const rows = useMemo(
     () =>
-      (query.data ?? []).map((p) => ({ ...p, age: ageSecondsOf(p.recordedAt, now) })),
+      (query.data ?? []).map((p) => {
+        const age = ageSecondsOf(p.recordedAt, now);
+        // `ageSeconds` du serveur est figé à la réponse : on le remplace par l'âge réel.
+        return { ...p, age, ageSeconds: age };
+      }),
     [query.data, now],
   );
 
