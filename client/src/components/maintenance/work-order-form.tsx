@@ -24,6 +24,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAllVehicles } from "@/hooks/use-all-vehicles";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
@@ -90,9 +91,7 @@ export function WorkOrderForm({ initialData, isEdit = false, workOrderId, presel
   const queryClient = useQueryClient();
 
   // Fetch vehicles for dropdown
-  const { data: vehiclesData } = useQuery<{ vehicles: any[] }>({
-    queryKey: ["/api/vehicles"],
-  });
+  const { data: allVehicles } = useAllVehicles();
 
   // Fetch technicians (users with technician role) for dropdown
   const { data: techniciansData } = useQuery<any[]>({
@@ -110,7 +109,7 @@ export function WorkOrderForm({ initialData, isEdit = false, workOrderId, presel
     enabled: !!(initialData?.vehicleId || preselectedVehicleId),
   });
 
-  const vehicles = vehiclesData?.vehicles || [];
+  const vehicles = allVehicles ?? [];
 
   const technicians = Array.isArray(techniciansData) ? techniciansData : [];
   const schedules = Array.isArray(schedulesData) ? schedulesData : [];
