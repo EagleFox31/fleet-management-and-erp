@@ -242,3 +242,58 @@ describe("bandeau hors ligne", () => {
     expect(renderToStaticMarkup(React.createElement(OfflineDataBannerView, { text: null }))).toBe("");
   });
 });
+
+describe("lecture hors ligne du chauffeur : liste blanche de champs", () => {
+  const collectKeys = (value: unknown, prefix = "", out = new Set<string>()): Set<string> => {
+    if (Array.isArray(value)) value.forEach((v) => collectKeys(v, prefix + "[]", out));
+    else if (value && typeof value === "object") {
+      for (const [k, v] of Object.entries(value)) {
+        out.add(`${prefix}.${k}`);
+        collectKeys(v, `${prefix}.${k}`, out);
+      }
+    }
+    return out;
+  };
+  const SECRETS = [
+    "podUrl", "workflowData", "validatedBy", "email", "fuelBudget", "roadExpensesBudget", "contingencyBudget",
+    "budgets", "budgetSuggestion", "fuel", "amount", "unitPrice", "totalAmount", "balance", "fuelBalance",
+    "totalCredits", "totalDebits", "lastCredit", "lastDebit", "uploadedByName", "detail", "cniNumber", "licenseNumber",
+  ];
+  const fat = (extra: Record<string, unknown> = {}) => ({
+    id: 11, status: "in_progress", orderNumber: "M-11", cargo: "ciment", assignments: [{ driverId: 7, id: 1, secret: "x", vehicle: { id: 2, registrationNumber: "LT-1", vin: "VIN" } }],
+    assignment: { driverId: 7, notes: "n" }, client: { name: "ACME", phone: "6", email: "a@b.c", contactPerson: "Bob", taxId: "T" },
+    podUrl: "/x", workflowData: { a: 1 }, validatedBy: 3, fuelBudget: 10, budgets: { a: 1 }, driver: { cniNumber: "C" }, ...extra,
+  });
+
+  it("une enveloppe persistée ne contient aucune clé hors liste blanche (récursif)", () => {
+    const qs = [
+      meOf([{ id: 11, status: "in_progress" }]),
+      query(["/api/missions/11"], fat()),
+      query(["/api/missions/11/fuel-records"], {
+        missionId: 11, missionStatus: "in_progress", totalQuantity: 5, totalAmount: 9,
+        records: [{ id: 1, date: "d", quantity: 5, mileage: 100, stationName: "S", amount: 9, unitPrice: 2, paymentMode: "cash" }],
+      }),
+      query(["/api/missions/11/launch-readiness"], {
+        missionId: 11, missionStatus: "in_progress", canLaunch: true, summary: { total: 1, passed: 1, failed: 0, warnings: 0 },
+        checks: [{ key: "budget_fuel", label: "Budget", passed: true, blocking: true, detail: "500 FCFA" }],
+        fuel: { balance: 1 }, budgets: { fuelBudget: 1 }, budgetSuggestion: { a: 1 },
+      }),
+      query(["/api/missions/11/pod-files"], { files: [{ id: 1, originalName: "a.jpg", mime: "image/jpeg", sizeBytes: 3, uploadedAt: "t", uploadedByName: "Moi" }] }),
+      query(["/api/fuel-card/balance"], { balance: 99, fuelBalance: 3, totalCredits: 1, totalDebits: 1, lastCredit: { a: 1 }, averagePricePerLiter: 700, priceSource: "real" }),
+    ];
+    const persisted = selectPersistableQueries(qs, flagsOn);
+    expect(persisted).toHaveLength(6);
+    const keys = collectKeys(persisted.map((q) => q.state.data));
+    const names = [...keys].map((k) => k.split(".").pop()!);
+    for (const secret of SECRETS) expect(names, secret).not.toContain(secret);
+    expect([...keys].sort()).toMatchSnapshot();
+  });
+
+  it("le détail garde le contact sur place et les points A/B, sans e-mail client", () => {
+    const [, d] = selectPersistableQueries([meOf([{ id: 11, status: "in_progress" }]), query(["/api/missions/11"], fat({ pickupLat: 1, pickupLng: 2 }))], flagsOn);
+    const data = d!.state.data as Record<string, any>;
+    expect(data.client).toEqual({ name: "ACME", phone: "6", contactPerson: "Bob" });
+    expect(data.pickupLat).toBe(1);
+    expect(data.cargo).toBe("ciment");
+  });
+});

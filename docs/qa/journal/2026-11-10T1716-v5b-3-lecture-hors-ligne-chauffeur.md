@@ -5,3 +5,11 @@
 - Pourquoi : lecture indispensable sur un quai sans réseau (plan V5b, décisions 3 et 7 : cache minimal, pas de documents personnels).
 - Tester : `tests/unit/client/offline-read-driver.test.ts` (sélection, second compte sans accès, purge, drapeaux éteints, bandeau). Drapeaux éteints, le comportement est celui d'avant.
 - Non fait : e2e `setOffline(true)` + second compte (voir PR : exige un serveur de dev et des comptes chauffeur sur une base locale non préparés ici). Dépendance à #659 : aucune fonctionnelle ; `offline-user-scope.ts` est touché hors des sections de #659 (conflit de contexte possible seulement).
+
+### Cache minimal : liste blanche de champs (décision 7)
+
+- Quoi : le cache du chauffeur ne garde plus que les champs affichés. `client/src/lib/offline-driver-projection.ts` (logique pure, `pickFields` + une forme par endpoint) est appliqué dans le profil chauffeur de `offline-user-scope.ts` : fiche `/api/drivers/me`, détail mission, pleins, check-list de lancement, pièces de preuve, solde carte.
+- Retirés : e-mail client, `workflowData`, ids de validation, `podUrl`, budgets et suggestion, montants des pleins, `detail` des contrôles (contient les budgets), solde carte (seuls le prix moyen au litre et sa source sont gardés, ce sont les seuls champs lus par l'écran chauffeur), nom de l'auteur du dépôt de preuve.
+- Garde-fou : test récursif dans `tests/unit/client/offline-read-driver.test.ts` (aucune clé sensible, instantané des chemins de clés persistés). Toute clé ajoutée au cache fait échouer l'instantané et impose une relecture.
+- Serveur : `router.param("id")` (missions et preuves) et le contrôle explicite de `launch-readiness` vérifient l'appartenance au chauffeur ; aucun défaut serveur constaté. `fuel-card.routes.ts` non touché (son `console.error` reste).
+- Non fait (dette) : e2e Playwright hors ligne (`setOffline(true)` puis second compte) : demande Postgres local + serveur local avec drapeaux, non monté dans cette passe ; la cloison par compte est couverte en unitaire avec un stockage en mémoire.

@@ -20,6 +20,16 @@
  */
 
 import { clientLogger } from "@/lib/logger";
+import {
+  DRIVER_ME_SHAPE,
+  FUEL_CARD_BALANCE_SHAPE,
+  LAUNCH_READINESS_SHAPE,
+  MISSION_DETAIL_SHAPE,
+  MISSION_FUEL_SHAPE,
+  POD_FILES_SHAPE,
+  pickFields,
+  type FieldShape,
+} from "@/lib/offline-driver-projection";
 
 export const OFFLINE_DB_PREFIX = "fleetos-offline-u";
 export const OFFLINE_SCHEMA_VERSION = 2;
@@ -194,6 +204,12 @@ export const DRIVER_OFFLINE_MISSION_STATUSES: readonly string[] = ["in_progress"
 
 export const DRIVER_ME_PATH = "/api/drivers/me";
 export const FUEL_CARD_BALANCE_PATH = "/api/fuel-card/balance";
+const MISSION_SUBRESOURCE_SHAPES: Record<string, FieldShape> = {
+  detail: MISSION_DETAIL_SHAPE,
+  "fuel-records": MISSION_FUEL_SHAPE,
+  "launch-readiness": LAUNCH_READINESS_SHAPE,
+  "pod-files": POD_FILES_SHAPE,
+};
 const DRIVER_MISSION_PATH = /^\/api\/missions\/(\d+)(?:\/(fuel-records|launch-readiness|pod-files))?$/;
 
 type FlagReader = (flag: string) => boolean;
@@ -236,14 +252,7 @@ export function projectDriverMe(
     if (!mission || id === null || !DRIVER_OFFLINE_MISSION_STATUSES.includes(String(mission.status))) return [];
     return [mission];
   });
-  return {
-    driver: {
-      id: driverId,
-      ...(typeof driver.firstName === "string" ? { firstName: driver.firstName } : {}),
-      ...(typeof driver.lastName === "string" ? { lastName: driver.lastName } : {}),
-    },
-    missions,
-  };
+  return pickFields({ driver, missions }, DRIVER_ME_SHAPE) as ReturnType<typeof projectDriverMe>;
 }
 
 /** Le détail d'une mission n'est gardé que s'il reste lisible hors ligne et porte une affectation du chauffeur. */
@@ -262,6 +271,10 @@ function missionDataIsOwnedBy(kind: string, data: unknown, missionId: number, dr
   return true;
 }
 
+function withData<T extends CachedQueryLike>(q: T, data: unknown): T {
+  return { ...q, state: { ...q.state, data } };
+}
+
 export const DRIVER_READ_PROFILE: OfflineReadProfile = {
   id: "driver",
   flags: ["driver-offline", "offline-writes"],
@@ -272,20 +285,23 @@ export const DRIVER_READ_PROFILE: OfflineReadProfile = {
     const me = anchor ? projectDriverMe(anchor.state.data) : null;
     if (!anchor || !me) return [];
     const missionIds = new Set(me.missions.flatMap((m) => positiveInt(m.id) ?? []));
-    const result: T[] = [{ ...anchor, state: { ...anchor.state, data: me } }];
+    const result: T[] = [withData(anchor, me)];
     for (const q of queries) {
       if (q === anchor || q.state.status !== "success" || q.state.data === undefined) continue;
       if (q.queryKey.length !== 1 || typeof q.queryKey[0] !== "string") continue;
       const path = q.queryKey[0];
       if (path === FUEL_CARD_BALANCE_PATH) {
-        result.push(q);
+        result.push(withData(q, pickFields(q.state.data, FUEL_CARD_BALANCE_SHAPE)));
         continue;
       }
       const match = DRIVER_MISSION_PATH.exec(path);
       if (!match) continue;
       const missionId = Number(match[1]);
       if (!missionIds.has(missionId)) continue;
-      if (missionDataIsOwnedBy(match[2] ?? "detail", q.state.data, missionId, me.driver.id)) result.push(q);
+      const kind = match[2] ?? "detail";
+      if (missionDataIsOwnedBy(kind, q.state.data, missionId, me.driver.id)) {
+        result.push(withData(q, pickFields(q.state.data, MISSION_SUBRESOURCE_SHAPES[kind]!)));
+      }
     }
     return result;
   },
