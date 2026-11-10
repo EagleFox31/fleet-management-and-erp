@@ -487,8 +487,8 @@ export const DRIVER_DIRECTORY_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filte
 );
 
 /**
- * Lecteurs des missions (liste, fiche, preuves de livraison) : le personnel sans le technicien, qui n'a
- * aucun écran mission (adresses, client, chauffeurs). Le chauffeur y reste, cloisonné à ses missions par
+ * Lecteurs des missions (liste, fiche, preuves de livraison, `/api/drivers/me`) : le personnel sans le
+ * technicien, qui n'a aucun écran mission (adresses, client, chauffeurs). Le chauffeur y reste, cloisonné à ses missions par
  * la garde des routeurs (`router.param("id")`, portée chauffeur de la liste).
  */
 export const MISSION_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "technician");
