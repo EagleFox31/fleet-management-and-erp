@@ -4,11 +4,11 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { UNSUPPORTED_CONTENT_TYPE_MESSAGE } from "../../server/middleware/require-json-content-type";
-import { activityLogs, fuelRecords, incidents, parts, partsStockMovements, vehicleDocuments, workOrders } from "../../shared/schema";
+import { activityLogs, clientPayments, fuelRecords, incidents, parts, partsStockMovements, vehicleDocuments, workOrders } from "../../shared/schema";
 import { apiErrorProblems, leakText } from "../support/api-error";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
-import { createTestPart, createTestVehicle } from "../support/factories";
+import { createTestClient, createTestClientInvoice, createTestPart, createTestVehicle } from "../support/factories";
 import { deleteFuelRecordsWhere } from "../support/money-override";
 
 /**
@@ -21,7 +21,7 @@ import { deleteFuelRecordsWhere } from "../support/money-override";
  * c'est ce que la version sans garde faisait.
  */
 
-const ACTORS = { admin: "admin", boss: "workshop_manager" } as const;
+const ACTORS = { admin: "admin", boss: "workshop_manager", secretary: "secretary" } as const;
 type Actor = keyof typeof ACTORS;
 
 const ids = createIdBag();
@@ -148,6 +148,33 @@ describe("écritures /api hors JSON : refus 415 avant tout effet", { timeout: 12
   it("les lectures ne sont pas concernées (GET sans type)", async () => {
     const res = await fetch(`${session.baseUrl}/api/parts/${partId}`, { headers: { Cookie: session.cookies.get("admin")! } });
     expect(res.status).not.toBe(415);
+  });
+});
+
+describe("route d'argent de facturation : paiement client en urlencoded", { timeout: 120000 }, () => {
+  it("POST /api/billing/invoices/:id/payments : 415, aucun paiement écrit, solde intact", async () => {
+    const client = await createTestClient();
+    ids.clientIds.push(client.id);
+    const invoice = await createTestClientInvoice({ clientId: client.id });
+    ids.clientInvoiceIds.push(invoice.id);
+    const form = new URLSearchParams({ amount: "1000", paymentDate: "2026-10-29", paymentMethod: "cash" }).toString();
+    for (const [type, body] of [[FORM, form], ["text/plain", form], [undefined, undefined]] as const) {
+      const res = await fetch(`${session.baseUrl}/api/billing/invoices/${invoice.id}/payments`, {
+        method: "POST",
+        headers: { Cookie: session.cookies.get("secretary")!, ...(type ? { "Content-Type": type } : {}) },
+        body,
+      });
+      const json = await res.json();
+      expect(apiErrorProblems(res.status, json, 415), String(type)).toEqual([]);
+      expect(json.message).toBe(UNSUPPORTED_CONTENT_TYPE_MESSAGE);
+    }
+    const payments = await db.select().from(clientPayments).where(eq(clientPayments.invoiceId, invoice.id));
+    expect(payments).toHaveLength(0);
+    const ok = await session.call("POST", `/api/billing/invoices/${invoice.id}/payments`, {
+      actor: "secretary",
+      body: { amount: 1000, paymentDate: "2026-10-29", paymentMethod: "cash" },
+    });
+    expect(ok.status, leakText(ok.body)).toBe(200);
   });
 });
 
