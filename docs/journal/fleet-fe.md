@@ -29,3 +29,10 @@
 **Pourquoi.** Le technicien recevait un 403 et l'OT annulé un 409 après affichage du bouton.
 
 **Comment tester.** Compte technicien : pas de corbeille. Admin, magasin ou chef d'atelier sur OT en cours : corbeille présente ; OT annulé ou terminé : absente. Test : `tests/unit/client/part-used-remove-roles.test.ts`.
+
+## 2026-11-10 — Landing : nombre de rôles dérivé
+
+- Quoi : les 6 nombres de rôles en dur de `client/src/pages/landing.tsx` (7, 9, 9, 9, 11, 11) deviennent `ROLE_COUNT = userProfiles.length` (11).
+- Comment : constante définie sous le tableau `userProfiles`, utilisée dans les 6 libellés. Test `tests/unit/client/landing-role-count.test.ts` : ids de `userProfiles` = `ALL_APP_ROLES` sans `user` (sans doublon), aucun `\d+ rôles|Profils` en dur, constante dérivée.
+- Pourquoi : les chiffres avaient divergé de la liste réellement affichée.
+- Tester : `node node_modules/vitest/vitest.mjs run tests/unit/client/landing-role-count.test.ts`.

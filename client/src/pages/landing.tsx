@@ -251,6 +251,9 @@ const userProfiles = [
   }
 ];
 
+/** Nombre de profils affiché partout sur la page : dérivé de la liste, jamais écrit en dur. */
+const ROLE_COUNT = userProfiles.length;
+
 // Matrice des permissions granulaire par profil
 const permissionsMatrix: Record<string, Record<string, boolean>> = {
   "Gestion véhicules & flotte": { admin: true, workshop_manager: true, technician: false, secretary: true, accountant: false, logistics: true, warehouse: false, viewer: true, management: true, client: false, driver: false },
@@ -923,7 +926,7 @@ function HeroLiveCockpit() {
           <div className="flex items-center gap-2 rounded-lg bg-white/5 border border-white/10 px-3 py-2">
             <Sparkles className="h-4 w-4 text-teal-300 shrink-0" />
             <div className="text-[11px] leading-tight text-slate-300">
-              <strong className="text-white">Synchronisation</strong> : 7 rôles connectés
+              <strong className="text-white">Synchronisation</strong> : {ROLE_COUNT} rôles connectés
             </div>
           </div>
         </div>
@@ -1201,7 +1204,7 @@ export default function LandingPage() {
               Fonctionnalités
             </a>
             <a href="#profiles" className="hover:text-emerald-400 transition-colors">
-              9 Rôles Métier
+              {ROLE_COUNT} Rôles Métier
             </a>
             <a href="#transformation" className="hover:text-emerald-400 transition-colors">
               Transformation
@@ -1280,7 +1283,7 @@ export default function LandingPage() {
                   <div className="text-xs text-slate-400">Traçabilité pièces & OT</div>
                 </div>
                 <div>
-                  <div className="text-2xl sm:text-3xl font-extrabold text-teal-300">9 Rôles</div>
+                  <div className="text-2xl sm:text-3xl font-extrabold text-teal-300">{ROLE_COUNT} Rôles</div>
                   <div className="text-xs text-slate-400">Interconnectés en direct</div>
                 </div>
               </div>
@@ -1307,13 +1310,13 @@ export default function LandingPage() {
               Gouvernance & Sécurité RBAC
             </Badge>
             <h2 className="text-3xl md:text-5xl font-extrabold tracking-tight text-white mb-4">
-              9 Profils Métier,{" "}
+              {ROLE_COUNT} Profils Métier,{" "}
               <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-300 bg-clip-text text-transparent">
                 une collaboration fluide
               </span>
             </h2>
             <p className="text-slate-400 text-base md:text-lg mb-4 leading-relaxed">
-              Des accès sur mesure et une séparation rigoureuse des responsabilités pour les 11 rôles clés de votre organisation.
+              Des accès sur mesure et une séparation rigoureuse des responsabilités pour les {ROLE_COUNT} rôles clés de votre organisation.
             </p>
             <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-xs text-slate-300">
               <Info className="h-3.5 w-3.5 text-emerald-400" />
@@ -1504,7 +1507,7 @@ export default function LandingPage() {
                 </Button>
               </Link>
               <Button size="lg" variant="outline" className="rounded-full h-12 sm:h-13 px-7 text-sm sm:text-base font-medium text-white border-white/20 bg-white/5 hover:bg-white/10 hover:border-white/30 backdrop-blur-md transition-all duration-200 active:scale-[0.98] min-w-[200px]" asChild>
-                <a href="#profiles">Explorer les 11 rôles</a>
+                <a href="#profiles">Explorer les {ROLE_COUNT} rôles</a>
               </Button>
             </div>
 
