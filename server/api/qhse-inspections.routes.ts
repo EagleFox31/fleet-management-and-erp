@@ -6,7 +6,7 @@ import {
   qhseInspectionsQuerySchema,
   updateQhseCriterionRequestSchema,
 } from "@shared/contracts/qhse-inspections";
-import { idSchema } from "@shared/contracts/common";
+import { parseRouteId } from "../lib/route-id";
 import { QHSE_CRITERIA_MANAGER_ROLES, QHSE_INSPECTION_ROLES } from "@shared/constants/roles";
 import { AppError } from "../lib/app-error";
 import { requireFeature } from "../lib/feature-flags";
@@ -56,7 +56,7 @@ router.post("/qhse/criteria", flag, authorize([...QHSE_CRITERIA_MANAGER_ROLES]),
 
 router.patch("/qhse/criteria/:id", flag, authorize([...QHSE_CRITERIA_MANAGER_ROLES]), validateBody(updateQhseCriterionRequestSchema), async (req, res, next) => {
   try {
-    const id = idSchema.parse(req.params.id);
+    const id = parseRouteId(req.params.id, "Critère invalide.");
     res.json(await updateCriterion(actorOf(req), id, req.body));
   } catch (error) {
     next(error);
@@ -73,7 +73,7 @@ router.get("/qhse/inspections", flag, staffOrDriver, async (req, res, next) => {
 
 router.get("/qhse/inspections/:id", flag, staffOrDriver, async (req, res, next) => {
   try {
-    res.json(await getInspection(actorOf(req), idSchema.parse(req.params.id)));
+    res.json(await getInspection(actorOf(req), parseRouteId(req.params.id, "Inspection invalide.")));
   } catch (error) {
     next(error);
   }

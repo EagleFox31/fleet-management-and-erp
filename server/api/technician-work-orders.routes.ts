@@ -13,7 +13,7 @@ import { alertService } from "../services/alert-service";
 import { transitionWorkOrderStatus } from "../services/work-order-status-transition";
 import { storage } from "../storage";
 import { workOrderCostScope } from "../lib/work-order-realtime-scope";
-import { idSchema } from "@shared/contracts/common";
+import { parseRouteId } from "../lib/route-id";
 
 const log = moduleLogger("technician-work-orders");
 
@@ -28,7 +28,6 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: "annulé",
 };
 
-const paramsSchema = z.object({ id: idSchema });
 
 const bodySchema = z.object({
   status: z.enum(TECHNICIAN_TARGET_STATUSES, {
@@ -56,7 +55,7 @@ const patchTechnicianWorkOrderStatus: RequestHandler = async (req, res, next) =>
       throw new AppError(403, "Accès réservé aux techniciens");
     }
 
-    const { id: workOrderId } = paramsSchema.parse(req.params);
+    const workOrderId = parseRouteId(req.params.id, "Ordre de travail invalide");
     const body = bodySchema.parse(req.body ?? {});
 
     if (body.partsUsed !== undefined && !(Array.isArray(body.partsUsed) && body.partsUsed.length === 0)) {

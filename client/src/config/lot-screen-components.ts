@@ -22,6 +22,7 @@ import {
   TariffGridScreen,
   TimeTrackingScreen,
   TireMovementsScreen,
+  WorkOrderHistoryScreen,
   WithholdingsScreen,
 } from "@/pages/lot/screens";
 import { MissionBudgetsDailyNeed } from "@/components/finance/mission-budgets-daily-need";
@@ -40,6 +41,7 @@ export const LOT_SCREEN_COMPONENTS: Partial<Record<string, ComponentType<LotScre
   "incident-declare": IncidentDeclareScreen,
   "incidents-list": IncidentsListScreen,
   "tire-movements": TireMovementsScreen,
+  "wo-history": WorkOrderHistoryScreen,
   "fuel-vouchers": FuelVouchersScreen,
   "fuel-anomalies": FuelAnomaliesScreen,
   "time-tracking": TimeTrackingScreen,

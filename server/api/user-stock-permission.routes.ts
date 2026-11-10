@@ -6,11 +6,10 @@ import { db } from "../db";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { authenticate, isAdmin } from "../middleware/auth";
-import { idSchema } from "@shared/contracts/common";
+import { parseRouteId } from "../lib/route-id";
 
 const log = moduleLogger("user-stock-permission");
 
-const paramsSchema = z.object({ id: idSchema });
 const bodySchema = z.object({
   canIssueStock: z.boolean({
     errorMap: () => ({ message: "Valeur invalide : indiquez si le droit de sortie est accordé (oui ou non)." }),
@@ -25,15 +24,14 @@ const bodySchema = z.object({
  */
 export const patchStockIssuePermission: RequestHandler = async (req, res, next) => {
   try {
-    const params = paramsSchema.safeParse(req.params);
-    if (!params.success) throw new AppError(400, "Utilisateur invalide");
+    const targetId = parseRouteId(req.params.id, "Utilisateur invalide");
     const body = bodySchema.safeParse(req.body);
     if (!body.success) throw new AppError(400, body.error.issues[0]?.message ?? "Requête invalide");
 
     const [target] = await db
       .select({ id: users.id, role: users.role })
       .from(users)
-      .where(and(eq(users.id, params.data.id), isNull(users.deletedAt)));
+      .where(and(eq(users.id, targetId), isNull(users.deletedAt)));
     if (!target) throw new AppError(404, "Utilisateur introuvable");
     if (target.role !== "workshop_manager") {
       throw new AppError(400, "Ce réglage ne concerne que les chefs d'atelier.");
