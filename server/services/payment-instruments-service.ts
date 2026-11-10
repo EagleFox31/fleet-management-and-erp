@@ -36,6 +36,8 @@ const NOT_FOUND = "Traite ou chèque introuvable.";
 const NOT_PENDING = "Seule une échéance en attente peut être modifiée.";
 const DUE_BEFORE_ISSUE = "L'échéance ne peut pas précéder la date d'émission.";
 const BAD_LINK = "Un lien (fournisseur, client ou véhicule) n'existe pas.";
+const INSTRUMENT_KEY_CONFLICT =
+  "Une autre échéance a déjà été enregistrée pour cette saisie. Rechargez la page pour voir les échéances enregistrées.";
 
 const today = (now: Date) => isoDateInZone(now);
 
@@ -147,7 +149,7 @@ const sameInstrument = (p: PaymentInstrument, input: CreatePaymentInstrumentInpu
   COMPARED.every((field) => (p[field] ?? null) === (input[field] ?? null));
 
 function replay(existing: PaymentInstrument & { requestKey: string | null }, input: CreatePaymentInstrumentInput) {
-  if (!sameInstrument(existing, input)) throw new AppError(409, "Cette clé de requête a déjà servi pour une autre échéance.");
+  if (!sameInstrument(existing, input)) throw new AppError(409, INSTRUMENT_KEY_CONFLICT);
   const { requestKey: _key, ...instrument } = existing;
   return { instrument, replayed: true };
 }
@@ -229,7 +231,7 @@ export const paymentInstrumentsService = {
       if (pgCode(error) === "23505" && key) {
         const existing = await readOne(db, sql`p.request_key = ${key}`, now);
         if (existing) return replay(existing, input);
-        throw new AppError(409, "Cette clé de requête a déjà servi pour une autre échéance.", { cause: error });
+        throw new AppError(409, INSTRUMENT_KEY_CONFLICT, { cause: error });
       }
       return mapDbError(error);
     }
