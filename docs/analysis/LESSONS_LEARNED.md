@@ -3603,6 +3603,7 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/contract/mission-trailer-assignment.contract.test.ts`, cas « trailerId "abc", 1.5, 2147483648, true : 400, jamais 500 » et « création et ajout simultanés : un 201, un 409, jamais d'interblocage » ;
   - `tests/unit/server/vehicle-activity-sources.test.ts` échoue sur toute clé étrangère vers `vehicles.id` non classée.
 - **Leçon généralisée** : un objet imbriqué lu par une route est toujours déclaré dans son schéma Zod, sinon il n'est pas validé du tout. L'ordre des verrous consultatifs est fixé en un seul endroit et chaque route l'emprunte. Toute clé étrangère vers `vehicles.id` est classée dans `vehicle-lifecycle-sources.ts` dans la même PR.
+- **Suite (#649), quatrième oubli du même lot** : `openWork` (suppression douce) ne cherchait les affectations que par `vehicle_id`, alors que `VEHICLE_ACTIVITY_SOURCES` classait aussi `assignments.trailer_id` : une remorque attelée était supprimable. Corrigé, avec le contrôle du changement de `vehicleType` d'un véhicule attelé. Prévention : `tests/unit/server/vehicle-lifecycle-open-work.test.ts` exige que `openWork` mentionne chaque colonne `assignments.*` de `VEHICLE_ACTIVITY_SOURCES`. Règle : un lecteur du critère d'action dérive ses colonnes de la source, il ne les recopie pas.
 
 ## 2026-11-10 — Service importé par un test unitaire qui charge server/db : job unit rouge (#642)
 
