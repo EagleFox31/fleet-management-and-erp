@@ -35,6 +35,24 @@ describe("toWorkOrderHistoryEntry", () => {
   });
 });
 
+describe("libellé d'action d'après le chemin", () => {
+  const label = (method: string, path: string, action: AuditLogRow["action"] = "create") =>
+    toWorkOrderHistoryEntry(row({ method, path, action })).action;
+  it("ne dit pas « Création » pour un POST qui n'en est pas une", () => {
+    expect(label("POST", "/api/work-orders/7/items")).toBe("Ajout de ligne");
+    expect(label("POST", "/api/work-orders/7/parts")).toBe("Ajout de pièce");
+    expect(label("POST", "/api/work-orders/7/awaiting-parts")).toBe("Statut : Attente pièces");
+    expect(label("POST", "/api/work-orders/7/part-requirements/4/issue")).toBe("Sortie de pièce du stock");
+    expect(label("POST", "/api/work-orders/7/quality-check")).toBe("Contrôle qualité");
+  });
+  it("statut du technicien, création réelle et repli sur le verbe", () => {
+    expect(label("PATCH", "/api/technician/work-orders/7/status", "update")).toBe("Changement de statut (technicien)");
+    expect(label("POST", "/api/work-orders")).toBe("Création");
+    expect(label("PATCH", "/api/work-orders/7", "update")).toBe("Modification");
+    expect(label("DELETE", "/api/work-orders/7/parts", "delete")).toBe("Suppression");
+  });
+});
+
 describe("WorkOrderHistory (rendu)", () => {
   const KEY = ["/api/work-orders/7/audit-trail"] as const;
   async function render(outcome: { data: unknown } | { error: Error }): Promise<string> {

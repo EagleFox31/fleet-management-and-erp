@@ -8,6 +8,11 @@ export interface AuditRule {
   entityType: string;
   /** Index du groupe de capture portant l'id (defaut 1). */
   idGroup?: number;
+  /**
+   * Creation sans id dans le chemin (`POST /work-orders`) : l'id est lu dans le corps JSON de la reponse.
+   * Sans lui, l'entree serait journalisee avec `entityId = null` et absente de l'historique de l'entite.
+   */
+  idFromResponse?: boolean;
 }
 export interface AuditConfig {
   rules: AuditRule[];
@@ -35,18 +40,33 @@ export function matchAuditRule(config: AuditConfig, method: string, path: string
   return null;
 }
 
+function wantsResponseId(config: AuditConfig, method: string, originalUrl: string): boolean {
+  if (method.toUpperCase() !== "POST") return false;
+  const clean = originalUrl.replace(/^\/api/, "").split("?")[0].toLowerCase().replace(/\/+$/, "");
+  return config.rules.find((r) => r.pattern.test(clean))?.idFromResponse === true;
+}
+
 /** Journalise, apres la reponse (< 400), les ecritures dont le chemin correspond a une regle. */
 export function auditWrites(config: AuditConfig): RequestHandler {
   return (req, res, next) => {
     const hit = matchAuditRule(config, req.method, req.originalUrl.replace(/^\/api/, ""));
     if (!hit) return next();
+    let responseId: string | null = null;
+    if (hit.entityId === null && wantsResponseId(config, req.method, req.originalUrl)) {
+      const json = res.json.bind(res);
+      res.json = (body?: unknown) => {
+        const id = (body as { id?: unknown } | null | undefined)?.id;
+        if (typeof id === "number" && Number.isInteger(id) && id > 0) responseId = String(id);
+        return json(body);
+      };
+    }
     res.on("finish", () => {
       if (res.statusCode >= 400) return;
       void recordAudit({
         userId: (req as { user?: { id?: number } }).user?.id ?? null,
         action: hit.action,
         entityType: hit.entityType,
-        entityId: hit.entityId,
+        entityId: hit.entityId ?? responseId,
         method: req.method,
         path: req.originalUrl.split("?")[0],
         requestId: (req as { requestId?: string }).requestId,
