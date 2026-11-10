@@ -17,7 +17,13 @@ export type ApiErrorCode =
   | "VEHICLE_RETIRED"
   /** 409 d'une écriture rejouable dont la même clé d'idempotence est encore en cours : le client réessaie plus tard, avec la même clé. */
   | "IDEMPOTENCY_IN_PROGRESS"
+  /** 503 d'une déclaration de panne dont l'écriture a échoué avant d'être validée : rien n'est enregistré, la même clé peut réessayer. Jamais vu du client (toute 5xx est normalisée en INTERNAL) : il ne sert qu'à libérer la clé d'idempotence. */
+  | "INCIDENT_WRITE_FAILED"
+  /** 404 d'une déclaration de panne sur un véhicule inexistant : refus prononcé avant toute écriture. */
+  | "INCIDENT_VEHICLE_NOT_FOUND"
   | "RATE_LIMITED"
+  /** 400 : cible de requête que l'app et un routeur monté liraient différemment (`\` dans le chemin, forme absolue). */
+  | "NON_CANONICAL_TARGET"
   | "INTERNAL";
 
 export type ApiFieldError = { field: string; message: string };
@@ -37,7 +43,10 @@ export const STATUS_MESSAGES: Record<ApiErrorCode, string> = {
   CONFLICT: "Cet élément a été modifié entre-temps. Rechargez la page puis réessayez.",
   VEHICLE_RETIRED: "Véhicule retiré : le restaurer avant de le modifier.",
   IDEMPOTENCY_IN_PROGRESS: "Cet envoi est déjà en cours de traitement. Réessayez dans un instant.",
+  INCIDENT_WRITE_FAILED: "La déclaration n'a pas pu être enregistrée. Réessayez dans un instant.",
+  INCIDENT_VEHICLE_NOT_FOUND: "Véhicule introuvable.",
   RATE_LIMITED: "Trop de tentatives. Patientez un instant avant de réessayer.",
+  NON_CANONICAL_TARGET: "Adresse de requête invalide.",
   INTERNAL: "Une erreur technique est survenue. Réessayez dans un instant.",
 };
 

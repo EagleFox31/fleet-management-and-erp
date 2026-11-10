@@ -7,6 +7,7 @@ import { AUDIT_CONFIG } from "../../../server/lib/audit-config";
 import { AppError } from "../../../server/lib/app-error";
 import { parseRouteId } from "../../../server/lib/route-id";
 import { auditWrites } from "../../../server/middleware/audit-writes";
+import { BACKSLASH, sendRaw } from "../../support/raw-request";
 
 /**
  * Le journal d'audit compare le chemin de la requete a des motifs. Une liste de chaines ne prouve rien :
@@ -36,6 +37,10 @@ beforeAll(async () => {
   });
   apiRouter.use("/work-orders", workOrderParts);
   app.use("/api", apiRouter);
+  // Declaree sur l'app apres apiRouter, comme `server/routes.ts` (PATCH /api/users/:id).
+  app.patch("/api/users/:id", (req, res) => {
+    res.json({ id: parseRouteId(req.params.id, "Utilisateur invalide") });
+  });
   const onError: ErrorRequestHandler = (err, _req, res, _next) => {
     res.status(err instanceof AppError ? err.status : 500).end();
   };
@@ -124,6 +129,26 @@ describe("auditWrites dans un vrai routeur Express", () => {
     await settle();
     expect(status).toBe(400);
     expect(entries).toHaveLength(0);
+  });
+});
+
+/**
+ * Barre oblique inverse : `parseurl` la convertit en `/` quand la cible porte un `#` ou une forme
+ * absolue, et la route de l'app s'execute sur l'objet 62. Sans `rejectNonCanonicalTarget` (teste a part),
+ * l'audit doit le voir quand meme : il lit le chemin du routeur, pas `originalUrl` brut.
+ */
+const B = BACKSLASH;
+const BACKSLASH_TARGETS = [`/api${B}users/62#x`, `http://h/api${B}users/62`, `/api/users${B}62#`, `/api/users/62${B}#`];
+
+describe("auditWrites : barre oblique inverse (socket brut)", () => {
+  it.each(BACKSLASH_TARGETS)("PATCH %s s'execute et laisse une entree sur l'utilisateur 62", async (target) => {
+    const { port } = server.address() as AddressInfo;
+    const status = await sendRaw(port, "PATCH", target, { body: {} });
+    await settle();
+    expect(status).toBe(200);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ entityType: "user", entityId: "62", method: "PATCH" });
+    expect(entries[0]?.path).toMatch(/^\/api\/users\/62\/?$/);
   });
 });
 
