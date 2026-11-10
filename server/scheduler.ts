@@ -2,6 +2,7 @@ import { alertService } from "./services/alert-service";
 import { moduleLogger } from "./lib/logger";
 import { backupTick } from "./jobs/backup-production";
 import { idempotencyPurgeTick } from "./jobs/idempotency-purge";
+import { preventiveDateCheckTick } from "./jobs/preventive-date-check";
 import { clientBillingService } from "./services/client-billing-service";
 import { CLIENT_BILLING_EVENT_ROLES } from "@shared/constants/roles";
 
@@ -58,6 +59,8 @@ async function runAlertCycle(reason: string): Promise<void> {
 
   try {
     await alertService.runAllAlertChecks();
+    // Préventif par date (V5a) : idempotent, au plus un passage toutes les 6 h. Ne lève jamais.
+    await preventiveDateCheckTick();
     // Erreur capturée en interne : un échec ici n'interrompt pas le cycle.
     await markOverdueClientInvoices(reason);
   } catch (err) {

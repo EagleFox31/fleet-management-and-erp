@@ -24,6 +24,9 @@ const ALLOWED: Record<string, number | "any"> = {
   // Contrôle de validité du permis au lancement d'une mission : la date n'est pas renvoyée,
   // seul un booléen ou un message en sort (préparation ~1368, PUT /:id/status ~2286).
   "api/missions.routes.ts": 2,
+  // Alertes d'échéance du permis et de la CNI (V5a) : lues pour calculer le palier, puis émises aux
+  // seuls admin et logistique, qui sont lecteurs de ces données. Aucune route ne les renvoie.
+  "services/alert-service.ts": 4,
 };
 
 function walk(dir: string): string[] {

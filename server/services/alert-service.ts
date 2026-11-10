@@ -7,6 +7,7 @@ import { db } from "../db";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   alerts,
+  drivers,
   alertRecipientSettings,
   missions,
   assignments,
@@ -21,6 +22,7 @@ import {
 } from "../../shared/schema";
 import { and, asc, eq, inArray, isNotNull, isNull, lt, max, or, sql, type SQL } from "drizzle-orm";
 import { classifyDocumentExpiry, documentExpiryDedupeKey } from "./document-expiry-rule";
+import { driverExpiryFindings } from "./driver-document-expiry";
 import { daysBetweenDateOnly, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { moduleLogger } from "../lib/logger";
 import { broadcastAlertCreated } from "../lib/alert-broadcast";
@@ -184,6 +186,12 @@ export class AlertService {
   private readonly stockOverrideRecipients: AlertRecipientRole[] = [
     "admin",
     "warehouse",
+  ];
+
+  // Papiers des chauffeurs (permis, CNI, CPC) : les rôles qui gèrent les chauffeurs.
+  private readonly driverDocumentRecipients: AlertRecipientRole[] = [
+    "admin",
+    "logistics",
   ];
 
   // Stock bas : le magasin réapprovisionne, l'admin surveille (décision du 3 novembre 2026).
@@ -878,6 +886,52 @@ export class AlertService {
   }
 
   /**
+   * Papiers des chauffeurs actifs (V5a) : permis, CNI et CPC (date de formation + 731 jours).
+   * Une alerte par document, par palier (J-30, J-7, échu) et par échéance : la clé de
+   * dédoublonnage porte le palier et la date, donc un passage rejoué ne recrée rien et un
+   * renouvellement réarme. Destinataires : admin et logistique. Retourne le nombre de
+   * candidates produites (l'émission dédoublonne ensuite).
+   */
+  async checkDriverDocumentAlerts(now: Date = new Date()): Promise<number> {
+    const rows = await db
+      .select({
+        id: drivers.id,
+        firstName: drivers.firstName,
+        lastName: drivers.lastName,
+        licenseExpiry: drivers.licenseExpiry,
+        cniExpiry: drivers.cniExpiry,
+        cpcTrainingDate: drivers.cpcTrainingDate,
+      })
+      .from(drivers)
+      .where(
+        and(
+          eq(drivers.isActive, true),
+          or(isNotNull(drivers.licenseExpiry), isNotNull(drivers.cniExpiry), isNotNull(drivers.cpcTrainingDate)),
+        ),
+      );
+
+    let emitted = 0;
+    for (const driver of rows) {
+      for (const finding of driverExpiryFindings(driver, now)) {
+        await this.createAlertIfNotExists({
+          type: "mission",
+          topic: "documents",
+          title: finding.title,
+          message: finding.message,
+          priority: finding.priority,
+          link: `/drivers/${finding.driverId}`,
+          entityType: "driver",
+          entityId: finding.driverId,
+          targetRoles: this.driverDocumentRecipients,
+          dedupeKey: finding.dedupeKey,
+        });
+        emitted++;
+      }
+    }
+    return emitted;
+  }
+
+  /**
    * Vérifie les alertes de kilométrage pour un véhicule
    */
   private async checkVehicleMileageAlerts(vehicle: Vehicle): Promise<void> {
@@ -1320,6 +1374,7 @@ export class AlertService {
           await this.checkMissionAlerts();
           await this.checkIncompleteSupplierAlerts();
           await this.checkTypedDocumentExpiryAlerts();
+          await this.checkDriverDocumentAlerts();
         });
       } finally {
         const created = await this.emitAlerts(batch);
