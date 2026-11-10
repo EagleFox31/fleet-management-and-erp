@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
-import { VEHICLES_PAGE_SIZE } from "../../../client/src/lib/fetch-all-pages";
+import { PARTS_PAGE_SIZE, VEHICLES_PAGE_SIZE } from "../../../client/src/lib/fetch-all-pages";
 import { WORK_ORDERS_PAGE_SIZE } from "../../../client/src/lib/fetch-all-work-orders";
 
 /**
@@ -41,13 +41,6 @@ const DEFAULT_LIMITS: Record<string, number> = {
 const FROZEN: Record<string, number> = {
   // Lot 2b : rotations (la route ignore `limit` et rend tout ; lecture sans `limit` à lever avec la route).
   "client/src/pages/inventory/tires/index.tsx": 1,
-  // Lot 3 restant : pièces (aucun lecteur paginé de pièces encore), stock du technicien.
-  "client/src/pages/technician/fleet-status.tsx": 1,
-  "client/src/pages/inventory/parts-database.tsx": 1,
-  // `getAll` des services et hooks génériques, sans appelant d'écran repéré : à vérifier, pas supprimé.
-  "client/src/lib/api-calls.ts": 4,
-  "client/src/hooks/useVehicles.ts": 1,
-  "client/src/hooks/useMaintenance.ts": 1,
 };
 
 const ROOT = join(__dirname, "..", "..", "..");
@@ -205,5 +198,7 @@ describe("routes paginées par défaut : alignement sur le serveur", () => {
     expect(VEHICLES_PAGE_SIZE).toBeLessThanOrEqual(constant(vehicleListSrc, "VEHICLE_LIST_MAX_LIMIT"));
     const workOrdersMax = Number(handler("/api/work-orders").match(/Math\.min\(Math\.max\(requestedLimit,\s*1\),\s*(\d+)\)/)?.[1]);
     expect(WORK_ORDERS_PAGE_SIZE).toBeLessThanOrEqual(workOrdersMax);
+    const partsMax = Number(handler("/api/parts").match(/Math\.min\(rawLimit,\s*(\d+)\)/)?.[1]);
+    expect(PARTS_PAGE_SIZE).toBeLessThanOrEqual(partsMax);
   });
 });

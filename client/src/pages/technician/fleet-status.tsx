@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useAllVehicles } from "@/hooks/use-all-vehicles";
+import { useAllParts } from "@/hooks/use-all-parts";
 import { useState, useEffect } from "react";
 import { queryClient } from "@/lib/queryClient";
 import { InlineQueryError } from "@/components/ui/inline-query-error";
@@ -82,13 +83,7 @@ export default function FleetTechnicianPWA() {
     refetchOnMount: true
   });
 
-  const { data: parts, isLoading: partsLoading } = useQuery<any>({
-    queryKey: ['/api/parts'],
-    staleTime: 0,
-    gcTime: 0,
-    retry: isOnline ? 3 : 0,
-    refetchOnWindowFocus: true
-  });
+  const { isLoading: partsLoading } = useAllParts();
 
   const { data: fuelRecords, isLoading: fuelLoading } = useQuery<any>({
     queryKey: ['/api/fuel-records'],

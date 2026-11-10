@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAllParts } from "@/hooks/use-all-parts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,9 +51,7 @@ export default function PartsDatabasePage() {
   const [selectedPartId, setSelectedPartId] = useState<number | null>(null);
 
   // Queries pour récupérer les données
-  const { data: parts = [], isLoading: partsLoading } = useQuery<any>({
-    queryKey: ["/api/parts"],
-  });
+  const { data: parts = [], isLoading: partsLoading } = useAllParts();
 
   const { data: categories = [], isLoading: categoriesLoading } = useQuery<any>({
     queryKey: ["/api/parts/categories"],

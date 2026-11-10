@@ -1,12 +1,11 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { maintenanceService } from "@/services/maintenanceService";
+import { useAllWorkOrders } from "@/hooks/use-all-work-orders";
 
 export function useMaintenance() {
-  const workOrdersQuery = useQuery<any>({
-    queryKey: ['/api/work-orders'],
-    enabled: true,
-  });
+  // Tous les OT : `["/api/work-orders"]` sans `limit` ne rendait que les 50 premiers.
+  const workOrdersQuery = useAllWorkOrders();
 
   const preventiveSchedulesQuery = useQuery<any>({
     queryKey: ['/api/maintenance/preventive'],
