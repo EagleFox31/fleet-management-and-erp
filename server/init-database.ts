@@ -1263,6 +1263,66 @@ FOR EACH ROW
 EXECUTE FUNCTION fn_users_keep_active_admin();`;
 
 /**
+ * Verrou d'argent en base sur les pleins validés (lot V1, D2). Doit rester identique à
+ * server/db/migrations/20261110_money_lock_fuel.sql (AGENTS.md §5), comparé par
+ * tests/unit/server/fuel-records-lock-schema.test.ts. Un seul envoi = une transaction.
+ */
+export const FUEL_RECORDS_VALIDATED_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+
+CREATE OR REPLACE FUNCTION fn_fuel_records_validated_lock()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  free_cols text[] := ARRAY['updated_at', 'updated_by', 'mission_id', 'deleted_at', 'deleted_by', 'cancellation_reason'];
+BEGIN
+  -- Levée explicite pour la transaction en cours, ou plein encore en attente (sa validation comprise) : rien à garder.
+  IF current_setting('fleetos.allow_money_override', true) = 'on' OR OLD.validation_status IS DISTINCT FROM 'validated' THEN
+    IF TG_OP = 'DELETE' THEN
+      RETURN OLD;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Plein validé : suppression refusée.'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
+  END IF;
+
+  -- Toute colonne hors liste blanche (montants, quantités, statut de validation, auteur...) est gelée.
+  IF (to_jsonb(NEW) - free_cols) IS DISTINCT FROM (to_jsonb(OLD) - free_cols) THEN
+    RAISE EXCEPTION 'Plein validé : seule son annulation tracée est permise.'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
+  END IF;
+
+  -- La mission ne se change pas ; elle ne se détache que vers NULL (suppression de la mission).
+  IF NEW.mission_id IS DISTINCT FROM OLD.mission_id AND NEW.mission_id IS NOT NULL THEN
+    RAISE EXCEPTION 'Plein validé : la mission ne se change pas.'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
+  END IF;
+
+  -- Annulation tracée : une seule fois, de NULL vers une valeur, avec auteur et motif.
+  IF (NEW.deleted_at, NEW.deleted_by, NEW.cancellation_reason)
+       IS DISTINCT FROM (OLD.deleted_at, OLD.deleted_by, OLD.cancellation_reason) THEN
+    IF OLD.deleted_at IS NOT NULL OR OLD.deleted_by IS NOT NULL OR OLD.cancellation_reason IS NOT NULL
+       OR NEW.deleted_at IS NULL OR NEW.deleted_by IS NULL
+       OR NEW.cancellation_reason IS NULL OR btrim(NEW.cancellation_reason) = ''
+       OR char_length(NEW.cancellation_reason) > 500 THEN
+      RAISE EXCEPTION 'Plein validé : annulation une seule fois, avec un motif de 1 à 500 caractères.'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE TRIGGER trg_fuel_records_validated_lock
+BEFORE UPDATE OR DELETE ON fuel_records
+FOR EACH ROW
+EXECUTE FUNCTION fn_fuel_records_validated_lock();`;
+
+/**
  * L1 : budget de mission (drapeau finance), un par mission. Doit rester identique à
  * server/db/migrations/20261105_mission_budgets.sql : tests/unit/server/mission-budgets-schema.test.ts
  * compare les deux. Un seul envoi = une transaction, sérialisée par le verrou consultatif.
@@ -2473,6 +2533,8 @@ export async function initializeDatabase() {
     await reportUsersPinBcryptGaps(pool);
     // Au moins un administrateur actif — jumelle de server/db/migrations/20261105_users_keep_active_admin.sql.
     await pool.query(USERS_KEEP_ACTIVE_ADMIN_SQL);
+    // Plein validé verrouillé en base (lot V1) — jumelle de server/db/migrations/20261110_money_lock_fuel.sql.
+    await pool.query(FUEL_RECORDS_VALIDATED_LOCK_SQL);
     // Grille tarifaire (O3) — jumelle de server/db/migrations/20261106_tariff_grid.sql.
     await pool.query(TARIFF_GRID_SQL);
     // Prix convenu d'une mission (O3 lot 3) — jumelle de server/db/migrations/20261106_mission_agreed_price.sql.

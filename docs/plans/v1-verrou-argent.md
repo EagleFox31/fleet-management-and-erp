@@ -97,6 +97,8 @@ Plan établi le 2026-11-10 sur main e7b0f5ba. Les numéros de ligne ci-dessous v
 3. aa modifie `generateInvoiceFromMission` (vers la ligne 118) : éviter tout conflit sur ce fichier.
 4. Revue sécurité obligatoire sur les PR 2 à 5. Envoyer à 0a chaque SHA final.
 5. Avant la fusion de la PR 3, 0a compte en production, en lecture seule, les pleins validés et les factures émises.
+6. **PR3 posée (2026-11-10, branche `c7-v1-fuel-trigger`)** : trigger BEFORE UPDATE OR DELETE `trg_fuel_records_validated_lock` (migration `20261110_money_lock_fuel.sql`, jumelle `FUEL_RECORDS_VALIDATED_LOCK_SQL`, parité par `tests/unit/server/fuel-records-lock-schema.test.ts`). Aucune donnée réécrite : les pleins déjà validés deviennent protégés. Écritures légitimes recensées dans `server/` : validation (`fuel-voucher-service.ts`, ligne en attente), annulation (`cancelFuelRecord`, liste blanche), `ON DELETE SET NULL` de la mission, restauration (`withMoneyOverride`). `storage.ts:964` (`deleteVehicle`, sans appelant) serait refusé sur un véhicule portant un plein validé : voulu.
+   - F3 (même PR) : la validation d'un bon ne touche qu'un plein `pending` non supprimé, et, si l'écran envoie la `version` affichée, inchangé depuis ; sinon 409 « Ce plein a changé ou est déjà validé : rechargez la liste. »
 
 ## Backlog (PR2)
 - Déplacer le `PATCH /api/fuel-records/:id` de `server/routes.ts` vers `server/api/fuel-records.routes.ts` (lot séparé) ; la garde du plein validé vit déjà dans `FuelService.updateFuelRecord`.
