@@ -348,8 +348,8 @@ describe("factures : jamais 0 ni vide sur une lecture en échec", () => {
   it("procurement/invoices/[id] : règlements illisibles, pas de bouton de paiement ni de montant", () => {
     const src = read("client/src/pages/procurement/invoices/[id].tsx");
     expect(src).toMatch(/const settlementsFailed = settlementsData === undefined && !!settlementsError/);
-    expect(src).toMatch(/canPay && !settlementsFailed && remainingToRecord > 0\.01/);
-    expect(src).toMatch(/canPay && !settlementsFailed && hasRecordedSettlement/);
+    expect(src).toMatch(/canPay && settlementsData !== undefined && !settlementsFailed && remainingToRecord > 0\.01/);
+    expect(src).toMatch(/canPay && settlementsData !== undefined && !settlementsFailed && hasRecordedSettlement/);
     expect(src).toMatch(/settlementsFailed \? UNAVAILABLE : formatCurrency\(reconciledAmount\)/);
     expect(src).toMatch(/settlementsFailed \? UNAVAILABLE : formatCurrency\(pendingReconciliationAmount\)/);
     expect(src).toMatch(/data-testid="settlements-load-error"/);
