@@ -40,3 +40,10 @@
 - Preuve du rouge : 2 des 3 nouveaux cas échouaient avant le correctif (« expected { userId: 7 ... } to be null », « expected true to be false »), puis vert.
 - Tester : `node node_modules/vitest/vitest.mjs run tests/unit/client/offline-resume-storage.test.ts` (bloc « énumération des magasins impossible »).
 - Non traité : `purgeOthers` garde `?? []` (changement de compte en ligne, hors du périmètre du mineur).
+
+## Audit de #682, mineur 2 : 404 sur /api/auth/me, compte supprimé
+
+- Quoi : `checkSession` traite un 404 comme un 401 (`anonymous`) : `resumeSession` efface le marqueur et expire le compte actif, `auth-bootstrap` retire la reprise hors ligne et affiche la connexion.
+- Pourquoi : `GET /api/auth/me` répond 404 quand le compte de la session n'existe plus. C'était classé « serveur injoignable avec code HTTP » : ni purge, ni arrêt de la lecture hors ligne d'un compte supprimé.
+- Preuve du rouge : 2 échecs avant le correctif (`session-check.test.ts` : 404 attendu `anonymous`, reçu `unreachable`; `auth-bootstrap.test.ts` : grant non effacé après le 404), puis vert.
+- Tester : `node node_modules/vitest/vitest.mjs run tests/unit/client/session-check.test.ts tests/unit/client/auth-bootstrap.test.ts`.
