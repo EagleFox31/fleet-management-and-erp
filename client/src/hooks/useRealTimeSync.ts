@@ -24,6 +24,8 @@ function invalidateSatellites(event: string, payload?: SatellitePayload): void {
 }
 
 /** Couche 3 des événements du lot : invalide les clés déclarées au catalogue (`invalidates`). */
+const TRACK_KEY_PATTERN = /^\/api\/missions\/\d+\/track$/;
+
 function invalidateCatalogEvent(name: RealtimeEventName): void {
   for (const key of REALTIME_EVENTS[name].invalidates) {
     queryClient.invalidateQueries({ queryKey: [key] });
@@ -1031,6 +1033,16 @@ export function handleDomainUpdate(update: RealTimeUpdate): void {
       break;
     case "vehicle_position_updated":
       invalidateCatalogEvent("vehicle_position_updated");
+      // Trace de la mission concernée (toutes les traces ouvertes si l'identifiant manque).
+      {
+        const missionId = toNumber(payloadRecord.missionId);
+        queryClient.invalidateQueries({
+          predicate: (q) => {
+            const key = q.queryKey[0];
+            return typeof key === "string" && (typeof missionId === "number" ? key === `/api/missions/${missionId}/track` : TRACK_KEY_PATTERN.test(key));
+          },
+        });
+      }
       break;
     case "import_batch_applied":
       // Aucun toast : un import touche des centaines de lignes.

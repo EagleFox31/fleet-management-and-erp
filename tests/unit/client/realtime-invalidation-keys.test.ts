@@ -53,7 +53,6 @@ const declared = declaredQueryKeys();
  */
 const AWAITING_SCREEN: Record<string, string> = {
   "/api/part-sales": "CDC-4 : écran des ventes de pièces",
-  "/api/vehicle-positions": "CDC-6 : carte de la flotte",
 };
 
 describe("événements temps réel : clés d'invalidation", () => {
@@ -81,7 +80,6 @@ describe("événements temps réel : clés d'invalidation", () => {
   it("la liste des clés en attente d'écran est figée", () => {
     expect(Object.keys(AWAITING_SCREEN).sort()).toEqual([
       "/api/part-sales",
-      "/api/vehicle-positions",
     ]);
   });
 
