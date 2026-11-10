@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { CLIENT_CREDIT_NOTES_SQL, CLIENT_INVOICES_ISSUED_LOCK_SQL } from "../../server/init-database";
+import { CREDIT_NOTE_KEY_CONFLICT_MESSAGE, CREDIT_NOTE_KEY_OTHER_INVOICE_MESSAGE } from "../../shared/contracts/client-credit-notes";
 import { clientCreditNotes, clientInvoices, clients } from "../../shared/schema";
 import { leakText } from "../support/api-error";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -263,9 +264,23 @@ describe("Avoirs clients : contrat", { timeout: 120_000 }, () => {
       const res = await credit(invoice.id, changed);
       expect(res.status).toBe(409);
       expectErrorContract(res, res.body.code);
+      // Message métier : l'écran l'affiche tel quel, sans « clé de requête ».
+      expect(res.body.message).toBe(CREDIT_NOTE_KEY_CONFLICT_MESSAGE);
     }
     expect(await notesOf(invoice.id)).toHaveLength(1);
     expect(Number((await invoiceOf(invoice.id)).balance)).toBe(TOTAL - 23850);
+  });
+
+  it("même saisie rejouée sur une autre facture : 409 lisible, rien d'écrit sur la seconde", async () => {
+    const first = await newInvoice();
+    const second = await newInvoice();
+    const body = valid(10000);
+    expect((await credit(first.id, body)).status).toBe(201);
+    const res = await credit(second.id, body);
+    expect(res.status).toBe(409);
+    expectErrorContract(res, res.body.code);
+    expect(res.body.message).toBe(CREDIT_NOTE_KEY_OTHER_INVOICE_MESSAGE);
+    expect(await notesOf(second.id)).toHaveLength(0);
   });
 
   it("paiement partiel, avoir, paiement solde : la facture finit payée, pas de dépassement", async () => {

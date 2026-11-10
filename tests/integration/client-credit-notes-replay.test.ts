@@ -6,6 +6,7 @@ import { db } from "../../server/db";
 import { CLIENT_CREDIT_NOTES_SQL, CLIENT_INVOICES_ISSUED_LOCK_SQL } from "../../server/init-database";
 import { withMoneyOverride } from "../../server/lib/money-override";
 import { clientCreditNotes, clientInvoices } from "../../shared/schema";
+import { CREDIT_NOTE_KEY_CONFLICT_MESSAGE } from "../../shared/contracts/client-credit-notes";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestClient, createTestClientInvoice, createTestUser } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
@@ -89,7 +90,8 @@ describe("rejeu d'un avoir", { timeout: 60_000 }, () => {
     const otherReason = await failureOf(() => createCreditNote(invoice.id, { amountHt: 10000, reason: "TEST motif B", requestKey }, userId));
     expect(otherAmount.status).toBe(409);
     expect(otherReason.status).toBe(409);
-    expect(otherAmount.message).toMatch(/montant ou de motif/);
+    expect(otherAmount.message).toBe(CREDIT_NOTE_KEY_CONFLICT_MESSAGE);
+    expect(otherReason.message).toBe(CREDIT_NOTE_KEY_CONFLICT_MESSAGE);
 
     const same = await createCreditNote(invoice.id, { amountHt: 10000, reason: "TEST motif A", requestKey }, userId);
     expect(same.replayed).toBe(true);
