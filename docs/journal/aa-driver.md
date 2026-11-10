@@ -1,0 +1,17 @@
+# Journal aa-driver : moindre donnée côté serveur pour le chauffeur
+
+## 2026-11-10 — Coordonnées client et solde de carte
+- **Quoi** : `GET /api/missions/:id` ne donne plus au chauffeur contact, e-mail ni téléphone du client (id et nom restent) ; `GET /api/fuel-card/balance` ne rend aux rôles hors `TREASURY_FUEL_CARD_READ_ROLES` (chauffeur, technicien, magasinier, chef d'atelier) que les prix au litre et `priceSource`. Les deux `console.error` de `fuel-card.routes.ts` passent par `next(withLogContext(...))` vers le gestionnaire central (journal pino avec `requestId`, réponse générique avec référence).
+- **Comment** : `server/lib/mission-client-contact-scope.ts` et `server/lib/fuel-balance-scope.ts` (liste blanche de champs, échec fermé). Liste des lecteurs réutilisée de `canReadFuelCardBalance` (check-list de lancement) : admin, secrétariat, comptable, direction, logistique. La matrice `MATRICE_ROLES_GAP.md` ne dit rien du solde de la carte ; les rôles viennent de `shared/constants/roles.ts`.
+- **Pourquoi** : audit de la PR #661 ; aucun écran chauffeur ne lit ces champs (le tableau de bord chauffeur lit `averagePricePerLiter*` et `priceSource`).
+- **Preuve** : contrat `driver-least-data` 15/15 sur la branche, 4 rouges contre main ; tsc 0 ; unitaires verts.
+- **Hors périmètre** : seule la lecture détail renvoyait le contact client ; les listes ne renvoient que id et nom.
+  Correction (même jour, suite) : ce constat était faux, `GET /api/operations/missions` renvoyait aussi le contact au chauffeur (voir l'entrée suivante).
+
+## 2026-11-10 (suite) — Canaux contournés : clients, pleins, carte, liste des opérations
+- **Quoi** : `/api/clients` fermé au chauffeur (garde de montage `isStaffExceptDriver`, constante `STAFF_EXCEPT_DRIVER_ROLES`) et trames `client_*` limitées à ces rôles ; `balance`/`fuelBalance` des lignes de plein retirés hors `TREASURY_FUEL_CARD_READ_ROLES` (GET/POST/régularisation `/api/missions/:id/fuel-records`, `/api/fuel-records` et `/vehicle/:id`) et de la trame `mission_fuel_recorded` ; `/api/fuel-card` history, monthly-stats, stats-by-client, vehicle stats/anomalies réservés à ces lecteurs, trames `fuel_card_*` idem ; `GET /api/operations/missions` passe par `redactMissionClientContact` (il renvoyait contact, e-mail et téléphone au chauffeur, ce qui corrige le constat « les listes ne renvoient que id et nom » de l'entrée précédente, faux pour cette liste).
+- **Comment** : `redactMissionClientContact` devient une liste blanche de rôles (`STAFF_EXCEPT_DRIVER_ROLES`, échec fermé) ; `withoutFuelCardBalance` dans `server/lib/fuel-balance-scope.ts`. `/history` et `GET /api/missions/:id` relaient leurs erreurs par `next(withLogContext(...))` ; les libellés `event` reprennent les anciens messages de journal pour rester cherchables.
+- **Pourquoi** : audit sécurité et relecture de #667, l'objectif « moindre donnée » n'était atteint que sur une route.
+- **Preuve** : voir la description de la PR (contrats rouge puis vert).
+- **Ajout (inventaire b7)** : `GET /api/missions/:id/fuel-records` réservé à `TREASURY_FUEL_CARD_READ_ROLES` (aucun écran ne l'appelle, vérifié par git grep : le client ne fait que l'invalider) ; `mission_fuel_recorded` : trame complète (sans solde courant) aux lecteurs de la carte, `{missionId, fuelRecordId}` aux autres rôles de `MISSION_EVENT_ROLES`, `{missionId}` au chauffeur affecté (paramètre `staffRoles` ajouté à `emitMissionEvent`). `mission_updated` et voisines : charge chauffeur déjà `{missionId}`, couverte par `mission-realtime-scope`.
+
