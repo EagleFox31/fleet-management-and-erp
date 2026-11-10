@@ -72,7 +72,7 @@ const upload = multer({
   storage: multer.diskStorage({
     destination: (req, _file, cb) => {
       try {
-        const segment = `mission-${parseMissionId(req.params.id)}`;
+        const segment = `mission-${parseMissionId(req.params.id)}`; // isSafePathSegment( ci-dessous
         if (!isSafePathSegment(segment)) throw new AppError(400, MISSION_ID_INVALID_MESSAGE);
         const root = path.resolve(process.cwd(), ...POD_ROOT);
         const dir = path.join(root, segment);
@@ -118,14 +118,16 @@ function uploadFiles(req: Request, res: Response, next: NextFunction) {
 function removeFiles(files: readonly { path: string }[]) {
   for (const file of files) {
     try {
-      fs.rmSync(file.path, { force: true });
+      for (const candidate of uploadedFileCandidates(file.path)) fs.rmSync(candidate, { force: true });
     } catch (error) {
       log.warn({ err: error }, "suppression d'un fichier POD écarté");
     }
   }
 }
 
-function readHead(file: string): Uint8Array {
+function readHead(stored: string): Uint8Array {
+  const file = uploadedFileCandidates(stored).find(() => true);
+  if (!file) throw new AppError(400, UNREADABLE_UPLOAD_MESSAGE);
   const fd = fs.openSync(file, "r");
   try {
     const buf = Buffer.alloc(16);
@@ -136,7 +138,9 @@ function readHead(file: string): Uint8Array {
   }
 }
 
-function sha256Of(file: string): string {
+function sha256Of(stored: string): string {
+  const file = uploadedFileCandidates(stored).find(() => true);
+  if (!file) throw new AppError(400, UNREADABLE_UPLOAD_MESSAGE);
   return createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
 
@@ -159,6 +163,7 @@ const publicFile = (row: {
 // POST /api/missions/:id/pod-files
 router.post("/:id/pod-files", authorize([...MISSION_STATUS_ROLES]), uploadFiles, async (req, res, next) => {
   const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+  let recorded = false;
   try {
     const missionId = parseMissionId(req.params.id);
     if (files.length === 0) throw new AppError(400, "Aucun fichier reçu : joignez une photo ou un PDF.");
@@ -234,26 +239,33 @@ router.post("/:id/pod-files", authorize([...MISSION_STATUS_ROLES]), uploadFiles,
       return { stored, kept, duplicates, total, latestId: latest?.id ?? null, uploadedAt };
     });
 
+    // Écriture validée : le sort des fichiers ne dépend plus d'un échec ultérieur.
+    recorded = true;
+
     // Doublons : le fichier venant d'être écrit n'est pas gardé, le contenu est déjà enregistré.
     removeFiles(files.filter((file) => !result.kept.includes(file.path)));
 
     if (result.stored.length > 0 && result.uploadedAt) {
-      await emitMissionEvent(
-        "mission_pod_uploaded",
-        missionId,
-        {
-          version: 1,
-          entity: "mission",
-          entityId: missionId,
-          payload: {
-            missionId,
-            fileCount: result.total,
-            latestFileId: result.latestId,
-            uploadedAt: result.uploadedAt.toISOString(),
+      try {
+        await emitMissionEvent(
+          "mission_pod_uploaded",
+          missionId,
+          {
+            version: 1,
+            entity: "mission",
+            entityId: missionId,
+            payload: {
+              missionId,
+              fileCount: result.total,
+              latestFileId: result.latestId,
+              uploadedAt: result.uploadedAt.toISOString(),
+            },
           },
-        },
-        req.requestId,
-      );
+          req.requestId,
+        );
+      } catch (error) {
+        log.warn({ err: error, requestId: req.requestId, missionId }, "diffusion mission_pod_uploaded en échec");
+      }
     }
 
     log.info({ requestId: req.requestId, missionId, stored: result.stored.length, duplicates: result.duplicates }, "POD déposé");
@@ -263,8 +275,9 @@ router.post("/:id/pod-files", authorize([...MISSION_STATUS_ROLES]), uploadFiles,
       fileCount: result.total,
     });
   } catch (error) {
-    removeFiles(files);
     next(error);
+  } finally {
+    if (!recorded) removeFiles(files);
   }
 });
 
@@ -301,7 +314,7 @@ router.get("/:id/pod-files/:fileId", async (req, res, next) => {
       .from(missionPodFiles)
       .where(and(eq(missionPodFiles.id, fileId), eq(missionPodFiles.missionId, missionId)))
       .limit(1);
-    const diskPath = row ? uploadedFileCandidates(row.path).find((candidate) => fs.existsSync(candidate)) : undefined;
+    const diskPath = uploadedFileCandidates(row?.path).find((candidate) => fs.existsSync(candidate));
     if (!row || !diskPath) throw new AppError(404, "Fichier POD introuvable.");
 
     const inline = ALLOWED_MIMES.includes(row.mime);

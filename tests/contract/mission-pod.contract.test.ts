@@ -4,6 +4,7 @@ import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
 import { assignments, drivers, missionPodFiles, missions } from "../../shared/schema";
+import { missionPodListResponseSchema, missionPodUploadResponseSchema } from "../../shared/contracts/mission-pod";
 import { apiErrorProblems } from "../support/api-error";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
@@ -149,6 +150,8 @@ describe("POD : dépôt par la logistique", { timeout: 180000 }, () => {
     const pdf = tinyPdf();
     const first = await upload(mission.id, [{ name: "bon.pdf", type: "application/pdf", data: pdf }]);
     expect(first.status).toBe(201);
+    expect(missionPodUploadResponseSchema.safeParse(first.body).success).toBe(true);
+    expect(first.body).toMatchObject({ duplicates: 0, fileCount: 1 });
     const second = await upload(mission.id, [{ name: "photo.jpg", type: "image/jpeg", data: JPEG }]);
     expect(second.status).toBe(201);
 
@@ -168,7 +171,8 @@ describe("POD : dépôt par la logistique", { timeout: 180000 }, () => {
     // Même contenu redéposé : aucun doublon en base ni sur disque.
     const again = await upload(mission.id, [{ name: "bon-bis.pdf", type: "application/pdf", data: pdf }]);
     expect(again.status).toBe(201);
-    expect(again.body.duplicates).toBe(1);
+    expect(missionPodUploadResponseSchema.safeParse(again.body).success).toBe(true);
+    expect(again.body).toMatchObject({ files: [], duplicates: 1, fileCount: 2 });
     expect(await rowsOf(mission.id)).toHaveLength(2);
     expect(filesOnDisk(mission.id)).toHaveLength(2);
   });
@@ -255,6 +259,9 @@ describe("POD : cloison des rôles", { timeout: 180000 }, () => {
     expect(put.status).toBe(403);
     const list = await actors.call("GET", `/api/missions/${mission.id}/pod-files`, { actor: "client" });
     expect(list.status).toBe(403);
+    const seeded = await seedPodFile(mission.id, actors.userIdOf("logistics"));
+    const file = await actors.call("GET", `/api/missions/${mission.id}/pod-files/${seeded.id}`, { actor: "client" });
+    expect(file.status).toBe(403);
   });
 });
 
@@ -264,6 +271,7 @@ describe("POD : lecture", { timeout: 180000 }, () => {
     await seedPodFile(mission.id, actors.userIdOf("logistics"));
     const res = await actors.call("GET", `/api/missions/${mission.id}/pod-files`, { actor: "logistics" });
     expect(res.status).toBe(200);
+    expect(missionPodListResponseSchema.safeParse(res.body).success).toBe(true);
     expect(res.body.files).toHaveLength(1);
     expect(Object.keys(res.body.files[0]).sort()).toEqual(["id", "mime", "originalName", "sizeBytes", "uploadedAt", "uploadedByName"]);
   });
