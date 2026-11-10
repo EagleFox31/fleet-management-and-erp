@@ -1,4 +1,5 @@
 import { publicClientInvoiceColumns } from "../lib/client-public-columns";
+import { paidTtcOf } from "@shared/constants/client-invoices";
 import { and, eq, gte, ilike, inArray, isNull, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import {
   computeTrendPercent,
@@ -738,7 +739,18 @@ export class ManagementDashboardService {
         ),
       );
 
-    let invoicedHT = 0;
+    // Avoirs (lot V1) : le CA net retire leur HT à la date de l'avoir (hors factures annulées).
+    const creditRows = await db.execute<{ credit_ht: string | null }>(sql`
+      SELECT COALESCE(SUM(cn.amount_ht), 0) AS credit_ht
+      FROM client_credit_notes cn
+      JOIN client_invoices i ON i.id = cn.invoice_id
+      WHERE i.status <> 'cancelled'
+        AND cn.created_at::date >= ${startIso}::date
+        AND cn.created_at::date <= ${endIso}::date
+    `);
+    const creditNotesHT = parseAmount((creditRows.rows[0] as { credit_ht: string | null } | undefined)?.credit_ht ?? 0);
+
+    let invoicedHT = -creditNotesHT;
     let invoicedTTC = 0;
     let collectedTTC = 0;
     let outstandingTTC = 0;
@@ -753,7 +765,7 @@ export class ManagementDashboardService {
       const amountHT = parseAmount(row.invoice.amountHT);
       const amountTTC = parseAmount(row.invoice.amountTTC);
       const balance = parseAmount(row.invoice.balance);
-      const paid = Math.max(amountTTC - balance, 0);
+      const paid = Math.max(paidTtcOf(row.invoice), 0);
 
       invoicedHT += amountHT;
       invoicedTTC += amountTTC;

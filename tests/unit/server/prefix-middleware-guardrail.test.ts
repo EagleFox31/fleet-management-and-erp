@@ -49,7 +49,7 @@ const MIDDLEWARES_JUSTIFIES: Entree[] = [
   { name: "authenticate", type: "garde-role", raison: "refuse sans session (401)" },
   { name: "isAnyUser", type: "garde-role", raison: "refuse sans session (401) et charge req.user pour les routes ouvertes aux clients" },
   { name: "isStaff", type: "garde-role", raison: "refuse tout role hors personnel (403)" },
-  { name: "isStaffExceptDriver", type: "garde-role", raison: "refuse tout role hors personnel et le chauffeur (403) : fiches client" },
+  { name: "isClientDirectoryReader", type: "garde-role", raison: "refuse tout role hors personnel, le chauffeur et le technicien (403) : fiches client" },
   { name: "isAdmin", type: "garde-role", raison: "reserve a l'administrateur (403)" },
   { name: "isTechnician", type: "garde-role", raison: "reserve aux roles atelier (403)" },
   { name: "isWorkshopManager", type: "garde-role", raison: "reserve aux chefs d'atelier et admin (403)" },

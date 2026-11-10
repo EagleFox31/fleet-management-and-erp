@@ -221,7 +221,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // Relevé client : avant /clients (isStaff), la cloison client et les rôles finance sont posés sur la route.
   apiRouter.use(clientStatementRoutes);
   // Fiches client : le chauffeur lit le nom sur sa mission, pas les coordonnées (moindre donnée).
-  apiRouter.use("/clients", isStaffExceptDriver, clientsRoutes);
+  apiRouter.use("/clients", isClientDirectoryReader, clientsRoutes);
   apiRouter.use("/operations", isStaff, operationsRoutes);
   apiRouter.use("/billing", billingRoutes);
   apiRouter.use("/exports", ...exportsGuard, exportsRoutes);
@@ -386,7 +386,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
 // For backward compatibility, export a default router created with default session
 // This will be replaced by the factory-created router in registerRoutes
 import { sessionMiddleware } from "../middleware/session";
-import { authenticate, authorize, isAdmin, sessionGuard, isStaff, isStaffExceptDriver, isTechnician, isWorkshopManager } from "../middleware/auth";
+import { authenticate, authorize, isAdmin, sessionGuard, isStaff, isClientDirectoryReader, isTechnician, isWorkshopManager } from "../middleware/auth";
 import { exportsGuard } from "../middleware/exports-guard";
 import { PURCHASE_ORDER_READ_ROLES,
   GPS_VIEW_ROLES,
