@@ -40,7 +40,8 @@ describe("R3 : garde déclarée, 403 pour un rôle hors périmètre", { timeout:
   const cases = [
     { route: "POST /api/document-renewals/requests", denied: "technician", allowed: "secretary", body: {} },
     { route: "PATCH /api/document-renewals/requests/999999999/status", denied: "technician", allowed: "secretary", body: { status: "approved" } },
-    { route: "POST /api/incidents", denied: "client", allowed: "technician", body: {} },
+    // Déclaration réservée au chauffeur et à l'admin (#637) : le technicien est refusé lui aussi.
+    { route: "POST /api/incidents", denied: "technician", allowed: "admin", body: {} },
     { route: "PATCH /api/technician/work-orders/999999999/status", denied: "manager", allowed: "technician", body: { status: "in_progress" } },
   ] as const;
 

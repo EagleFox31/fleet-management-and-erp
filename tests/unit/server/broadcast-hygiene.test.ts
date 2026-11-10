@@ -81,7 +81,8 @@ const OPAQUE_SCOPES: Record<string, number> = {
   "server/lib/fuel-record-realtime.ts": 1,
   "server/lib/vehicle-realtime.ts": 1,
   "server/routes.ts": 4,
-  "server/services/incident-service.ts": 1,
+  // Portees prises dans REALTIME_EVENTS.incident_reported (atelier et logistique) et workOrderCostScope().
+  "server/services/incident-service.ts": 2,
   "server/services/preventive-maintenance-service.ts": 1,
   "server/services/procurement-service.ts": 2,
 };

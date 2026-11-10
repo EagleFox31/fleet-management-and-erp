@@ -60,7 +60,6 @@ const OPEN_GET_READS_FROZEN: string[] = [
   "server/api/document-renewals.routes.ts GET /document-renewals/centers",
   "server/api/document-renewals.routes.ts GET /document-renewals/requests",
   "server/api/feature-flags.routes.ts GET /feature-flags",
-  "server/api/incidents.routes.ts GET /incidents",
   "server/api/notification-settings.routes.ts GET /notifications/settings",
   "server/routes.ts GET /api/alerts",
   "server/routes.ts GET /api/alerts/active",

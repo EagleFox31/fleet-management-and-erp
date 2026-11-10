@@ -3,7 +3,8 @@
  *
  * L'identifiant est celui de `fuel_records`. Seul un bon en attente se valide :
  * déjà validé, ou modifié depuis la `version` affichée, il répond 409
- * (`FUEL_VOUCHER_STALE_MESSAGE`) sans rien réécrire. Le technicien reçoit 403.
+ * (`FUEL_VOUCHER_STALE_MESSAGE`) sans rien réécrire. Un bon annulé (suppression douce) ou inconnu
+ * répond 404, pas 409. Le technicien reçoit 403.
  */
 import { z } from "zod";
 import { idSchema, isoDateSchema, isoDateTimeSchema } from "./common";
@@ -11,7 +12,7 @@ import { idSchema, isoDateSchema, isoDateTimeSchema } from "./common";
 export const validateFuelVoucherPath = (id: number) => `/api/fuel-vouchers/${id}/validate`;
 export const fuelVoucherParamsSchema = z.object({ id: idSchema });
 
-/** Réponse 409 d'une validation : bon déjà validé, annulé, ou modifié depuis son affichage. */
+/** Réponse 409 d'une validation : bon déjà validé ou modifié depuis son affichage (un bon annulé répond 404). */
 export const FUEL_VOUCHER_STALE_MESSAGE = "Ce plein a changé ou est déjà validé : rechargez la liste.";
 
 /**
@@ -53,8 +54,11 @@ export const fuelVoucherSchema = z.object({
   validationStatus: z.enum(FUEL_VALIDATION_STATUSES),
   validatedByName: z.string().nullable(),
   validatedAt: isoDateTimeSchema.nullable(),
-  /** Jeton de version (dernière modification) à renvoyer à la validation. */
-  version: z.string(),
+  /**
+   * Jeton de version (dernière modification) à renvoyer à la validation. Optionnel en réponse : champ
+   * ajouté à un contrat existant ; absent, la validation ne contrôle que l'état du bon.
+   */
+  version: z.string().optional(),
 });
 
 export const fuelVouchersResponseSchema = z.array(fuelVoucherSchema);
