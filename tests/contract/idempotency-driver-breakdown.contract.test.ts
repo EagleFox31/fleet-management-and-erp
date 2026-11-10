@@ -1,5 +1,5 @@
-import { and, eq, inArray } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { db } from "../../server/db";
 import { IDEMPOTENCY_HEADER, IDEMPOTENCY_REPLAYED_HEADER } from "../../server/lib/idempotency-config";
 import { assignments, drivers, idempotencyKeys, incidents, missions, vehicles, workOrders } from "../../shared/schema";
@@ -18,7 +18,7 @@ import { uniqueTestToken } from "../support/ids";
  * La preuve « non réexécutée » modifie la base entre les deux appels, comme #10b.
  */
 
-const ACTORS = { driverA: "driver" } as const;
+const ACTORS = { driverA: "driver", driverB: "driver", admin: "admin", viewer: "viewer" } as const;
 type Actor = keyof typeof ACTORS;
 
 const ids = createIdBag();
@@ -28,15 +28,16 @@ const previousFlags = process.env.FEATURE_FLAGS;
 const FUTURE = "2099-01-01";
 let session: Awaited<ReturnType<typeof startContractActors<Actor>>>;
 let driverFicheId = 0;
+let driverBFicheId = 0;
 
 type Sent = { status: number; body: any; replayed: string | null };
 
-async function send(method: "POST" | "PUT", path: string, body: unknown, key?: string): Promise<Sent> {
+async function send(method: "POST" | "PUT", path: string, body: unknown, key?: string, actor: Actor = "driverA"): Promise<Sent> {
   const res = await fetch(session.baseUrl + path, {
     method,
     headers: {
       "Content-Type": "application/json",
-      Cookie: session.cookies.get("driverA")!,
+      Cookie: session.cookies.get(actor)!,
       ...(key !== undefined ? { [IDEMPOTENCY_HEADER]: key } : {}),
     },
     body: JSON.stringify(body),
@@ -44,7 +45,7 @@ async function send(method: "POST" | "PUT", path: string, body: unknown, key?: s
   return { status: res.status, body: await res.json().catch(() => null), replayed: res.headers.get(IDEMPOTENCY_REPLAYED_HEADER) };
 }
 
-async function assignedMission(status: string) {
+async function assignedMission(status: string, driverId = driverFicheId) {
   const vehicle = await createTestVehicle({});
   ids.vehicleIds.push(vehicle.id);
   await db
@@ -56,7 +57,7 @@ async function assignedMission(status: string) {
     .values({ orderNumber: uniqueTestToken("MIS"), pickupAddress: "TEST A", deliveryAddress: "TEST B", status } as any)
     .returning();
   missionIds.push(mission.id);
-  await db.insert(assignments).values({ missionId: mission.id, vehicleId: vehicle.id, driverId: driverFicheId, status: "accepted" } as any);
+  await db.insert(assignments).values({ missionId: mission.id, vehicleId: vehicle.id, driverId, status: "accepted" } as any);
   return { mission, vehicle };
 }
 
@@ -77,7 +78,17 @@ beforeAll(async () => {
     .returning();
   driverFicheId = driver.id;
   driverIds.push(driver.id);
+  const [driverB] = await db
+    .insert(drivers)
+    .values({ userId: session.userIdOf("driverB"), firstName: "TEST", lastName: uniqueTestToken("drv"), cpcStatus: "FORME", licenseExpiry: FUTURE } as any)
+    .returning();
+  driverBFicheId = driverB.id;
+  driverIds.push(driverB.id);
 }, 120000);
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 afterAll(async () => {
   if (previousFlags === undefined) delete process.env.FEATURE_FLAGS;
@@ -172,6 +183,94 @@ describe("V5b-1 : déclaration de panne rejouable", { timeout: 120000 }, () => {
       .where(and(eq(idempotencyKeys.userId, session.userIdOf("driverA")), eq(idempotencyKeys.key, key)));
     expect(rows).toHaveLength(0);
     expect(await counts(stranger.id)).toEqual({ incidents: 0, workOrders: 0 });
+  });
+});
+
+async function keyRows(actor: Actor, key: string) {
+  return db
+    .select()
+    .from(idempotencyKeys)
+    .where(and(eq(idempotencyKeys.userId, session.userIdOf(actor)), eq(idempotencyKeys.key, key)));
+}
+
+describe("V5b-1b : la clé d'une panne n'est gardée que si l'écriture a pu avoir lieu", { timeout: 120000 }, () => {
+  it("échec de la transaction avant validation : 503 lisible, clé libérée, le réessai crée l'incident", async () => {
+    const { vehicle } = await assignedMission("in_progress");
+    const key = uniqueTestToken("pan");
+    // Interblocage ou coupure avant toute écriture validée.
+    vi.spyOn(db, "transaction").mockRejectedValueOnce(new Error("deadlock detected"));
+
+    const failed = await send("POST", "/api/driver/breakdowns", declaration(vehicle.id), key);
+    expect(failed.status, JSON.stringify(failed.body)).toBe(503);
+    // La garde de sortie normalise toute 5xx en INTERNAL + référence ; le code dédié ne sert qu'à libérer la clé.
+    expect(failed.body.code).toBe("INTERNAL");
+    expect(JSON.stringify(failed.body)).not.toMatch(/deadlock/i);
+    expect(await keyRows("driverA", key)).toHaveLength(0);
+    expect(await counts(vehicle.id)).toEqual({ incidents: 0, workOrders: 0 });
+
+    const retry = await send("POST", "/api/driver/breakdowns", declaration(vehicle.id), key);
+    expect(retry.status, JSON.stringify(retry.body)).toBe(201);
+    expect(retry.replayed).toBeNull();
+    expect(await counts(vehicle.id)).toEqual({ incidents: 1, workOrders: 1 });
+  });
+
+  it("véhicule inexistant (retard, sans OT) : 404 lisible et non 500, clé libérée", async () => {
+    const [{ maxId }] = await db.select({ maxId: sql<number>`coalesce(max(${vehicles.id}), 0)::int` }).from(vehicles);
+    const key = uniqueTestToken("pan");
+    const res = await send("POST", "/api/driver/breakdowns", { ...declaration(maxId + 100000), type: "delay" }, key, "admin");
+    expect(res.status, JSON.stringify(res.body)).toBe(404);
+    expect(res.body.code).toBe("INCIDENT_VEHICLE_NOT_FOUND");
+    expect(await keyRows("admin", key)).toHaveLength(0);
+  });
+
+  it("véhicule inexistant (panne, avec OT) : 404, clé libérée", async () => {
+    const [{ maxId }] = await db.select({ maxId: sql<number>`coalesce(max(${vehicles.id}), 0)::int` }).from(vehicles);
+    const key = uniqueTestToken("pan");
+    const res = await send("POST", "/api/driver/breakdowns", declaration(maxId + 100000), key, "admin");
+    expect(res.status, JSON.stringify(res.body)).toBe(404);
+    expect(await keyRows("admin", key)).toHaveLength(0);
+  });
+
+  it("même clé, deux comptes : chacun écrit sa propre panne, sans rejeu croisé", async () => {
+    const a = await assignedMission("in_progress");
+    const b = await assignedMission("in_progress", driverBFicheId);
+    const key = uniqueTestToken("pan");
+
+    const first = await send("POST", "/api/driver/breakdowns", declaration(a.vehicle.id), key, "driverA");
+    const second = await send("POST", "/api/driver/breakdowns", declaration(b.vehicle.id), key, "driverB");
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    expect(second.status, JSON.stringify(second.body)).toBe(201);
+    expect(second.replayed).toBeNull();
+    expect(second.body.id).not.toBe(first.body.id);
+    expect(await counts(a.vehicle.id)).toEqual({ incidents: 1, workOrders: 1 });
+    expect(await counts(b.vehicle.id)).toEqual({ incidents: 1, workOrders: 1 });
+    expect(await keyRows("driverA", key)).toHaveLength(1);
+    expect(await keyRows("driverB", key)).toHaveLength(1);
+  });
+
+  it("lecteur refusé (403) : clé libérée, rien d'écrit", async () => {
+    const { vehicle } = await assignedMission("in_progress");
+    const key = uniqueTestToken("pan");
+    const res = await send("POST", "/api/driver/breakdowns", declaration(vehicle.id), key, "viewer");
+    expect(res.status).toBe(403);
+    expect(await keyRows("viewer", key)).toHaveLength(0);
+    expect(await counts(vehicle.id)).toEqual({ incidents: 0, workOrders: 0 });
+  });
+
+  it("le 409 « en cours » ne promet pas que la panne apparaîtra", async () => {
+    const { vehicle } = await assignedMission("in_progress");
+    const key = uniqueTestToken("pan");
+    // Réservation laissée en cours par une requête dont l'issue est inconnue.
+    const hold = await send("POST", "/api/driver/breakdowns", declaration(vehicle.id), key);
+    expect(hold.status).toBe(201);
+    await db
+      .update(idempotencyKeys)
+      .set({ state: "in_progress", responseStatus: null, responseBody: null } as any)
+      .where(and(eq(idempotencyKeys.userId, session.userIdOf("driverA")), eq(idempotencyKeys.key, key)));
+    const again = await send("POST", "/api/driver/breakdowns", declaration(vehicle.id), key);
+    expect(again.status).toBe(409);
+    expect(again.body.code).toBe("IDEMPOTENCY_IN_PROGRESS");
+    expect(/appara[iî]tra/i.test(String(again.body.message))).toBe(false);
   });
 });
 

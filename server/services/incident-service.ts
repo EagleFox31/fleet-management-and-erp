@@ -16,6 +16,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { incidents, users, vehicles, workOrders, type WorkOrder } from "@shared/schema";
 import type { CreateIncidentRequest, Incident, IncidentStatus } from "@shared/contracts/incidents";
 import { ACTIVE_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
+import { STATUS_MESSAGES } from "@shared/errors";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { workOrderCostScope } from "../lib/work-order-realtime-scope";
@@ -130,6 +131,20 @@ export interface CreateIncidentOptions {
 
 const WORK_ORDER_PRIORITY = { low: "low", medium: "medium", high: "high" } as const;
 
+/**
+ * Échec d'une étape antérieure à toute écriture validée (lecture du périmètre, transaction) :
+ * 404 si la clé étrangère du véhicule saute (course avec une suppression), sinon 503 lisible.
+ * Les deux codes figurent dans `PRE_WRITE_REFUSAL_CODES` : la clé d'idempotence est libérée, le
+ * réessai avec la même clé peut écrire. Une `AppError` déjà prononcée passe telle quelle.
+ */
+function preWriteFailure(err: unknown): never {
+  if (err instanceof AppError) throw err;
+  if ((err as { code?: unknown } | null)?.code === "23503") {
+    throw new AppError(404, "Véhicule introuvable.", { cause: err, code: "INCIDENT_VEHICLE_NOT_FOUND" });
+  }
+  throw new AppError(503, STATUS_MESSAGES.INCIDENT_WRITE_FAILED, { cause: err, code: "INCIDENT_WRITE_FAILED" });
+}
+
 export async function createIncident(
   actor: IncidentActor | undefined,
   input: CreateIncidentRequest,
@@ -137,7 +152,7 @@ export async function createIncident(
   options: CreateIncidentOptions = {},
 ): Promise<Incident> {
   const d = deps ?? (await defaultDeps());
-  const assigned = actor?.role === "driver" ? await d.assignedVehicleIds(actor) : [];
+  const assigned = actor?.role === "driver" ? await d.assignedVehicleIds(actor).catch(preWriteFailure) : [];
   const denied = incidentScopeError(actor, input.vehicleId, assigned);
   if (denied) throw denied;
   const user = actor as IncidentActor;
@@ -145,19 +160,21 @@ export async function createIncident(
   const now = (d.now ?? (() => new Date()))();
   let workOrder: WorkOrder | null = null;
   const row = await d.db.transaction(async (tx: any) => {
+    const [vehicle] = await tx
+      .select({
+        id: vehicles.id,
+        registrationNumber: vehicles.registrationNumber,
+        brand: vehicles.brand,
+        model: vehicles.model,
+        deletedAt: vehicles.deletedAt,
+      })
+      .from(vehicles)
+      .where(eq(vehicles.id, input.vehicleId))
+      .limit(1);
+    // Véhicule inexistant : 404 lisible (et non la violation de clé étrangère de l'incident, un 500).
+    if (!vehicle) throw new AppError(404, "Véhicule introuvable.", { code: "INCIDENT_VEHICLE_NOT_FOUND" });
     if (options.openWorkOrder) {
-      const [vehicle] = await tx
-        .select({
-          id: vehicles.id,
-          registrationNumber: vehicles.registrationNumber,
-          brand: vehicles.brand,
-          model: vehicles.model,
-          deletedAt: vehicles.deletedAt,
-        })
-        .from(vehicles)
-        .where(eq(vehicles.id, input.vehicleId))
-        .limit(1);
-      if (!vehicle || vehicle.deletedAt) throw new AppError(404, "Véhicule introuvable.");
+      if (vehicle.deletedAt) throw new AppError(404, "Véhicule introuvable.", { code: "INCIDENT_VEHICLE_NOT_FOUND" });
       const [order] = await tx
         .insert(workOrders)
         .values({
@@ -193,7 +210,7 @@ export async function createIncident(
       })
       .returning();
     return created as typeof incidents.$inferSelect;
-  });
+  }).catch(preWriteFailure);
 
   // Après validation de la transaction : l'alerte ne peut pas annoncer un incident absent.
   await d

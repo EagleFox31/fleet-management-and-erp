@@ -3581,3 +3581,13 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/integration/fuel-record-cancel-mission.test.ts`, cas de course solde / annulation : échoue (`deadlock detected`) si le verrou de la mission est retiré ;
   - revue des autres chemins : tous ceux de `mission-budgets-service.ts` (mise à jour, transitions, solde, dépenses) verrouillent la mission (`lockMission`) avant le budget ; aucun chemin inverse trouvé.
 - **Leçon généralisée** : tout service qui touche mission et budget prend les verrous dans le même ordre, mission puis budget, y compris les verrous implicites des triggers. Un verrou conditionnel (requête filtrée) ne verrouille rien quand le filtre est faux : verrouiller d'abord, tester ensuite.
+
+## 2026-11-10 — Clé d'idempotence conservée sur un 500 antérieur à l'écriture (V5b-1)
+
+- **Contexte** : la revue sécurité de V5b-1 (#636) a relevé que `POST /api/driver/breakdowns` garde sa clé 7 jours sur toute issue incertaine (`staleSeconds: null` + `keepKeyOnUncertainOutcome`). Aucun incident en production, trouvé à la relecture.
+- **Cause racine** : « issue incertaine » avait été traduit par « tout 5xx ». Or un 5xx levé avant l'écriture (interblocage, coupure, clé étrangère d'un véhicule inexistant sur un retard ou un autre signalement) n'est pas incertain : rien n'est validé. La clé restait réservée et chaque rejeu recevait le 409 « en cours » alors que la panne n'existait pas.
+- **Classification** : idempotence, garde trop prudente, erreur lisible (500 sur une donnée invalide au lieu d'un 404).
+- **Résolution** : `createIncident` distingue les échecs antérieurs à la validation (503 `INCIDENT_WRITE_FAILED`, 404 `INCIDENT_VEHICLE_NOT_FOUND`), tous deux dans `PRE_WRITE_REFUSAL_CODES` : la clé est libérée. Le message du 409 ne promet plus que la panne apparaîtra.
+- **Prévention vérifiée** : `tests/contract/idempotency-driver-breakdown.contract.test.ts`, bloc V5b-1b. Rouges sans correctif : échec de transaction puis réessai avec la même clé, véhicule inexistant (avec et sans OT), message du 409. Verts avant et après, gardés comme caractérisation : même clé pour deux comptes, lecteur refusé en 403.
+- **Risque résiduel** : un échec du `COMMIT` lui-même (connexion coupée après l'envoi) reste ambigu et libère la clé ; un doublon est alors possible, le dédoublonnage côté appli hors ligne reste à étudier côté V5b.
+- **Leçon généralisée** : sur une route qui garde sa clé, chaque erreur doit être classée « avant l'écriture » (libérer, code dédié dans `PRE_WRITE_REFUSAL_CODES`) ou « après / inconnue » (garder). Un 500 non classé garde la clé : tout chemin d'erreur antérieur à la transaction a donc son code, et son contrat.
