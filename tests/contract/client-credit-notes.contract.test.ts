@@ -163,6 +163,25 @@ describe("Avoirs clients : contrat", { timeout: 120_000 }, () => {
     expect(res.status).toBe(201);
   });
 
+  it("anti-CSRF : POST en urlencoded, texte ou sans type → 415, aucun avoir écrit, facture inchangée", async () => {
+    const invoice = await newInvoice();
+    const before = await invoiceOf(invoice.id);
+    const form = new URLSearchParams({ amountHt: "1000", reason: "TEST csrf", requestKey: key() }).toString();
+    for (const [type, body] of [["application/x-www-form-urlencoded", form], ["text/plain", form], [undefined, undefined]] as const) {
+      const res = await fetch(`${session.baseUrl}/api/billing/invoices/${invoice.id}/credit-notes`, {
+        method: "POST",
+        headers: { Cookie: session.cookies.get("accountant")!, ...(type ? { "Content-Type": type } : {}) },
+        body,
+      });
+      expect(res.status, String(type)).toBe(415);
+    }
+    const notes = await db.select().from(clientCreditNotes).where(eq(clientCreditNotes.invoiceId, invoice.id));
+    expect(notes).toHaveLength(0);
+    const after = await invoiceOf(invoice.id);
+    expect(after.balance).toBe(before.balance);
+    expect(after.creditedAmountTtc).toBe(before.creditedAmountTtc);
+  });
+
   it("404 : facture inconnue ; 400 : identifiant invalide", async () => {
     const missing = await credit(2_000_000_000, valid(1000));
     expect(missing.status).toBe(404);
