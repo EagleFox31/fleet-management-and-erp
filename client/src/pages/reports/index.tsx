@@ -48,6 +48,8 @@ import { exportsService } from "@/services/exportsService";
 import { cn } from "@/lib/utils";
 import { HeaderCard, KpiGrid, KpiTile, PremiumTabsNav, CardShell, IconSquare } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
+import { queryView, readyData } from "@/lib/query-view";
+import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 
 type ExportCardTone = "green" | "blue" | "amber" | "red" | "gray";
 
@@ -196,10 +198,14 @@ export default function ReportsIndex() {
     enabled: !!user,
   });
 
-  const { data: partsStats, isLoading: partsLoading } = useQuery<any>({
+  const partsStatsQuery = useQuery<any>({
     queryKey: ["/api/parts/statistics"],
     enabled: !!user,
   });
+  // Échec sans données : « Indisponible », jamais « 0 pièce sous seuil ».
+  const partsStatsView = queryView(partsStatsQuery);
+  const partsStats = readyData(partsStatsView, undefined as any);
+  const partsLoading = partsStatsQuery.isLoading;
 
   const { data: documentStats, isLoading: documentStatsLoading } = useQuery<any>({
     queryKey: ["/api/vehicles/document-stats"],
@@ -812,6 +818,7 @@ export default function ReportsIndex() {
 
   const pendingWorkOrders = Number(workOrderStats?.pending || 0);
   const inProgressWorkOrders = Number(workOrderStats?.inProgress || 0);
+  const lowStockFailed = partsStatsView.kind === "error";
   const lowStockCount = Number(partsStats?.lowStockCount || 0);
   const activeMissionsCount = Array.isArray(missionsData)
     ? missionsData.filter((m) => m.status === "in_progress").length
@@ -859,7 +866,7 @@ export default function ReportsIndex() {
       {
         key: "stock",
         label: "Pièces sous seuil",
-        value: lowStockCount,
+        value: lowStockFailed ? UNAVAILABLE : lowStockCount,
         subValue: "Alertes stock magasin",
         icon: <Package className="h-4 w-4" />,
         iconWrapperClassName: "bg-blue-50 text-blue-600",
@@ -1034,6 +1041,7 @@ export default function ReportsIndex() {
     expiredDocumentsCount,
     expiringDocumentsCount,
     lowStockCount,
+    lowStockFailed,
     reportTypesCount,
     documentationCount,
     pendingRenewalsCount,

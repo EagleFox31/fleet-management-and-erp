@@ -17,12 +17,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { HeaderCard, CardShell, SectionLabel, KpiGrid, KpiTile } from "@/components/design-system";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { canManagePartsPurchaseOrders } from "@shared/constants/roles";
+import { isSuggestedDiscountKnown } from "@/lib/purchase-order-discount";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { cn, formatPrice } from "@/lib/utils";
 import { useFormDraft } from "@/hooks/use-form-draft";
 import { FormDraftBadge, FormDraftDiscardButton } from "@/components/form-draft/form-draft-indicator";
 import { purchaseOrderDraft } from "@/lib/form-drafts";
-import { queryView, readyData } from "@/lib/query-view";
+import { listQueryView, queryView, readyData } from "@/lib/query-view";
 import { InlineQueryError } from "@/components/ui/inline-query-error";
 
 interface Supplier {
@@ -191,13 +193,26 @@ export default function NewPurchaseOrderPage() {
   });
 
   // Charger les suggestions de regroupement
-  const { data: groupSuggestions = [], isLoading: groupSuggestionsLoading } = useQuery<any[]>({
+  // Hors périmètre pièces (logistique), le serveur répond 403 : ne pas lire, ne rien signaler.
+  const canReadGroupSuggestions = canManagePartsPurchaseOrders(user?.role);
+  const groupSuggestionsQuery = useQuery<any[]>({
     queryKey: ["/api/purchase-orders/group-suggestions", { minRequirements: 1 }],
+    enabled: canReadGroupSuggestions,
   });
+  const groupSuggestionsView = listQueryView<any>(groupSuggestionsQuery);
+  const groupSuggestions = readyData(groupSuggestionsView, [] as any[]);
+  const groupSuggestionsLoading = groupSuggestionsQuery.isLoading;
 
-  const { data: lowStockParts = [], isLoading: lowStockPartsLoading } = useQuery<LowStockPart[]>({
+  const lowStockPartsQuery = useQuery<LowStockPart[]>({
     queryKey: ["/api/parts/low-on-stock"],
   });
+  const lowStockPartsView = listQueryView<LowStockPart>(lowStockPartsQuery);
+  const lowStockParts = readyData(lowStockPartsView, [] as LowStockPart[]);
+  const lowStockPartsLoading = lowStockPartsQuery.isLoading;
+  // Échec sans données : les suggestions (stock bas, remise de regroupement) sont signalées
+  // indisponibles, jamais présentées comme « rien à suggérer ».
+  const groupSuggestionsFailed = canReadGroupSuggestions && groupSuggestionsView.kind === "error";
+  const suggestionsFailed = groupSuggestionsFailed || lowStockPartsView.kind === "error";
 
   const {
     data: supplierOrders = [],
@@ -478,12 +493,17 @@ export default function NewPurchaseOrderPage() {
 
   // Préremplissage remise: applique la remise suggérée à chaque changement de fournisseur
   useEffect(() => {
-    if (!selectedSupplier || discountAutoForSupplier === selectedSupplier || !isSupplierOrdersFetched) return;
+    const groupDiscountKnown = isSuggestedDiscountKnown({
+      historyDiscount: parseAmount(negotiatedDiscountFromHistory),
+      canReadGroupSuggestions,
+      groupSuggestionsReady: groupSuggestionsView.kind === "ready",
+    });
+    if (!selectedSupplier || discountAutoForSupplier === selectedSupplier || !isSupplierOrdersFetched || !groupDiscountKnown) return;
 
     form.setValue("discountPercentage", Number.isFinite(suggestedDiscount) ? suggestedDiscount : 0);
 
     setDiscountAutoForSupplier(selectedSupplier);
-  }, [selectedSupplier, suggestedDiscount, form, discountAutoForSupplier, isSupplierOrdersFetched]);
+  }, [selectedSupplier, suggestedDiscount, form, discountAutoForSupplier, isSupplierOrdersFetched, groupSuggestionsView.kind, negotiatedDiscountFromHistory, canReadGroupSuggestions]);
 
   // Ajouter une ligne manuelle
   const addManualLine = () => {
@@ -1005,6 +1025,20 @@ export default function NewPurchaseOrderPage() {
                       </div>
                     ))}
                   </div>
+                )}
+
+                {selectedSupplier && suggestionsFailed && (
+                  <InlineQueryError
+                    className="mt-5"
+                    error={groupSuggestionsFailed && groupSuggestionsView.kind === "error" ? groupSuggestionsView.error : lowStockPartsView.kind === "error" ? lowStockPartsView.error : null}
+                    isRetrying={groupSuggestionsQuery.isFetching || lowStockPartsQuery.isFetching}
+                    fallback="Les suggestions (stock bas, remise de regroupement) sont momentanément indisponibles."
+                    onRetry={() => {
+                      if (groupSuggestionsFailed) void groupSuggestionsQuery.refetch();
+                      if (lowStockPartsView.kind === "error") void lowStockPartsQuery.refetch();
+                    }}
+                    data-testid="order-suggestions-error"
+                  />
                 )}
 
                 {(additionalSupplierApprovedRequirements.length > 0 || nonPendingSupplierRequirements.length > 0 || lowStockSuggestions.length > 0) && (
