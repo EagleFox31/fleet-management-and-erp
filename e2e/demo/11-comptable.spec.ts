@@ -38,6 +38,7 @@ test("démo comptable : régler une facture fournisseur, suivre l'argent, sans s
 
   await loginThroughForm(page, DEMO_ACCOUNTS.accountant.username, DEMO_ACCOUNTS.accountant.password);
   await expect(page.getByTestId("accountant-kpi-supplier-balance")).toContainText(money(DEMO_ACCOUNTING.amountTTC), { timeout: 30_000 });
+  await expect(page.getByTestId("accountant-kpi-receivables")).toContainText(/\d+ factures? en attente/, { timeout: 30_000 });
   await beat(page, 2500);
 
   // Facture fournisseur approuvée : règlement saisi avec justificatif, puis rapproché.
@@ -90,7 +91,7 @@ test("démo comptable : régler une facture fournisseur, suivre l'argent, sans s
   await beat(page, 2000);
 
   // Rien d'opérationnel : la garde serveur refuse avant toute validation du corps.
-  for (const path of ["/api/work-orders", "/api/parts", "/api/missions", "/api/fuel-card/consumption"]) {
+  for (const path of ["/api/work-orders", "/api/parts", "/api/missions", "/api/fuel-card/consumption", "/api/fuel-records"]) {
     const response = await page.request.post(path, { data: {} });
     expect(response.status(), `POST ${path}`).toBe(403);
   }

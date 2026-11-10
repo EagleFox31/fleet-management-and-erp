@@ -17,6 +17,8 @@ describe("assertLocalDatabase (seed de démo)", () => {
     ["préfixe sans séparateur", "postgres://fleet:fleet@localhost:54320/fleet_testprod"],
     ["suffixe en majuscules", "postgres://fleet:fleet@localhost:54320/fleet_test_PROD"],
     ["sous-chemin", "postgres://fleet:fleet@localhost:54320/fleet_test/x"],
+    ["paramètre host", "postgres://fleet:fleet@localhost:54320/fleet_test?host=db.prod.example.com"],
+    ["paramètre hostaddr", "postgres://fleet:fleet@localhost:54320/fleet_test?hostaddr=10.0.0.1"],
     ["URL absente", undefined],
     ["URL invalide", "pas une url"],
   ])("refuse : %s", (_label, url) => {

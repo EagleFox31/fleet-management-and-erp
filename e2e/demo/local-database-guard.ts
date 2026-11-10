@@ -14,7 +14,9 @@ export function assertLocalDatabase(rawUrl: string | undefined = process.env.DAT
   let ok = false;
   try {
     const url = new URL(rawUrl ?? "");
-    ok = LOCAL_HOSTS.has(url.hostname) && LOCAL_DATABASE_PATH.test(url.pathname);
+    // host / hostaddr en paramètre de requête remplacent l'hôte de l'URL côté libpq.
+    const redirected = url.searchParams.has("host") || url.searchParams.has("hostaddr");
+    ok = !redirected && LOCAL_HOSTS.has(url.hostname) && LOCAL_DATABASE_PATH.test(url.pathname);
   } catch {
     ok = false;
   }
