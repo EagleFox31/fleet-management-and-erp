@@ -3582,6 +3582,14 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - revue des autres chemins : tous ceux de `mission-budgets-service.ts` (mise à jour, transitions, solde, dépenses) verrouillent la mission (`lockMission`) avant le budget ; aucun chemin inverse trouvé.
 - **Leçon généralisée** : tout service qui touche mission et budget prend les verrous dans le même ordre, mission puis budget, y compris les verrous implicites des triggers. Un verrou conditionnel (requête filtrée) ne verrouille rien quand le filtre est faux : verrouiller d'abord, tester ensuite.
 
+## 2026-11-10 — Tuile « À encaisser » : type local redéclaré à la place du contrat partagé
+
+- **Contexte** : démo comptable. La tuile des créances du tableau de bord comptable affichait une valeur fausse. Trouvé au tournage, avant toute recette.
+- **Cause racine** : l'écran redéclarait un type local de la réponse de `/api/finance/receivables-aging` au lieu d'importer `FinanceReceivablesAgingResponse`. La forme supposée ne correspondait pas au contrat, et TypeScript ne pouvait pas le voir.
+- **Classification** : contrat dupliqué, dérive silencieuse entre client et serveur.
+- **Résolution** : la page importe le contrat partagé et lit `totals.total.netPayable` / `count`.
+- **Prévention vérifiée** : `e2e/demo/11-comptable.spec.ts` asserte la tuile `accountant-kpi-receivables` (échoue si la valeur n'est plus lue depuis le contrat).
+- **Leçon généralisée** : une réponse d'API se type avec le contrat de `shared/contracts/`, jamais avec un type écrit à la main dans la page. Même règle pour les listes de rôles : une constante partagée (`FUEL_RECORD_WRITER_ROLES`) sert au middleware et à l'écran.
 ## 2026-11-10 — Remorque d'affectation : trois oublis du même lot, trouvés en revue et en CI (#635)
 
 - **Contexte** : ajout de `assignments.trailer_id` (lot remorque). Trois défauts trouvés avant la fusion, aucune donnée touchée.

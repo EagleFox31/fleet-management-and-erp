@@ -33,6 +33,7 @@ import {
   purchaseOrders,
   supplierInvoices,
   suppliers,
+  treasuryAccounts,
   users,
   vehicleDocuments,
   vehicles,
@@ -40,6 +41,7 @@ import {
 } from "../../shared/schema";
 import { deleteClientInvoicesWhere } from "../../tests/support/money-override";
 import { cleanupPodFiles } from "../../tests/support/pod";
+import { assertLocalDatabase } from "./local-database-guard";
 
 export const DEMO_ACCOUNTS = {
   technician: { username: "tech1", password: "tech123", name: "Paul Mbarga", role: "technician" },
@@ -54,6 +56,7 @@ export const DEMO_ACCOUNTS = {
   admin: { username: "admin1", password: "admin123", name: "Admin Démo", role: "admin" },
   recruit: { username: "recrue1", password: "recrue123", name: "Paul Recrue", role: "warehouse" },
   driver: { username: "chauffeur1", password: "chauffeur123", name: "Samuel Biyick", role: "driver" },
+  accountant: { username: "compta1", password: "compta123", name: "Christelle Nguema", role: "accountant" },
 } as const;
 
 export const DEMO_VEHICLES = {
@@ -87,20 +90,7 @@ export const DEMO_RECEPTION = {
 export const DEMO_WORK_ORDER_TITLE = "Démo - Vidange et contrôle freins";
 export const DEMO_DOCUMENT_NAME = "Assurance DEMO-SEC-001";
 
-/** Hôtes acceptés : base locale ou conteneur Docker du compose de test. */
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "postgres"]);
-
-/** Refuse toute base autre que `fleet_test` sur un hôte local (le .env racine peut viser la production). */
-export function assertLocalDatabase(rawUrl: string | undefined = process.env.DATABASE_URL): void {
-  let ok = false;
-  try {
-    const url = new URL(rawUrl ?? "");
-    ok = LOCAL_HOSTS.has(url.hostname) && url.pathname === "/fleet_test";
-  } catch {
-    ok = false;
-  }
-  if (!ok) throw new Error("Seed de démo refusé : DATABASE_URL doit viser la base locale fleet_test.");
-}
+export { assertLocalDatabase };
 
 async function ensureUser(account: { username: string; password: string; name: string; role: string }): Promise<number> {
   await db
@@ -409,6 +399,98 @@ async function seedDriverDay(): Promise<void> {
   await db.insert(assignments).values({ missionId: mission.id, vehicleId, driverId: driver.id, status: "accepted" });
 }
 
+export const DEMO_ACCOUNTING = {
+  supplierName: "Garage Akwa Freins (démo)",
+  invoicePrefix: "DEMO-FF-",
+  invoiceToPay: "DEMO-FF-001",
+  invoicePaid: "DEMO-FF-002",
+  amountHT: 420_000,
+  amountTTC: 500_850,
+  missionPrefix: "DEMO-CPT-",
+  missionPrice: 750_000,
+  accounts: [
+    { code: "DEMO-BQ-01", label: "Compte bancaire principal (démo)", kind: "bank", bankName: "Banque démo", openingBalance: "18500000" },
+    { code: "DEMO-CAISSE-01", label: "Caisse du siège (démo)", kind: "cash", bankName: null, openingBalance: "750000" },
+    { code: "DEMO-CARTE-01", label: "Carte carburant (démo)", kind: "fuel_card", bankName: null, openingBalance: "50000000" },
+  ],
+} as const;
+
+/**
+ * Comptable : une facture fournisseur approuvée à régler, une déjà payée, une mission livrée
+ * non facturée (« À facturer ») et les comptes de trésorerie. Factures et missions DEMO-* purgées
+ * puis recréées ; les comptes sont posés par code, soldes d'ouverture ramenés à la démo.
+ */
+async function seedAccounting(): Promise<void> {
+  const accountantId = await ensureUser(DEMO_ACCOUNTS.accountant);
+  await db.insert(suppliers).values({ name: DEMO_ACCOUNTING.supplierName, category: "Freinage", isActive: true }).onConflictDoNothing();
+  const [supplier] = await db.select({ id: suppliers.id }).from(suppliers).where(eq(suppliers.name, DEMO_ACCOUNTING.supplierName));
+  // Les règlements suivent la facture (ON DELETE CASCADE) : un rejeu repart d'une facture sans règlement.
+  await db.delete(supplierInvoices).where(like(supplierInvoices.invoiceNumber, `${DEMO_ACCOUNTING.invoicePrefix}%`));
+  const vat = String(DEMO_ACCOUNTING.amountTTC - DEMO_ACCOUNTING.amountHT);
+  const common = { supplierId: supplier.id, family: "Freinage", amountHT: String(DEMO_ACCOUNTING.amountHT), subtotal: String(DEMO_ACCOUNTING.amountHT), vatAmount: vat, taxAmount: vat, totalTTC: String(DEMO_ACCOUNTING.amountTTC), totalAmount: String(DEMO_ACCOUNTING.amountTTC) };
+  await db.insert(supplierInvoices).values([
+    {
+      ...common,
+      invoiceNumber: DEMO_ACCOUNTING.invoiceToPay,
+      invoiceDate: isoDayFromNow(-12),
+      dueDate: isoDayFromNow(3),
+      description: "Plaquettes et disques de frein, essieu avant",
+      balance: String(DEMO_ACCOUNTING.amountTTC),
+      status: "approved",
+      approvedBy: accountantId,
+      approvedAt: new Date(),
+    },
+    {
+      ...common,
+      invoiceNumber: DEMO_ACCOUNTING.invoicePaid,
+      invoiceDate: isoDayFromNow(-40),
+      dueDate: isoDayFromNow(-10),
+      description: "Tambours de frein, remorque",
+      balance: "0",
+      status: "paid",
+      isPaymentComplete: true,
+      paidBy: accountantId,
+      paidDate: isoDayFromNow(-11),
+    },
+  ]);
+
+  const oldMissions = await db.select({ id: missions.id }).from(missions).where(like(missions.orderNumber, `${DEMO_ACCOUNTING.missionPrefix}%`));
+  if (oldMissions.length > 0) {
+    const ids = oldMissions.map((m) => m.id);
+    await deleteClientInvoicesWhere(inArray(clientInvoices.missionId, ids));
+    await db.delete(missions).where(inArray(missions.id, ids));
+  }
+  const [client] = await db.select({ id: clients.id }).from(clients).where(eq(clients.name, DEMO_INVOICE.clientName));
+  const delivered = new Date(Date.now() - 86_400_000);
+  await db.insert(missions).values({
+    clientId: client.id,
+    orderNumber: `${DEMO_ACCOUNTING.missionPrefix}001`,
+    pickupAddress: "Douala, port",
+    deliveryAddress: "Edéa, usine",
+    pickupDate: new Date(delivered.getTime() - 86_400_000),
+    deliveryDate: delivered,
+    completedAt: delivered,
+    agreedPrice: String(DEMO_ACCOUNTING.missionPrice),
+    status: "completed",
+  });
+
+  for (const account of DEMO_ACCOUNTING.accounts) {
+    // Une seule carte carburant active : on n'en ajoute pas si la base en a déjà une autre.
+    if (account.kind === "fuel_card") {
+      const [other] = await db.select({ code: treasuryAccounts.code }).from(treasuryAccounts).where(and(eq(treasuryAccounts.kind, "fuel_card"), eq(treasuryAccounts.isActive, true)));
+      if (other && other.code !== account.code) continue;
+    }
+    await db
+      .insert(treasuryAccounts)
+      .values({ ...account, openingDate: isoDayFromNow(-30), isActive: true, createdBy: accountantId, updatedBy: accountantId })
+      .onConflictDoNothing();
+    await db
+      .update(treasuryAccounts)
+      .set({ openingBalance: account.openingBalance, isActive: true })
+      .where(and(eq(treasuryAccounts.code, account.code), ne(treasuryAccounts.openingBalance, account.openingBalance)));
+  }
+}
+
 export async function seedDemo(): Promise<void> {
   assertLocalDatabase();
   await purgeReceptionOrders();
@@ -431,6 +513,7 @@ export async function seedDemo(): Promise<void> {
   const secretaryVehicleId = await ensureVehicle(DEMO_VEHICLES.secretary, "Kerax", null);
   await seedFleetAudit(secretaryVehicleId);
   await seedDriverDay();
+  await seedAccounting();
 
   await db
     .insert(parts)
