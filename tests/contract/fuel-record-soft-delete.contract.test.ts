@@ -7,6 +7,7 @@ import { fuelRecords } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestFuelRecord, createTestVehicle } from "../support/factories";
+import { deleteFuelRecordsWhere } from "../support/money-override";
 
 /**
  * Suppression d'un plein (DELETE /api/fuel-records/:id) :
@@ -55,7 +56,7 @@ beforeAll(async () => {
 }, 120000);
 
 afterAll(async () => {
-  if (ids.vehicleIds.length > 0) await db.delete(fuelRecords).where(inArray(fuelRecords.vehicleId, ids.vehicleIds));
+  if (ids.vehicleIds.length > 0) await deleteFuelRecordsWhere(inArray(fuelRecords.vehicleId, ids.vehicleIds));
   await cleanupCreated(ids);
   await session?.close();
 }, 120000);

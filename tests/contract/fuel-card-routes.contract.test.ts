@@ -5,6 +5,7 @@ import { fuelRecords } from "../../shared/schema";
 import { createTestVehicle } from "../support/factories";
 import { startContractSession } from "../support/contract-session";
 import { uniqueTestToken } from "../support/ids";
+import { deleteFuelRecordsWhere } from "../support/money-override";
 
 /**
  * FUEL1, carte carburant et pleins : routes `/api/fuel-card/*` et `/api/fuel-records`.
@@ -64,9 +65,9 @@ beforeAll(async () => {
 }, 60000);
 
 afterAll(async () => {
-  if (recordIds.length > 0) await db.delete(fuelRecords).where(inArray(fuelRecords.id, recordIds));
+  if (recordIds.length > 0) await deleteFuelRecordsWhere(inArray(fuelRecords.id, recordIds));
   // Balayage : 2031 est réservée à ce fichier. Un débit NaN resté en base empoisonnerait le solde global.
-  await db.delete(fuelRecords).where(sql`${fuelRecords.date} >= '2031-01-01' AND ${fuelRecords.date} < '2032-01-01'`);
+  await deleteFuelRecordsWhere(sql`${fuelRecords.date} >= '2031-01-01' AND ${fuelRecords.date} < '2032-01-01'`);
   await session.stop();
 });
 
@@ -360,7 +361,7 @@ describe("FUEL1 : validation, erreurs lisibles et cloison", { timeout: 120000 },
     if (typeof id === "number") {
       // L'id est enregistré avant la suppression : si elle échoue, le ménage de fin de fichier le reprend.
       recordIds.push(id);
-      await db.delete(fuelRecords).where(inArray(fuelRecords.id, [id]));
+      await deleteFuelRecordsWhere(inArray(fuelRecords.id, [id]));
     }
     probes[key] = { status: res.status, body: res.body };
   }

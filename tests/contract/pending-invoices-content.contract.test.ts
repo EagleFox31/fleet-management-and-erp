@@ -8,6 +8,7 @@ import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestClient, createTestUser, TEST_USER_PASSWORD } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { deleteClientInvoicesWhere } from "../support/money-override";
 
 /**
  * Niveau C, P-21 : contenu de `GET /api/billing/pending-invoices`, ce qui reste à facturer par client.
@@ -128,7 +129,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (invoiceIds.length > 0) await db.delete(clientInvoices).where(inArray(clientInvoices.id, invoiceIds));
+  if (invoiceIds.length > 0) await deleteClientInvoicesWhere(inArray(clientInvoices.id, invoiceIds));
   if (missionIds.length > 0) await db.delete(missions).where(inArray(missions.id, missionIds));
   await cleanupCreated(ids);
   await new Promise<void>((r) => server.close(() => r()));

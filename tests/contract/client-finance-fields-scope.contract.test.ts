@@ -8,6 +8,7 @@ import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
 import { createTestClient, createTestClientInvoice, createTestFuelRecord, createTestVehicle } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { deleteClientInvoicesWhere } from "../support/money-override";
 
 /**
  * Champs finance (lot F1) hors des lectures non finance : la fiche client jointe aux missions,
@@ -76,7 +77,7 @@ afterAll(async () => {
   (global as any).broadcastUpdate = previous;
   try {
     const own = db.select({ id: missions.id }).from(missions).where(eq(missions.clientId, clientId));
-    await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, own));
+    await deleteClientInvoicesWhere(inArray(clientInvoices.missionId, own));
     await db.delete(assignments).where(inArray(assignments.missionId, own));
     await db.delete(missions).where(eq(missions.clientId, clientId));
     if (driverIds.length > 0) await db.delete(drivers).where(inArray(drivers.id, driverIds));

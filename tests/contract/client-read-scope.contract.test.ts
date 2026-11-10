@@ -7,6 +7,7 @@ import { apiErrorProblems } from "../support/api-error";
 import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
+import { deleteFuelRecordsWhere } from "../support/money-override";
 
 /**
  * Niveau C, lectures encore ouvertes à tout compte connecté (suite de #127 et #157).
@@ -86,7 +87,7 @@ beforeAll(async () => {
 }, 60000);
 
 afterAll(async () => {
-  if (recordIds.length > 0) await db.delete(fuelRecords).where(inArray(fuelRecords.id, recordIds));
+  if (recordIds.length > 0) await deleteFuelRecordsWhere(inArray(fuelRecords.id, recordIds));
   await cleanupCreated(ids);
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 });

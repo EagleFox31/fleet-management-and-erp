@@ -6,6 +6,7 @@ import { clientInvoices, missions } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestClient } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { deleteClientInvoicesWhere } from "../support/money-override";
 
 /**
  * Lot « CA réel » : `getRevenueByClient` lit le chiffre d'affaires HT sur les factures émises.
@@ -125,7 +126,7 @@ beforeAll(async () => {
 }, 120000);
 
 afterAll(async () => {
-  if (ids.clientInvoiceIds.length) await db.delete(clientInvoices).where(inArray(clientInvoices.id, ids.clientInvoiceIds));
+  if (ids.clientInvoiceIds.length) await deleteClientInvoicesWhere(inArray(clientInvoices.id, ids.clientInvoiceIds));
   ids.clientInvoiceIds = [];
   if (missionIds.length) await db.delete(missions).where(inArray(missions.id, missionIds));
   await cleanupCreated(ids);

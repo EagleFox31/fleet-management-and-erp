@@ -7,6 +7,7 @@ import { fuelCardService } from "../../server/services/fuel-card-service";
 import { createTestUser, createTestVehicle } from "../support/factories";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { uniqueTestToken } from "../support/ids";
+import { deleteFuelRecordsWhere } from "../support/money-override";
 
 /**
  * R-03 : `GET /api/fuel-card/stats-by-client` cloisonné. La route est déjà fermée aux clients
@@ -17,7 +18,7 @@ const ids = createIdBag();
 const recordIds: number[] = [];
 
 afterAll(async () => {
-  if (recordIds.length > 0) await db.delete(fuelRecords).where(inArray(fuelRecords.id, recordIds));
+  if (recordIds.length > 0) await deleteFuelRecordsWhere(inArray(fuelRecords.id, recordIds));
   await cleanupCreated(ids);
 });
 

@@ -11,6 +11,7 @@ import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestClient, createTestClientInvoice, createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { deleteClientInvoicesWhere } from "../support/money-override";
 
 /** O1 : suivi des opérations clients (drapeau, rôles, contrat, upsert rejouable). */
 process.env.FEATURE_FLAGS = "operations-tracking=on";
@@ -66,7 +67,7 @@ beforeAll(async () => {
   missionId = m.id;
 }, 180000);
 afterAll(async () => {
-  if (ids.clientInvoiceIds.length) await db.delete(clientInvoices).where(inArray(clientInvoices.id, ids.clientInvoiceIds));
+  if (ids.clientInvoiceIds.length) await deleteClientInvoicesWhere(inArray(clientInvoices.id, ids.clientInvoiceIds));
   await db.delete(missions).where(eq(missions.id, missionId));
   await cleanupCreated(ids);
   await new Promise<void>((r) => server.close(() => r()));
