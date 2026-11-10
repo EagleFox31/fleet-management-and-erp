@@ -105,6 +105,22 @@ describe("remorque d'affectation", { timeout: 180000 }, () => {
     expect(frame?.data?.payload).toMatchObject({ trailerId });
   });
 
+  it("lancement : une remorque passée en atelier après l'attelage bloque le départ, motif nommant la remorque", async () => {
+    const missionId = await mission();
+    const trailerId = await trailer();
+    expect((await add("admin", missionId, { driverId: await driver(), vehicleId: await vehicle(), trailerId })).status).toBe(201);
+    await db.update(missions).set({ status: "assigned" } as any).where(eq(missions.id, missionId));
+    await db.update(vehicles).set({ status: "maintenance" } as any).where(eq(vehicles.id, trailerId));
+    const [{ registrationNumber }] = await db.select({ registrationNumber: vehicles.registrationNumber }).from(vehicles).where(eq(vehicles.id, trailerId));
+
+    const res = await session.call("PUT", `/api/missions/${missionId}/status`, { actor: "admin", body: { status: "in_progress" } });
+    expect(apiErrorProblems(res.status, res.body, 400, undefined, res.headers.get("x-request-id"))).toEqual([]);
+    const motifs: string[] = res.body.motifs ?? [];
+    expect(motifs.some((m) => m.startsWith(`Remorque ${registrationNumber} ne peut pas partir en mission`)), JSON.stringify(motifs)).toBe(true);
+    const [m] = await db.select({ status: missions.status }).from(missions).where(eq(missions.id, missionId));
+    expect(m.status).toBe("assigned");
+  });
+
   it("sans remorque : 201, trailerId nul", async () => {
     const missionId = await mission();
     const res = await add("admin", missionId, { driverId: await driver(), vehicleId: await vehicle() });
