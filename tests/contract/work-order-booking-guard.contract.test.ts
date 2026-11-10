@@ -103,7 +103,7 @@ describe("garde de double affectation des OT", { timeout: 180000 }, () => {
     // Avant le matcher Express, une regex sur `req.path` laissait passer `%36%32` (= `62`) sans 409.
     const encodedId = [...String(second.id)].map((digit) => `%3${digit}`).join("");
     const port = Number(new URL(baseUrl).port);
-    for (const target of [`/api/work-orders/${encodedId}`, `/api/WORK-ORDERS/${second.id}`, `/api/work-orders/${second.id}/`]) {
+    for (const target of [`/api/work-orders/${encodedId}`, `/api/WORK-ORDERS/${second.id}`, `/API/work-orders/${second.id}`, `/api/work-orders/${second.id}/`]) {
       const raw = await sendRawResponse(port, "PATCH", target, { headers: { Cookie: cookie }, body: { startDate: "2031-03-01T09:00:00Z" } });
       expect(raw.status, target).toBe(409);
     }
