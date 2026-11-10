@@ -1350,6 +1350,7 @@ END $$;`;
  * server/db/migrations/20261110_mission_pod_files.sql (tests/unit/server/mission-pod-files-schema.test.ts).
  */
 export const MISSION_POD_FILES_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
 
 CREATE TABLE IF NOT EXISTS mission_pod_files (
   id serial PRIMARY KEY,

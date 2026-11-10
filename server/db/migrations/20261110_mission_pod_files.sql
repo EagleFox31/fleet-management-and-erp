@@ -1,6 +1,7 @@
 -- Preuve de livraison (POD) : fichiers déposés sur une mission, en ajouts seulement.
 -- Jumelle de MISSION_POD_FILES_SQL (server/init-database.ts) : tests/unit/server/mission-pod-files-schema.test.ts compare les deux.
 SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
 
 CREATE TABLE IF NOT EXISTS mission_pod_files (
   id serial PRIMARY KEY,
