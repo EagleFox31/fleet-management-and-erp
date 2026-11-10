@@ -17,6 +17,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { HeaderCard, CardShell, SectionLabel, KpiGrid, KpiTile } from "@/components/design-system";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import { canManagePartsPurchaseOrders } from "@shared/constants/roles";
+import { isSuggestedDiscountKnown } from "@/lib/purchase-order-discount";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { cn, formatPrice } from "@/lib/utils";
 import { useFormDraft } from "@/hooks/use-form-draft";
@@ -191,8 +193,11 @@ export default function NewPurchaseOrderPage() {
   });
 
   // Charger les suggestions de regroupement
+  // Hors périmètre pièces (logistique), le serveur répond 403 : ne pas lire, ne rien signaler.
+  const canReadGroupSuggestions = canManagePartsPurchaseOrders(user?.role);
   const groupSuggestionsQuery = useQuery<any[]>({
     queryKey: ["/api/purchase-orders/group-suggestions", { minRequirements: 1 }],
+    enabled: canReadGroupSuggestions,
   });
   const groupSuggestionsView = listQueryView<any>(groupSuggestionsQuery);
   const groupSuggestions = readyData(groupSuggestionsView, [] as any[]);
@@ -206,7 +211,8 @@ export default function NewPurchaseOrderPage() {
   const lowStockPartsLoading = lowStockPartsQuery.isLoading;
   // Échec sans données : les suggestions (stock bas, remise de regroupement) sont signalées
   // indisponibles, jamais présentées comme « rien à suggérer ».
-  const suggestionsFailed = groupSuggestionsView.kind === "error" || lowStockPartsView.kind === "error";
+  const groupSuggestionsFailed = canReadGroupSuggestions && groupSuggestionsView.kind === "error";
+  const suggestionsFailed = groupSuggestionsFailed || lowStockPartsView.kind === "error";
 
   const {
     data: supplierOrders = [],
@@ -487,14 +493,17 @@ export default function NewPurchaseOrderPage() {
 
   // Préremplissage remise: applique la remise suggérée à chaque changement de fournisseur
   useEffect(() => {
-    // Remise de regroupement non lue : pas de préremplissage à 0, il se fera après « Réessayer ».
-    const groupDiscountKnown = groupSuggestionsView.kind === "ready";
+    const groupDiscountKnown = isSuggestedDiscountKnown({
+      historyDiscount: parseAmount(negotiatedDiscountFromHistory),
+      canReadGroupSuggestions,
+      groupSuggestionsReady: groupSuggestionsView.kind === "ready",
+    });
     if (!selectedSupplier || discountAutoForSupplier === selectedSupplier || !isSupplierOrdersFetched || !groupDiscountKnown) return;
 
     form.setValue("discountPercentage", Number.isFinite(suggestedDiscount) ? suggestedDiscount : 0);
 
     setDiscountAutoForSupplier(selectedSupplier);
-  }, [selectedSupplier, suggestedDiscount, form, discountAutoForSupplier, isSupplierOrdersFetched, groupSuggestionsView.kind]);
+  }, [selectedSupplier, suggestedDiscount, form, discountAutoForSupplier, isSupplierOrdersFetched, groupSuggestionsView.kind, negotiatedDiscountFromHistory, canReadGroupSuggestions]);
 
   // Ajouter une ligne manuelle
   const addManualLine = () => {
@@ -1021,10 +1030,11 @@ export default function NewPurchaseOrderPage() {
                 {selectedSupplier && suggestionsFailed && (
                   <InlineQueryError
                     className="mt-5"
-                    error={groupSuggestionsView.kind === "error" ? groupSuggestionsView.error : lowStockPartsView.kind === "error" ? lowStockPartsView.error : null}
+                    error={groupSuggestionsFailed && groupSuggestionsView.kind === "error" ? groupSuggestionsView.error : lowStockPartsView.kind === "error" ? lowStockPartsView.error : null}
+                    isRetrying={groupSuggestionsQuery.isFetching || lowStockPartsQuery.isFetching}
                     fallback="Les suggestions (stock bas, remise de regroupement) sont momentanément indisponibles."
                     onRetry={() => {
-                      if (groupSuggestionsView.kind === "error") void groupSuggestionsQuery.refetch();
+                      if (groupSuggestionsFailed) void groupSuggestionsQuery.refetch();
                       if (lowStockPartsView.kind === "error") void lowStockPartsQuery.refetch();
                     }}
                     data-testid="order-suggestions-error"

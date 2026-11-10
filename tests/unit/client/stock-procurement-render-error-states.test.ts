@@ -17,8 +17,9 @@ vi.mock("wouter", () => ({
   Link: ({ children }: { children?: React.ReactNode }) => React.createElement("a", null, children),
   useRoute: () => [false, {}],
 }));
+const auth = vi.hoisted(() => ({ role: "admin" }));
 vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({ user: { id: 1, role: "admin" }, isAuthenticated: true, isLoading: false }),
+  useAuth: () => ({ user: { id: 1, role: auth.role }, isAuthenticated: true, isLoading: false }),
 }));
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: () => {} }) }));
 vi.mock("@/lib/queryClient", async () => {
@@ -126,6 +127,20 @@ describe("lot C : lectures stock et achats en échec", () => {
     const html = render(Page, [[GROUP_KEY, { error: boom() }]]);
     expect(html).toContain('data-testid="group-suggestions-error"');
     expect(html).not.toContain("Aucune suggestion de regroupement disponible");
+  });
+
+  it("regroupement, logistique (hors périmètre pièces, 403 serveur) : explication, ni encart ni compteur", async () => {
+    auth.role = "logistics";
+    try {
+      const { default: Page } = await import("@/pages/procurement/orders/group");
+      const html = render(Page, []);
+      expect(html).toContain('data-testid="group-out-of-scope"');
+      expect(html).not.toContain('data-testid="group-suggestions-error"');
+      expect(html).not.toContain("Chargement des suggestions");
+      expect(html).not.toMatch(/Suggestions de Commandes Groupées \(/);
+    } finally {
+      auth.role = "admin";
+    }
   });
 
   it("regroupement, témoin : liste vide lue, « Aucune suggestion »", async () => {

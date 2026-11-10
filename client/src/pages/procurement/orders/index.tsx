@@ -142,6 +142,7 @@ export default function PurchaseOrdersListPage() {
                 error={statsView.error}
                 fallback="Les totaux des commandes sont momentanément indisponibles."
                 onRetry={() => void statsQuery.refetch()}
+                isRetrying={statsView.isRetrying}
               />
             </div>
           )}
@@ -235,6 +236,7 @@ export default function PurchaseOrdersListPage() {
                       error={ordersView.kind === "error" ? ordersView.error : null}
                       fallback="La liste des commandes est momentanément indisponible."
                       onRetry={() => void ordersQuery.refetch()}
+                      isRetrying={ordersView.kind === "error" && ordersView.isRetrying}
                     />
                   </td>
                 </tr>
