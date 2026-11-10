@@ -26,7 +26,7 @@ import { matchesAllowedWrite } from "@shared/constants/roles";
  * `EXPECTED` ci-dessous, en conscience, dans la même PR.
  */
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
-const EXPECTED = { apiRouter: 143, registerRoutes: 38, horsApi: 0, total: 177 };
+const EXPECTED = { apiRouter: 144, registerRoutes: 38, horsApi: 0, total: 178 };
 
 /** `/api/x/:id(\d+)/y` → `/api/x/1/y` : la garde refuse avant toute lecture de l'objet. */
 const concrete = (path: string) => path.replace(/:[A-Za-z_]+(\([^)]*\))?\??/g, "1");

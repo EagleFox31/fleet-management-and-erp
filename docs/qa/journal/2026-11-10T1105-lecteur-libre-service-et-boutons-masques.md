@@ -22,13 +22,13 @@ données personnelles des chauffeurs (CNI, permis), ni la trésorerie, ni la fac
 rien de métier ; seul le libre-service sur sa propre ligne lui reste ouvert.
 
 **Comment** : contrat sur la pile Express complète, décomptes figés en égalité
-(`EXPECTED = { apiRouter: 143, registerRoutes: 38, horsApi: 0, total: 177 }`), contrats
+(`EXPECTED = { apiRouter: 144, registerRoutes: 38, horsApi: 0, total: 178 }`), contrats
 libre-service en 200 (étape, mascotte et fin d'accueil, préférences, alerte lue, mot de passe,
 fermeture puis réouverture de session avec le nouveau mot de passe) ; `pin-login` passe la garde et
 c'est la route qui répond 401 (chauffeurs seulement). Unitaire de la garde avec
 `findActiveSessionUser` bouchonné ; unitaire `matchesAllowedWrite` sur les chemins piégés
 (casse, double barre, segment en plus, traversée, point-virgule, autre méthode).
-Rouge montré une fois en court-circuitant la garde localement (non commité) : les 177 routes
+Rouge montré une fois en court-circuitant la garde localement (non commité) : les 178 routes
 d'écriture répondent 403 « Accès non autorisé » / 404 / 400 au lieu du message de lecture seule.
 
 **Pourquoi** : un lecteur doit pouvoir changer son mot de passe, finir son accueil et marquer
