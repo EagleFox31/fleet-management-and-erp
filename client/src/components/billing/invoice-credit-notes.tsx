@@ -101,8 +101,10 @@ export function InvoiceCreditNotes({ invoice, role }: { invoice: CreditableInvoi
   const balance = Number.parseFloat(invoice.balance || "0");
   const maxHt = maxCreditNoteHtOf(balance, invoice.vatRate);
 
-  const parsedHt = Number(amountHt.trim().replace(",", "."));
-  const amountValid = /^\d{1,13}([.,]\d{1,2})?$/.test(amountHt.trim()) && parsedHt > 0;
+  // Espaces de milliers acceptés (« 1 000 ») : retirés avant le contrôle de format du serveur.
+  const normalizedHt = amountHt.replace(/[\s  ]/g, "").replace(",", ".");
+  const parsedHt = Number(normalizedHt);
+  const amountValid = /^\d{1,13}(\.\d{1,2})?$/.test(normalizedHt) && parsedHt > 0;
   const preview = amountValid ? creditNoteAmounts(parsedHt, invoice.vatRate) : null;
   const overBalance = preview !== null && preview.ttcCents > Math.round(balance * 100);
   const reasonLength = reason.trim().length;
@@ -133,7 +135,9 @@ export function InvoiceCreditNotes({ invoice, role }: { invoice: CreditableInvoi
         description: `${result.creditNote.creditNoteNumber} : solde restant ${formatPrice(result.newBalance)}.`,
       });
     },
-    onError: (error: Error) => {
+    onError: (error: Error, vars) => {
+      // Réponse perdue alors que l'avoir est peut-être créé : relire sans attendre la trame.
+      invalidateAfterCreditNote(vars.invoiceId);
       toast({
         title: "Avoir non émis",
         description: userMessageOf(error, "L'avoir n'a pas pu être émis."),
@@ -294,9 +298,9 @@ export function InvoiceCreditNotes({ invoice, role }: { invoice: CreditableInvoi
             </Button>
             <Button
               onClick={() =>
-                submit({ invoiceId: invoice.id, amountHt: amountHt.trim().replace(",", "."), reason: reason.trim(), requestKey })
+                submit({ invoiceId: invoice.id, amountHt: normalizedHt, reason: reason.trim(), requestKey })
               }
-              disabled={!amountValid || overBalance || !reasonValid || mutation.isPending}
+              disabled={!amountValid || overBalance || !reasonValid || blocker !== null || mutation.isPending}
               data-testid="button-confirm-credit-note"
             >
               {mutation.isPending ? "Émission…" : "Émettre l'avoir"}
