@@ -1,4 +1,5 @@
 import { vehiclesApi } from "@/lib/api-calls";
+import { fetchAllVehicles } from "@/lib/fetch-all-pages";
 
 export interface Vehicle {
   id: number;
@@ -32,9 +33,8 @@ export interface VehicleStatusSummary {
 
 export const vehiclesService = {
   async getAll(): Promise<Vehicle[]> {
-    const response = await vehiclesApi.getAll();
-    const data = await response.json();
-    return data;
+    // Toutes les pages : sans `limit`, la route ne rend que 10 véhicules, dans `{ vehicles, total }`.
+    return fetchAllVehicles<Vehicle>();
   },
 
   async getById(id: number): Promise<Vehicle> {

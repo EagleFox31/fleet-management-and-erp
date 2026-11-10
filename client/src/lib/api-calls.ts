@@ -65,7 +65,6 @@ export const billingApi = {
 // ============================================
 
 export const vehiclesApi = {
-  getAll: () => apiRequest("GET", "/api/vehicles"),
   getById: (id: number) => apiRequest("GET", `/api/vehicles/${id}`),
   getByRegistration: (registration: string) =>
     apiRequest("GET", `/api/vehicles/registration/${registration}`),
@@ -81,7 +80,6 @@ export const vehiclesApi = {
 // ============================================
 
 export const maintenanceApi = {
-  getWorkOrders: () => apiRequest("GET", "/api/work-orders"),
   getWorkOrderById: (id: number) => apiRequest("GET", `/api/work-orders/${id}`),
   createWorkOrder: (data: any) => apiRequest("POST", "/api/work-orders", data),
   updateWorkOrder: (id: number, data: any) =>
@@ -122,7 +120,6 @@ export const usersApi = {
 // ============================================
 
 export const partsApi = {
-  getAll: () => apiRequest("GET", "/api/parts"),
   getById: (id: number) => apiRequest("GET", `/api/parts/${id}`),
   create: (data: any) => apiRequest("POST", "/api/parts", data),
   update: (id: number, data: any) => apiRequest("PATCH", `/api/parts/${id}`, data),
@@ -136,7 +133,6 @@ export const partsApi = {
 // ============================================
 
 export const tiresApi = {
-  getAll: () => apiRequest("GET", "/api/tires"),
   getById: (id: number) => apiRequest("GET", `/api/tires/${id}`),
   create: (data: any) => apiRequest("POST", "/api/tires", data),
   update: (id: number, data: any) => apiRequest("PATCH", `/api/tires/${id}`, data),
