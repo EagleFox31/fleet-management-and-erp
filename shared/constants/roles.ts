@@ -488,7 +488,7 @@ export const DRIVER_DIRECTORY_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filte
 
 /**
  * Lecteurs des missions : liste et fiche, preuves de livraison, contrôle de lancement, demandes de
- * renouvellement d'une mission, listes d'exploitation (`/api/operations/missions*`). Le personnel sans le
+ * renouvellement d'une mission, listes d'exploitation (`/api/operations/missions*`), `/api/drivers/me`. Le personnel sans le
  * technicien, qui n'a aucun écran mission (adresses, client, chauffeurs). Le chauffeur y reste, cloisonné à ses missions par
  * la garde des routeurs (`router.param("id")`, portée chauffeur de la liste).
  */
