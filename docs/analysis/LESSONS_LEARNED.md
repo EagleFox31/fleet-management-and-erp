@@ -3684,6 +3684,19 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/contract/management-dashboard-kpis.contract.test.ts` (GPS-FE-4) : sur `GET /api/management/dashboard`, véhicule sans mission en `stopped`, aucun véhicule avec coordonnée tant qu'aucune source n'existe. Rouge sur l'ancien service (1 échec), vert après.
 - **Leçon généralisée** : un champ de contrat obligatoire pousse à fabriquer une valeur quand la donnée manque. Toute donnée dont la source n'existe pas encore est optionnelle et accompagnée d'un champ qui dit d'où elle vient (ici `positionSource`) ; un repli « plausible » n'est jamais acceptable dans une réponse que lit la direction.
 
+## 2026-11-10 — APK FleetOS Tech : elle appelait `https://localhost/api` sans le signaler
+
+- **Contexte** : l'APK construite par `build-android-apk.yml` embarquait le bundle client (`dist/public`) servi par Capacitor sur `https://localhost`. Le client appelle l'API en chemin relatif (`fetch("/api…")`, `/ws`) : tous les appels partaient vers `https://localhost/api`, sur le téléphone lui-même. Le build était vert, l'APK s'installait, aucune connexion n'aboutissait. Rien ne le disait.
+- **Cause racine** : l'origine du serveur n'était une donnée ni du build ni de la config Capacitor. Le workflow ne vérifiait que la compilation, jamais qu'une APK installée joint un serveur.
+- **Classification** : livraison, artefact vert mais inutilisable (faux succès CI). Préexistant.
+- **Résolution** (#664) :
+  - `server.url` = origine servie, lue par `capacitor.config.ts` dans `CAP_SERVER_URL` (variable de dépôt `FLEETOS_APP_URL`), validée par `resolveNativeServer` (`shared/native-shell.ts`) : origine seule, http(s), sans identifiants.
+  - Le workflow avertit si la variable manque, refuse un keystore sans origine, ne signe qu'une origine `https`, et affiche l'origine réellement embarquée.
+  - Page hors ligne embarquée (`errorPath`) au lieu d'un écran blanc.
+- **Prévention vérifiable** :
+  - Job `smoke` : APK debug lancée sur émulateur contre un serveur témoin ; bridge, `/api`, cookie, `/ws`, service worker, IndexedDB, relance serveur coupé et page hors ligne vérifiés.
+  - `tests/unit/shared/native-shell.test.ts` : validation de l'origine, verrous de `capacitor.config.ts` (`cleartext: false` en https, aucun `allowNavigation`), manifeste sans trafic en clair, signature https seulement, keystore effacé, géolocalisation au premier plan seulement.
+- **Leçon généralisée** : un artefact qui parle à un serveur se prouve par un test qui l'exécute contre un serveur, pas par sa compilation. Et une preuve dans un environnement non sécurisé (`http://10.0.2.2`) peut masquer des API réservées aux contextes sécurisés (`navigator.serviceWorker`) : le banc doit avoir le même statut de sécurité que la prod (ici `localhost` par `adb reverse`).
 ## 2026-11-10 — Écriture déclenchable en GET avec un cookie SameSite=None (GPS V1 API, #660)
 
 - **Contexte** : le lot API des positions téléphone exposait `GET /api/driver/positions?lat=&lon=&timestamp=` (format OsmAnd) qui déposait une position, à côté du POST. L'audit sécurité de #660 l'a relevé avant tout allumage du drapeau `gps`.
