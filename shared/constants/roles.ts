@@ -96,6 +96,16 @@ export const PROCUREMENT_ROLES = ["admin", "secretary", "logistics", "warehouse"
 export type ProcurementRole = (typeof PROCUREMENT_ROLES)[number];
 
 /**
+ * Commandes liées aux pièces atelier (regroupement des demandes compris) : la logistique en est
+ * exclue, elle ne gère que les commandes hors pièces. Source unique du serveur et des écrans.
+ */
+export const PURCHASE_ORDER_PARTS_SCOPE_ROLES = ["admin", "warehouse", "secretary"] as const;
+
+export function canManagePartsPurchaseOrders(role: string | null | undefined): boolean {
+  return (PURCHASE_ORDER_PARTS_SCOPE_ROLES as readonly string[]).includes(role ?? "");
+}
+
+/**
  * Consultation des fournisseurs : les profils d'approvisionnement, plus le chef
  * d'atelier qui lit les fiches sans rien écrire (création, modification,
  * évaluation et désactivation restent à PROCUREMENT_ROLES).

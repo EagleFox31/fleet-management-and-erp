@@ -24,13 +24,13 @@ const SCREENS: Array<{ path: string; queryKeys: string[]; shows: RegExp[] }> = [
   },
   {
     path: "client/src/pages/inventory/requests.tsx",
-    queryKeys: ['queryKey: ["/api/part-requirements"]'],
-    shows: [/data-testid="requests-error"/, /UNAVAILABLE/],
+    queryKeys: ['queryKey: ["/api/part-requirements"]', '"/api/work-orders/awaiting-parts"'],
+    shows: [/data-testid="requests-error"/, /UNAVAILABLE/, /awaitingPartsView\.kind === "error" && \(\s*<InlineQueryError data-testid="awaiting-parts-error"/],
   },
   {
     path: "client/src/pages/inventory/index.tsx",
-    queryKeys: ['queryKey: ["/api/part-requirements"]', '"/api/parts/stock-movements"'],
-    shows: [/UNAVAILABLE/],
+    queryKeys: ['queryKey: ["/api/part-requirements"]', '"/api/parts/stock-movements"', '"/api/parts/low-on-stock"'],
+    shows: [/UNAVAILABLE/, /data-testid="kpi-low-stock-value">\{lowStockFailed \? UNAVAILABLE : lowStockCount\}/],
   },
   {
     path: "client/src/pages/warehouse/dashboard.tsx",
@@ -49,21 +49,41 @@ const SCREENS: Array<{ path: string; queryKeys: string[]; shows: RegExp[] }> = [
   },
   {
     path: "client/src/pages/procurement/orders/new.tsx",
-    queryKeys: ['queryKey: ["/api/part-requirements"]'],
-    shows: [/data-testid="order-requirements-error"/],
+    queryKeys: ['queryKey: ["/api/part-requirements"]', '"/api/purchase-orders/group-suggestions"', '"/api/parts/low-on-stock"'],
+    shows: [/data-testid="order-requirements-error"/, /data-testid="order-suggestions-error"/],
   },
   {
     path: "client/src/components/inventory/part-table.tsx",
-    queryKeys: ["`/api/part-requirements/by-part/", '"/api/part-requirements/active-by-part"'],
-    shows: [/data-testid="part-requirements-error"/, /data-testid="active-requirements-error"/, /if \(activeRequirementsFailed\) \{\s*return <span[^>]*>\{UNAVAILABLE\}/],
+    queryKeys: ["`/api/part-requirements/by-part/", '"/api/part-requirements/active-by-part"', '"/api/parts",'],
+    shows: [/data-testid="parts-error"/, /data-testid="part-requirements-error"/, /data-testid="active-requirements-error"/, /if \(activeRequirementsFailed\) \{\s*return <span[^>]*>\{UNAVAILABLE\}/],
   },
   {
     path: "client/src/pages/inventory/[id].tsx",
-    queryKeys: ["`/api/parts/${partId}/stock-history`"],
+    queryKeys: ["`/api/parts/${partId}/stock-history`", "`/api/parts/${partId}/usage-history`", "`/api/parts/${partId}/work-orders`"],
     shows: [
+      /value: usageFailed \? UNAVAILABLE : `\$\{consumptionRate/,
+      /value: usageFailed \? UNAVAILABLE : daysRemaining > 365/,
+      /usageView\.kind === "error" \? \(\s*<InlineQueryError\s*data-testid="part-usage-error"/,
+      /workOrdersView\.kind === "error" \? workOrdersError\("part-overview-work-orders-error"\) : workOrders\.length === 0/,
+      /workOrdersView\.kind === "error" \? workOrdersError\("part-work-orders-error"\) : workOrders\.length === 0/,
       /stockHistoryView\.kind === "error" \? \(\s*stockHistoryError\("stock-history-recent-error"\)\s*\) : stockHistory\.length === 0/,
       /stockHistoryView\.kind === "error" \? \(\s*stockHistoryError\("stock-history-error"\)\s*\) : stockHistory\.length === 0/,
     ],
+  },
+  {
+    path: "client/src/pages/reports/index.tsx",
+    queryKeys: ['"/api/parts/statistics"'],
+    shows: [/value: lowStockFailed \? UNAVAILABLE : lowStockCount/],
+  },
+  {
+    path: "client/src/pages/procurement/orders/index.tsx",
+    queryKeys: ['"/api/purchase-orders", { status', '"/api/purchase-orders/statistics"'],
+    shows: [/data-testid="orders-error"/, /data-testid="orders-stats-error"/, /\{!ordersFailed && \(\s*<span[^>]*data-testid="orders-count"/],
+  },
+  {
+    path: "client/src/pages/procurement/orders/group.tsx",
+    queryKeys: ['"/api/purchase-orders/group-suggestions"'],
+    shows: [/data-testid="group-suggestions-error"/],
   },
   {
     path: "client/src/pages/maintenance/work-orders/[id].tsx",
@@ -348,8 +368,8 @@ describe("factures : jamais 0 ni vide sur une lecture en échec", () => {
   it("procurement/invoices/[id] : règlements illisibles, pas de bouton de paiement ni de montant", () => {
     const src = read("client/src/pages/procurement/invoices/[id].tsx");
     expect(src).toMatch(/const settlementsFailed = settlementsData === undefined && !!settlementsError/);
-    expect(src).toMatch(/canPay && !settlementsFailed && remainingToRecord > 0\.01/);
-    expect(src).toMatch(/canPay && !settlementsFailed && hasRecordedSettlement/);
+    expect(src).toMatch(/canPay && settlementsData !== undefined && !settlementsFailed && remainingToRecord > 0\.01/);
+    expect(src).toMatch(/canPay && settlementsData !== undefined && !settlementsFailed && hasRecordedSettlement/);
     expect(src).toMatch(/settlementsFailed \? UNAVAILABLE : formatCurrency\(reconciledAmount\)/);
     expect(src).toMatch(/settlementsFailed \? UNAVAILABLE : formatCurrency\(pendingReconciliationAmount\)/);
     expect(src).toMatch(/data-testid="settlements-load-error"/);

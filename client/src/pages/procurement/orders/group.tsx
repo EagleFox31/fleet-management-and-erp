@@ -2,6 +2,8 @@ import { userMessageOf } from "@/lib/api-error";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
+import { useAuth } from "@/hooks/useAuth";
+import { canManagePartsPurchaseOrders } from "@shared/constants/roles";
 import { TrendingUp, Package, CheckCircle, AlertTriangle, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +14,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatPrice } from "@/lib/utils";
+import { listQueryView, readyData } from "@/lib/query-view";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 
 interface GroupSuggestion {
   supplierId: number;
@@ -53,9 +57,19 @@ export default function GroupPurchaseOrdersPage() {
   const [selectedGroup, setSelectedGroup] = useState<number | null>(null);
 
   // Charger les suggestions de regroupement
-  const { data: suggestions = [], isLoading } = useQuery<GroupSuggestion[]>({
+  // Regroupement = commandes de pièces atelier : la logistique (hors périmètre, 403 serveur)
+  // reçoit une explication, pas un encart d'erreur permanent.
+  const { user } = useAuth();
+  const canGroup = canManagePartsPurchaseOrders(user?.role);
+  const suggestionsQuery = useQuery<GroupSuggestion[]>({
     queryKey: ["/api/purchase-orders/group-suggestions", { minRequirements, maxDaysOld, urgencyThreshold }],
+    enabled: canGroup,
   });
+  // Échec sans données : message et « Réessayer », jamais « Aucune suggestion » ni « (0) ».
+  const suggestionsView = listQueryView<GroupSuggestion>(suggestionsQuery);
+  const suggestions = readyData(suggestionsView, [] as GroupSuggestion[]);
+  const suggestionsFailed = suggestionsView.kind === "error";
+  const isLoading = suggestionsQuery.isLoading;
 
   // Charger l'optimisation de timing pour le groupe sélectionné
   const { data: optimization } = useQuery<OptimizationResult>({
@@ -206,11 +220,30 @@ export default function GroupPurchaseOrdersPage() {
       {/* Suggestions de regroupement */}
       <div className="space-y-4">
         <h2 className="text-xl font-semibold">
-          Suggestions de Commandes Groupées ({suggestions.length})
+          Suggestions de Commandes Groupées{suggestionsFailed || !canGroup ? "" : ` (${suggestions.length})`}
         </h2>
 
-        {isLoading ? (
+        {!canGroup ? (
+          <Card data-testid="group-out-of-scope">
+            <CardContent className="py-12">
+              <div className="text-center text-gray-500">
+                <Package className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                <p>Le regroupement concerne les commandes de pièces atelier.</p>
+                <p className="text-sm mt-1">Il est géré par le magasin et le secrétariat.</p>
+              </div>
+            </CardContent>
+          </Card>
+        ) : isLoading ? (
           <div className="text-center py-12">Chargement des suggestions...</div>
+        ) : suggestionsView.kind === "error" ? (
+          <div data-testid="group-suggestions-error">
+            <InlineQueryError
+              error={suggestionsView.error}
+              fallback="Les suggestions de regroupement sont momentanément indisponibles."
+              onRetry={() => void suggestionsQuery.refetch()}
+              isRetrying={suggestionsView.isRetrying}
+            />
+          </div>
         ) : suggestions.length === 0 ? (
           <Card>
             <CardContent className="py-12">

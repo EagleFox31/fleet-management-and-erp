@@ -770,8 +770,8 @@ export default function FuelPage() {
             {!canManageFuelCard && (
               <KpiTile
                 label="Véhicules suivis"
-                value={vehiclesCovered}
-                subValue="Sur la période affichée"
+                value={fuelRecordsFailed ? UNAVAILABLE : vehiclesCovered}
+                subValue={fuelRecordsFailed ? fuelRecordsFailedText : "Sur la période affichée"}
                 icon={<CarFront className="h-4 w-4" />}
                 iconWrapperClassName="bg-indigo-50 text-indigo-600"
               />
