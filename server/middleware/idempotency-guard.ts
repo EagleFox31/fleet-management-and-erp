@@ -102,7 +102,8 @@ export function idempotencyGuard(
       return res.status(outcome.status).json(outcome.body);
     }
     if (outcome.kind === "in_progress") {
-      return next(new AppError(409, route.inProgressMessage ?? "Cette opération est déjà en cours de traitement. Réessayez dans un instant."));
+      const message = route.inProgressMessage ?? "Cette opération est déjà en cours de traitement. Réessayez dans un instant.";
+      return next(new AppError(409, message, { code: "IDEMPOTENCY_IN_PROGRESS" }));
     }
     if (outcome.kind === "mismatch") {
       return next(new AppError(422, "Cette clé d'idempotence a déjà servi pour une autre opération."));

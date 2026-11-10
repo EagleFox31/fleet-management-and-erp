@@ -44,6 +44,8 @@ export const FEATURE_FLAGS = {
   "maintenance-report": { level: "should", defaultEnabled: false, label: "Rapport de maintenance" },
   "excel-import": { level: "should", defaultEnabled: false, label: "Import Excel" },
   "technician-offline": { level: "should", defaultEnabled: false, label: "Saisie hors ligne du technicien" },
+  // Appli chauffeur hors ligne (V5b). Exige `offline-writes` : sans lui, aucun effet.
+  "driver-offline": { level: "should", defaultEnabled: false, label: "Saisie hors ligne du chauffeur" },
   // Protection serveur contre les doublons des écritures rejouées (lot #10b), indépendante du rôle.
   // Un drapeau d'écran hors ligne (technician-offline, driver-offline) exige celui-ci.
   "offline-writes": { level: "should", defaultEnabled: false, label: "Écritures rejouables sans doublon" },
