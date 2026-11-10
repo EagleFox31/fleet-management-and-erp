@@ -18,15 +18,13 @@ import { uniqueTestToken } from "../support/ids";
  * Remorque attelée à une affectation (`assignments.trailer_id`) :
  *  - type remorque / semi_remorque vérifié côté serveur (400 lisible), jamais le camion lui-même ;
  *  - une remorque sur un seul attelage actif (409 lisible, index partiel `uq_assignments_trailer_active`) ;
- *  - le comptable n'écrit pas (403) ;
+ *  - le comptable et le lecteur n'écrivent pas (403) ;
  *  - la lecture de mission porte `assignment.trailer` ; l'événement `mission_updated` porte `trailerId` ;
  *  - O1 : la remorque de l'affectation active préremplit `trailerVehicleId`, sans écraser une saisie.
  */
 process.env.FEATURE_FLAGS = "operations-tracking=on";
 
-// Le lecteur (`viewer`, #632) n'existe pas encore sur cette branche : sa garde globale refuse déjà toute écriture
-// (contrat `viewer-read-only`, qui énumère chaque route d'écriture, dont celle-ci).
-const ACTORS = { admin: "admin", logistics: "logistics", accountant: "accountant" } as const;
+const ACTORS = { admin: "admin", logistics: "logistics", accountant: "accountant", viewer: "viewer" } as const;
 type Actor = keyof typeof ACTORS;
 
 const ids = createIdBag();
@@ -64,6 +62,14 @@ async function mission(status = "planned") {
 
 const add = (actor: Actor, missionId: number, body: unknown) => session.call("POST", `/api/missions/${missionId}/assignments`, { actor, body });
 const rowsOf = async (missionId: number) => db.select().from(assignments).where(eq(assignments.missionId, missionId));
+const create = async (actor: Actor, assignment: unknown) => {
+  const res = await session.call("POST", "/api/missions", {
+    actor,
+    body: { orderNumber: uniqueTestToken("TRL"), missionType: "delivery", pickupAddress: "TEST A", deliveryAddress: "TEST B", status: "planned", assignment },
+  });
+  if (res.status === 201) missionIds.push(res.body.id);
+  return res;
+};
 
 beforeAll(async () => {
   session = await startContractActors<Actor>(ACTORS, ids.userIds);
@@ -163,11 +169,33 @@ describe("remorque d'affectation", { timeout: 180000 }, () => {
     expect((await rowsOf(missionId)).map((r) => r.trailerId)).toEqual([null]);
   });
 
-  it.each(["accountant"] as const)("%s : 403, rien d'écrit", async (actor) => {
+  it.each(["accountant", "viewer"] as const)("%s : 403, rien d'écrit", async (actor) => {
     const missionId = await mission();
     const res = await add(actor, missionId, { driverId: await driver(), vehicleId: await vehicle(), trailerId: await trailer() });
     expect(apiErrorProblems(res.status, res.body, 403, undefined, res.headers.get("x-request-id"))).toEqual([]);
     expect(await rowsOf(missionId)).toHaveLength(0);
+  });
+
+  it("création de mission avec remorque : 201, l'affectation porte la remorque", async () => {
+    const trailerId = await trailer();
+    const res = await create("logistics", { vehicleId: await vehicle(), driverId: await driver(), trailerId });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect((await rowsOf(res.body.id))[0]).toMatchObject({ trailerId });
+  });
+
+  it.each([["abc"], [1.5], [2147483648], [true]])("création de mission, trailerId %j : 400, jamais 500", async (trailerId) => {
+    const res = await create("logistics", { vehicleId: await vehicle(), driverId: await driver(), trailerId });
+    expect(res.status, JSON.stringify(res.body)).toBe(400);
+  });
+
+  it("création de mission et ajout d'affectation simultanés sur la même remorque : un 201, un 409, jamais d'interblocage", async () => {
+    const [truck, trailerId, existing] = [await vehicle(), await trailer(), await mission()];
+    const [d1, d2] = [await driver(), await driver()];
+    const results = await Promise.all([
+      create("admin", { vehicleId: truck, driverId: d1, trailerId }),
+      add("logistics", existing, { vehicleId: truck, driverId: d2, trailerId }),
+    ]);
+    expect(results.map((r) => r.status).sort(), JSON.stringify(results.map((r) => r.body))).toEqual([201, 409]);
   });
 
   it("O1 : la remorque de l'affectation active préremplit le suivi, sans écraser une saisie", async () => {

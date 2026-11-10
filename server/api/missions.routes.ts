@@ -2051,6 +2051,9 @@ router.get("/:id/launch-readiness", async (req, res, next) => {
  * puis avance par PUT /:id/status. Le coût réel et les budgets (`workflowData.budgetPlan`) se
  * saisissent ensuite par PATCH /:id : Zod les retire du corps (relecture de #129, lot 2).
  */
+/** Identifiant d'une affectation : nombre ou chaîne de chiffres ; un booléen n'est pas un identifiant (true ≠ véhicule 1). */
+const assignmentIdSchema = z.union([z.number(), z.string()]).pipe(idSchema);
+
 const createMissionSchema = insertMissionSchema
   .omit({
     status: true,
@@ -2069,6 +2072,15 @@ const createMissionSchema = insertMissionSchema
     // O3 lot 3 : prix convenu en XAF entier ; le tarif d'origine n'a de sens qu'avec un prix.
     agreedPrice: z.number().int().min(0).max(999_999_999_999_999).nullable().optional().transform((v) => (v == null ? null : String(v))),
     tariffGridId: idSchema.nullable().optional(),
+    // Objet imbriqué déclaré : le handler ne relit jamais req.body après safeParse.
+    assignment: z
+      .object({
+        vehicleId: assignmentIdSchema.nullable().optional(),
+        driverId: assignmentIdSchema.nullable().optional(),
+        trailerId: assignmentIdSchema.nullable().optional(),
+      })
+      .nullable()
+      .optional(),
   })
   .refine((m) => m.tariffGridId == null || m.agreedPrice != null, {
     message: "Un tarif d'origine suppose un prix convenu.",
@@ -2098,7 +2110,7 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
         errors: parsed.error.issues.map((issue) => ({ field: issue.path.join("."), message: issue.message })),
       });
     }
-    const validatedData = parsed.data;
+    const { assignment: assignmentInput, ...validatedData } = parsed.data;
 
     if (validatedData.tariffGridId != null) {
       const [tariff] = await db
@@ -2127,19 +2139,16 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
       }
     }
 
-    const hasAssignment =
-      missionData.assignment &&
-      missionData.assignment.vehicleId &&
-      missionData.assignment.driverId;
+    const hasAssignment = Boolean(assignmentInput?.vehicleId && assignmentInput?.driverId);
 
     let assignmentVehicleId: number | null = null;
     let assignmentDriverId: number | null = null;
     let assignmentTrailerId: number | null = null;
 
     if (hasAssignment) {
-      assignmentVehicleId = Number(missionData.assignment.vehicleId);
-      assignmentDriverId = Number(missionData.assignment.driverId);
-      assignmentTrailerId = missionData.assignment.trailerId ? Number(missionData.assignment.trailerId) : null;
+      assignmentVehicleId = assignmentInput!.vehicleId!;
+      assignmentDriverId = assignmentInput!.driverId!;
+      assignmentTrailerId = assignmentInput!.trailerId ?? null;
 
       if (!Number.isInteger(assignmentVehicleId) || !Number.isInteger(assignmentDriverId)) {
         return res.status(400).json({
@@ -2239,10 +2248,8 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
     // celle qui reçoit son affectation après coup (PATCH, POST /:id/assignments). Un brouillon reste brouillon.
     const withAssignment = assignmentVehicleId !== null && assignmentDriverId !== null;
     const newMission = await db.transaction(async (tx) => {
-      if (withAssignment && assignmentTrailerId) {
-        await assertTrailerAssignable(tx, { trailerId: assignmentTrailerId, vehicleId: assignmentVehicleId as number });
-      }
       if (withAssignment) {
+        // Ordre des verrous identique sur les trois routes : camion (1), chauffeur (2), puis remorque (3).
         await lockPlanningResources(tx, assignmentVehicleId!, assignmentDriverId!);
         const clash = await findPlanningClash(tx, {
           missionId: null,
@@ -2252,6 +2259,9 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
           driverId: assignmentDriverId!,
         });
         if (clash) throw new AppError(409, planningClashMessage(clash));
+        if (assignmentTrailerId) {
+          await assertTrailerAssignable(tx, { trailerId: assignmentTrailerId, vehicleId: assignmentVehicleId! });
+        }
       }
       const [created] = await tx
         .insert(missions)
