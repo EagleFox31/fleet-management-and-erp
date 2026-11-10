@@ -162,7 +162,7 @@ export const REALTIME_EVENTS = {
   } as EventDefinition<{ id: number; invoiceId: number }>,
   vehicle_position_updated: {
     scope: { type: "roles", roles: GPS_VIEW_ROLES },
-    invalidates: ["/api/vehicle-positions"],
+    invalidates: ["/api/vehicle-positions", "/api/missions/:id/track"],
     // `missionId` (optionnel, source téléphone) : l'écran de trace invalide /api/missions/<missionId>/track.
   } as EventDefinition<{ vehicleId: number; missionId?: number | null }>,
   // Véhicule retiré de la flotte (physiquement ou en douceur) ou remis : listes, fiche, plans de

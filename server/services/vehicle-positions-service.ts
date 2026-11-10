@@ -34,7 +34,7 @@ export type IngestResult = {
 };
 
 /** Statuts de mission pendant lesquels un relevé est recevable (le hors ligne arrive après la livraison). */
-const RECORDABLE_MISSION_STATUSES = ["in_progress", "delivered", "completed"] as const;
+const RECORDABLE_MISSION_STATUSES = ["in_progress", "delivered", "completed", "cancelled"] as const;
 
 type MissionRoute = {
   missionId: number;
@@ -53,7 +53,7 @@ async function routeOfDriverMission(actor: PositionActor, missionId: number): Pr
   if (actor.role !== "driver") throw new AppError(403, "Accès refusé : réservé au chauffeur de la mission.");
   const driverIds = await driverScopeOf(actor);
   if (!driverIds || driverIds.length === 0) throw new AppError(403, OUT_OF_DRIVER_SCOPE_MESSAGE);
-  const [row] = await db
+  const [live] = await db
     .select({
       vehicleId: assignments.vehicleId,
       driverId: assignments.driverId,
@@ -66,6 +66,33 @@ async function routeOfDriverMission(actor: PositionActor, missionId: number): Pr
     .where(and(eq(assignments.missionId, missionId), driverLiveAssignmentFilter(driverIds)))
     .orderBy(desc(assignments.startedAt), desc(assignments.id))
     .limit(1);
+  let row = live;
+  if (!row) {
+    // Mission annulée en route : l'annulation passe les affectations à « cancelled », donc hors périmètre
+    // vivant. Les points relevés avant l'annulation (+ marge, plan §6) restent recevables : le trajet a eu lieu.
+    // Un chauffeur retiré d'une mission qui continue (affectation annulée seule) reste en 403.
+    const [cancelled] = await db
+      .select({
+        vehicleId: assignments.vehicleId,
+        driverId: assignments.driverId,
+        startedAt: assignments.startedAt,
+        endedAt: missions.cancelledAt,
+        missionStatus: missions.status,
+      })
+      .from(assignments)
+      .innerJoin(missions, eq(missions.id, assignments.missionId))
+      .where(and(
+        eq(assignments.missionId, missionId),
+        inArray(assignments.driverId, driverIds),
+        eq(assignments.status, "cancelled"),
+        eq(missions.status, "cancelled"),
+        isNotNull(missions.cancelledAt),
+        isNotNull(assignments.startedAt),
+      ))
+      .orderBy(desc(assignments.startedAt), desc(assignments.id))
+      .limit(1);
+    row = cancelled;
+  }
   if (!row) throw new AppError(403, OUT_OF_DRIVER_SCOPE_MESSAGE);
   if (!(RECORDABLE_MISSION_STATUSES as readonly string[]).includes(row.missionStatus) || !row.startedAt) {
     throw new AppError(409, "La mission n'est pas en route : position non enregistrée.");
@@ -131,12 +158,28 @@ export async function ingestDriverPositions(
   const suspects = suspectPointIds(previous ?? null, accepted);
 
   // Plafond par chauffeur et par mission : un compte (ou un téléphone qui boucle) ne remplit pas la table.
-  const [{ n }] = await db
-    .select({ n: sql<number>`count(*)::int` })
+  // Ne compte que les points nouveaux : doublons du paquet écartés, puis points déjà en base. Un rejeu
+  // près du plafond répond « doublons », pas 429.
+  const batch = new Map<string, GpsPoint>();
+  for (const p of accepted) if (!batch.has(p.clientPointId)) batch.set(p.clientPointId, p);
+  const known = await db
+    .select({ id: vehiclePositions.clientPointId })
     .from(vehiclePositions)
-    .where(and(eq(vehiclePositions.missionId, missionId), eq(vehiclePositions.driverId, route.driverId)));
-  if (n + accepted.length > GPS_MISSION_POINTS_CAP) {
-    throw new AppError(429, "Trop de positions enregistrées pour cette mission. Contactez la logistique.");
+    .where(and(
+      eq(vehiclePositions.source, "phone"),
+      eq(vehiclePositions.submittedBy, actor.id),
+      inArray(vehiclePositions.clientPointId, [...batch.keys()]),
+    ));
+  const knownIds = new Set(known.map((r) => r.id));
+  const fresh = [...batch.keys()].filter((id) => !knownIds.has(id)).length;
+  if (fresh > 0) {
+    const [{ n }] = await db
+      .select({ n: sql<number>`count(*)::int` })
+      .from(vehiclePositions)
+      .where(and(eq(vehiclePositions.missionId, missionId), eq(vehiclePositions.driverId, route.driverId)));
+    if (n + fresh > GPS_MISSION_POINTS_CAP) {
+      throw new AppError(429, "Trop de positions enregistrées pour cette mission. Contactez la logistique.");
+    }
   }
 
   const tuples = accepted.map(
@@ -187,27 +230,30 @@ export type LastPositionRow = {
 };
 
 /**
- * Dernière position retenue par véhicule (`DISTINCT ON`, index `(vehicle_id, recorded_at DESC)`).
+ * Dernière position retenue par véhicule (`LATERAL ... LIMIT 1` par véhicule, sur l'index `(vehicle_id, recorded_at DESC)`).
  * Un point marqué suspect n'est pas la « dernière position » : le précédent sert. Véhicule retiré
  * de la flotte (suppression douce) exclu. Sans trace : ni historique ni chauffeur.
  */
 export async function lastVehiclePositions(options: { vehicleId?: number; maxAgeMinutes?: number } = {}): Promise<LastPositionRow[]> {
-  const vehicleFilter = options.vehicleId !== undefined ? sql`AND vp.vehicle_id = ${options.vehicleId}` : sql``;
+  const vehicleFilter = options.vehicleId !== undefined ? sql`AND v.id = ${options.vehicleId}` : sql``;
   const ageFilter = options.maxAgeMinutes !== undefined
     ? sql`AND vp.recorded_at >= now() - (${options.maxAgeMinutes}::int * interval '1 minute')`
     : sql``;
   const res = await db.execute(sql`
-    SELECT * FROM (
-      SELECT DISTINCT ON (vp.vehicle_id)
-        vp.vehicle_id, v.registration_number, v.brand, v.model, vp.mission_id, m.order_number, m.status AS mission_status,
-        vp.source, vp.lat, vp.lng, vp.accuracy_m, vp.speed_kmh, vp.heading, vp.recorded_at,
-        extract(epoch FROM (now() - vp.recorded_at))::int AS age_seconds
-      FROM vehicle_positions vp
-      JOIN vehicles v ON v.id = vp.vehicle_id AND v.deleted_at IS NULL
-      LEFT JOIN missions m ON m.id = vp.mission_id
-      WHERE NOT vp.suspect ${vehicleFilter} ${ageFilter}
-      ORDER BY vp.vehicle_id, vp.recorded_at DESC, vp.id DESC
-    ) last ORDER BY last.recorded_at DESC`);
+    SELECT
+      v.id AS vehicle_id, v.registration_number, v.brand, v.model, vp.mission_id, m.order_number, m.status AS mission_status,
+      vp.source, vp.lat, vp.lng, vp.accuracy_m, vp.speed_kmh, vp.heading, vp.recorded_at,
+      extract(epoch FROM (now() - vp.recorded_at))::int AS age_seconds
+    FROM vehicles v
+    CROSS JOIN LATERAL (
+      SELECT * FROM vehicle_positions vp
+      WHERE vp.vehicle_id = v.id AND NOT vp.suspect ${ageFilter}
+      ORDER BY vp.recorded_at DESC, vp.id DESC
+      LIMIT 1
+    ) vp
+    LEFT JOIN missions m ON m.id = vp.mission_id
+    WHERE v.deleted_at IS NULL ${vehicleFilter}
+    ORDER BY vp.recorded_at DESC`);
   return (res.rows as Array<Record<string, any>>).map((r) => ({
     vehicleId: Number(r.vehicle_id),
     registrationNumber: r.registration_number,
