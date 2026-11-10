@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useFuelPrice } from "@/hooks/use-fuel-price";
 import { localDateKey } from "@/lib/fuel-price-policy";
 import { useRealTimeSync } from "@/hooks/useRealTimeSync";
+import { PodDepositButton } from "@/components/missions/mission-pod-panel";
 import { splitDriverMissions } from "@/lib/driver-missions";
 import { useMemo, useState } from "react";
 import { format, isThisMonth } from "date-fns";
@@ -979,6 +980,15 @@ export default function DriverDashboard() {
                     <Droplets className="h-5 w-5 text-success" />
                     Enregistrer un plein
                   </button>
+                  <PodDepositButton
+                    missionId={activeMission.id}
+                    status={activeMission.status}
+                    role={user?.role}
+                    tile
+                    capture
+                    testId="driver-button-pod-deposit"
+                    className="flex flex-col items-center justify-center gap-2 rounded-2xl bg-card border border-gray-100 shadow-sm p-4 text-center text-sm font-semibold text-gray-700 hover:bg-gray-50 active:scale-95 transition-transform disabled:opacity-60"
+                  />
                   <button
                     onClick={() => setShowProblemSheet(true)}
                     className="flex flex-col items-center justify-center gap-2 rounded-2xl bg-card border border-gray-100 shadow-sm p-4 text-center text-sm font-semibold text-gray-700 hover:bg-gray-50 active:scale-95 transition-transform"

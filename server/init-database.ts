@@ -1345,6 +1345,66 @@ EXCEPTION WHEN lock_not_available THEN
   RAISE WARNING 'contraintes mission_budgets non réconciliées : verrou de table indisponible';
 END $$;`;
 
+/**
+ * Preuve de livraison : fichiers POD d'une mission. Doit rester identique à
+ * server/db/migrations/20261110_mission_pod_files.sql (tests/unit/server/mission-pod-files-schema.test.ts).
+ */
+export const MISSION_POD_FILES_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+CREATE TABLE IF NOT EXISTS mission_pod_files (
+  id serial PRIMARY KEY,
+  mission_id integer NOT NULL
+    CONSTRAINT mission_pod_files_mission_id_missions_id_fk REFERENCES missions(id),
+  path text NOT NULL,
+  original_name text,
+  mime text NOT NULL,
+  size_bytes integer NOT NULL,
+  sha256 text NOT NULL,
+  uploaded_by integer NOT NULL
+    CONSTRAINT mission_pod_files_uploaded_by_users_id_fk REFERENCES users(id),
+  uploaded_at timestamp NOT NULL DEFAULT now(),
+  CONSTRAINT mission_pod_files_mime_check CHECK (mime IN ('application/pdf', 'image/jpeg', 'image/png', 'image/webp')),
+  CONSTRAINT mission_pod_files_size_check CHECK (size_bytes > 0),
+  CONSTRAINT mission_pod_files_mission_sha256_unique UNIQUE (mission_id, sha256)
+);
+
+CREATE INDEX IF NOT EXISTS mission_pod_files_mission_idx ON mission_pod_files (mission_id, uploaded_at);
+
+DO $$
+DECLARE
+  c record;
+BEGIN
+  -- Table déjà créée sans ces contraintes (drizzle-kit push antérieur) : la création conditionnelle est sautée.
+  -- CHECK posé NOT VALID puis validé : une ligne non conforme laisse un WARNING, relu par
+  -- reportCdcConstraintGaps (CDC_RECONCILED_CONSTRAINTS). Noms identiques à shared/schema.ts.
+  FOR c IN SELECT * FROM (VALUES
+    ('mission_pod_files_mime_check', 'CHECK (mime IN (''application/pdf'', ''image/jpeg'', ''image/png'', ''image/webp''))'),
+    ('mission_pod_files_size_check', 'CHECK (size_bytes > 0)')
+  ) AS v(name, def) LOOP
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_pod_files'::regclass AND conname = c.name) THEN
+      EXECUTE format('ALTER TABLE mission_pod_files ADD CONSTRAINT %I %s NOT VALID', c.name, c.def);
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_pod_files'::regclass AND conname = c.name AND NOT convalidated) THEN
+      BEGIN
+        EXECUTE format('ALTER TABLE mission_pod_files VALIDATE CONSTRAINT %I', c.name);
+      EXCEPTION WHEN check_violation THEN
+        RAISE WARNING 'mission_pod_files : lignes hors contrainte %, laissée NOT VALID', c.name;
+      END;
+    END IF;
+  END LOOP;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'mission_pod_files'::regclass
+                 AND conname = 'mission_pod_files_mission_sha256_unique') THEN
+    BEGIN
+      ALTER TABLE mission_pod_files ADD CONSTRAINT mission_pod_files_mission_sha256_unique UNIQUE (mission_id, sha256);
+    EXCEPTION WHEN unique_violation THEN
+      RAISE WARNING 'mission_pod_files : doublons (mission, sha256), contrainte mission_pod_files_mission_sha256_unique non posée';
+    END;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'contraintes mission_pod_files non réconciliées : verrou de table indisponible';
+END $$;`;
+
 // Grille tarifaire (O3) — jumelle de server/db/migrations/20261106_tariff_grid.sql.
 export const TARIFF_GRID_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
 SET LOCAL lock_timeout = '5s';
@@ -1909,6 +1969,10 @@ export const CDC_RECONCILED_CONSTRAINTS: readonly string[] = [
   'tariff_grid_pricing_unit_check',
   'tariff_grid_unit_price_check',
   'tariff_grid_period_check',
+  // Posées par MISSION_POD_FILES_SQL (preuve de livraison).
+  'mission_pod_files_mime_check',
+  'mission_pod_files_size_check',
+  'mission_pod_files_mission_sha256_unique',
 ];
 
 type Queryable = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };
@@ -2488,6 +2552,8 @@ export async function initializeDatabase() {
     await pool.query(MISSION_BUDGET_EXPENSES_SQL);
     // Mission soldée (Q18) — jumelle de server/db/migrations/20261106_mission_budget_settlement.sql.
     await pool.query(MISSION_BUDGET_SETTLEMENT_SQL);
+    // Preuve de livraison — jumelle de server/db/migrations/20261110_mission_pod_files.sql.
+    await pool.query(MISSION_POD_FILES_SQL);
     // Relu après le dernier SQL qui pose une contrainte réconciliée : au premier démarrage, une table
     // pas encore créée serait signalée à tort.
     await reportCdcConstraintGaps(pool);
