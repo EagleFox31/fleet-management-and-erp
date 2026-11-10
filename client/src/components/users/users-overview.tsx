@@ -10,6 +10,7 @@ export type UsersOverviewRole =
   | "technician"
   | "secretary"
   | "accountant"
+  | "viewer"
   | "logistics"
   | "warehouse"
   | "client"

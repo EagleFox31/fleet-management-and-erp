@@ -5,44 +5,8 @@ import { VEHICLE_OPERATION_WRITE_ROLES, ALL_APP_ROLES, STOCK_ISSUER_ROLES, STOCK
 
 const ALL_ROLES = ALL_APP_ROLES;
 
-const ROLE_ALIASES: Record<string, AppRole> = {
-  admin: "admin",
-  administrateur: "admin",
-  workshop_manager: "workshop_manager",
-  gestionnaire_atelier: "workshop_manager",
-  "gestionnaire d'atelier": "workshop_manager",
-  technician: "technician",
-  technicien: "technician",
-  secretary: "secretary",
-  secretaire: "secretary",
-  "secrétaire": "secretary",
-  accountant: "accountant",
-  comptable: "accountant",
-  logistics: "logistics",
-  logisticien: "logistics",
-  warehouse: "warehouse",
-  magasinier: "warehouse",
-  management: "management",
-  direction: "management",
-  directeur: "management",
-  dg: "management",
-  client: "client",
-  user: "user",
-};
-
-export const normalizeRole = (role: string | null | undefined): AppRole => {
-  const normalized = (role || "").trim().toLowerCase();
-  const aliasRole = ROLE_ALIASES[normalized];
-  if (aliasRole) {
-    return aliasRole;
-  }
-
-  if ((ALL_ROLES as readonly string[]).includes(normalized)) {
-    return normalized as AppRole;
-  }
-
-  return "user";
-};
+import { normalizeRole } from "@shared/constants/roles";
+export { normalizeRole };
 
 /**
  * Marque un middleware qui refuse toute requête sans session (401).

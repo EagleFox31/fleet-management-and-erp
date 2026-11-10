@@ -4,3 +4,4 @@
 **Comment** : test unitaire `money-lock-error.test.ts` écrit d'abord : 6 échecs sur 14 (réponse 500 au lieu de 409), puis correctif de `toHttpError`. Migration des DELETE par transformation mécanique de `db.delete(t).where(x)` en `deleteXWhere(x)`.
 **Pourquoi** : les triggers des PR3 et PR4 refuseront UPDATE et DELETE sur un plein validé ou une facture émise. Sans cette PR, tout nettoyage de test échouerait à leur arrivée. Tant que les triggers n'existent pas, le réglage est sans effet.
 **Preuve** : `node node_modules/vitest/vitest.mjs run --project unit tests/unit/server/money-lock-error.test.ts tests/unit/server/money-override-hygiene.test.ts`.
+**Correction (relecture de 0a)** : le décompte réel est d'environ 43 DELETE migrés vers les helpers, plus 2 dans le reset de recette (`scripts/lib/recette-data.ts`), et non 46.

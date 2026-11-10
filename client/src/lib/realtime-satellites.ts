@@ -14,6 +14,7 @@
  * Garde-fou : `tests/unit/client/realtime-satellites.test.ts`.
  */
 import { KPI_QUERY_KEYS, WAREHOUSE_QUERY_KEYS } from "@shared/contracts/realtime-events";
+import { TREASURY_BASE_PATH } from "@shared/contracts/treasury";
 
 /**
  * `byId` : clés d'un seul objet, gabarit à `:vehicleId`, `:registrationNumber` ou `:missionId` rempli depuis la
@@ -113,6 +114,9 @@ export const SATELLITE_GROUPS = {
     ],
     prefixes: ["/api/fuel-records/vehicle/"],
   },
+  /** Trésorerie : soldes des comptes et mouvements, relus quand un fait de carburant ou de budget déplace de l'argent. */
+  // Préfixe seul : les écrans posent leurs clés par gabarit (`${TREASURY_BASE_PATH}/accounts`, mouvements, sous-comptes).
+  treasury: { keys: [], prefixes: [TREASURY_BASE_PATH] },
   /** Chiffre d'affaires (factures client). */
   clientMoney: { keys: [MANAGEMENT_DASHBOARD, "/api/finance/invoices-awaiting-payment", "/api/finance/withholdings"] },
   /** Dettes fournisseurs (factures fournisseur et règlements). */
@@ -163,7 +167,7 @@ export const EVENT_SATELLITES: Record<string, readonly SatelliteGroupName[]> = {
   // Argent
   fuel_card_recharged: ["fuel"],
   fuel_card_consumption_recorded: ["fuel"],
-  fuel_record_changed: ["fuel", "missions"],
+  fuel_record_changed: ["fuel", "missions", "missionBudgets", "treasury"],
   fuel_record_validated: ["fuel"],
   client_invoice_created: ["clientMoney"],
   client_invoice_payment_recorded: ["clientMoney"],

@@ -1,4 +1,5 @@
 import { userMessageOf } from "@/lib/api-error";
+import { isReadOnlyRole } from "@/lib/read-only-role";
 import React, { useMemo, useState } from "react";
 import { canReadDocumentation, canReadInventoryReport, canReadTechnicianReport } from "@shared/constants/roles";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -725,7 +726,7 @@ export default function ReportsIndex() {
       console.error(`Erreur lors de l'export ${exportType}:`, error);
       toast({
         title: "Erreur d'export",
-        description: `Impossible d'exporter les données. Veuillez réessayer.`,
+        description: userMessageOf(error, "Impossible d'exporter les données. Veuillez réessayer."),
         variant: "destructive",
       });
     } finally {
@@ -1200,6 +1201,11 @@ export default function ReportsIndex() {
         </TabsContent>
         
         <TabsContent value="exports" className="space-y-4">
+          {isReadOnlyRole(user) ? (
+            <p className="text-sm text-muted-foreground" data-testid="exports-read-only">
+              Les exports ne sont pas disponibles pour un profil en lecture seule.
+            </p>
+          ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             <ExportCard
               title="Véhicules"
@@ -1363,6 +1369,7 @@ export default function ReportsIndex() {
               />
             )}
           </div>
+          )}
         </TabsContent>
 
         <TabsContent value="documentation" className="space-y-4">

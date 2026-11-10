@@ -7,6 +7,7 @@ import { alerts, fuelRecords, maintenanceSchedules, parts, users, vehicles, work
 import { sql } from "drizzle-orm";
 import { db } from "../db";
 import { AppError } from "../lib/app-error";
+import { withMoneyOverride } from "../lib/money-override";
 import { suppressSideEffects } from "../lib/suppress-side-effects";
 import { isFeatureEnabled } from "../lib/feature-flags";
 import { lockFuelCard, type DbExecutor } from "../lib/fuel-card-lock";
@@ -96,6 +97,8 @@ export async function restoreBackup(data: BackupData): Promise<BackupImportStats
 
     // Nettoyer les tables (sauf utilisateurs pour garder l'admin)
     await tx.delete(alerts);
+    // Le vidage touche des pleins validés : verrou d'argent levé pour cette seule transaction, motif journalisé.
+    await withMoneyOverride(tx, "restauration de sauvegarde");
     await tx.delete(fuelRecords);
     await tx.delete(maintenanceSchedules);
     await tx.delete(workOrders);

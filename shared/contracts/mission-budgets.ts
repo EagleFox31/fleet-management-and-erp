@@ -36,6 +36,14 @@ export const MISSION_BUDGET_STATUS_LABELS: Record<MissionBudgetStatus, string> =
   disbursed: "Décaissé",
 };
 
+/**
+ * Règle unique du budget soldé : `settled_at` posé par le seul chemin de solde (mission-budgets-service).
+ * Lue par le solde, les dépenses, l'annulation d'un plein et les actions de l'écran.
+ */
+export function isMissionBudgetSettled(budget: { settledAt?: Date | string | null }): boolean {
+  return budget.settledAt != null;
+}
+
 /** Mission close : plus de budget à saisir pour elle (409). */
 export const MISSION_STATUSES_WITHOUT_BUDGET = ["completed", "cancelled"] as const;
 

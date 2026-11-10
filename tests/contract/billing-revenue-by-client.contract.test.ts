@@ -17,7 +17,7 @@ import { deleteClientInvoicesWhere } from "../support/money-override";
 const ROLES: Record<TestUserRole, TestUserRole> = {
   admin: "admin", secretary: "secretary", accountant: "accountant", logistics: "logistics", management: "management",
   workshop_manager: "workshop_manager", technician: "technician", warehouse: "warehouse",
-  driver: "driver", client: "client", user: "user",
+  driver: "driver", client: "client", user: "user", viewer: "viewer",
 };
 const ALL = Object.keys(ROLES) as TestUserRole[];
 const READERS = ALL.filter((role) => (CLIENT_BILLING_STATS_ROLES as readonly string[]).includes(role));
