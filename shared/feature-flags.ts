@@ -24,10 +24,10 @@ export const FEATURE_FLAGS = {
 
   "work-order-audit-trail": { level: "should", defaultEnabled: false, label: "Historique d'un ordre de travail" },
   "vehicle-cost-summary": { level: "should", defaultEnabled: false, label: "Coût d'un véhicule" },
-  "tire-movements": { level: "should", defaultEnabled: false, label: "Mouvements de pneus" },
+  "tire-movements": { level: "should", defaultEnabled: true, label: "Mouvements de pneus" },
   "part-requirement-receive": { level: "should", defaultEnabled: false, label: "Réception signée des pièces" },
   "fuel-vouchers": { level: "should", defaultEnabled: false, label: "Validation des bons de carburant" },
-  "fuel-anomalies": { level: "should", defaultEnabled: false, label: "Traitement des anomalies carburant" },
+  "fuel-anomalies": { level: "should", defaultEnabled: true, label: "Traitement des anomalies carburant" },
   "fuel-prices": { level: "should", defaultEnabled: false, label: "Prix du carburant daté" },
   "time-tracking": { level: "should", defaultEnabled: false, label: "Pointage" },
   "operations-tracking": { level: "should", defaultEnabled: false, label: "Suivi des opérations clients" },
