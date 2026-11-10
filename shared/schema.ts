@@ -1501,7 +1501,9 @@ export const assignments = pgTable("assignments", {
   missionId: integer("mission_id").notNull().references(() => missions.id, { onDelete: "cascade" }),
   vehicleId: integer("vehicle_id").references(() => vehicles.id),
   driverId: integer("driver_id").references(() => drivers.id),
-  
+  // Remorque attelée (vehicleType remorque / semi_remorque), vérifiée par server/services/trailer-assignment.ts.
+  trailerId: integer("trailer_id").references(() => vehicles.id, { onDelete: "set null" }),
+
   // Dates affectation
   assignedAt: timestamp("assigned_at").defaultNow().notNull(),
   acceptedAt: timestamp("accepted_at"),
@@ -1516,7 +1518,12 @@ export const assignments = pgTable("assignments", {
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (t) => ({
+  // Une remorque sur un seul attelage actif — jumelle de server/db/migrations/20261110_assignments_trailer.sql.
+  trailerActiveUnique: uniqueIndex("uq_assignments_trailer_active")
+    .on(t.trailerId)
+    .where(sql`${t.trailerId} IS NOT NULL AND ${t.status} IN ('pending', 'accepted', 'in_progress')`),
+}));
 
 // Table missionSteps - Étapes d'une mission (pickup, delivery, rest, refuel)
 export const missionSteps = pgTable("mission_steps", {

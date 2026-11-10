@@ -5,6 +5,7 @@ import { Router } from "express";
 import { db } from "../db";
 import { missions, clients, assignments, drivers, vehicles, vehicleDocuments, alerts, documentRenewalRequests, fuelRecords, tariffGrid } from "@shared/schema";
 import { eq, and, asc, desc, inArray, ne, notInArray, or, ilike, isNull } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { insertMissionSchema, insertAssignmentSchema } from "@shared/schema";
 import { FuelCardService, toFuelCardAppError } from "../services/fuel-card-service";
 import { storage } from "../storage";
@@ -26,6 +27,10 @@ import { MISSION_ID_INVALID_MESSAGE, parseRouteId } from "../lib/route-id";
 import { assertValidDbId } from "../lib/work-order-scope";
 import { assertPlanningStateUnchanged, findPlanningClash, launchRefusalMessage, lockPlanningPairs, lockPlanningResources, planningClashMessage, planningStateKey } from "../services/mission-planning";
 import { ACTIVE_ASSIGNMENT_STATUSES, VOID_ASSIGNMENT_STATUSES, isActiveAssignmentStatus, isVoidAssignmentStatus } from "@shared/constants/assignments";
+import { assertTrailerAssignable, trailerConflictToAppError } from "../services/trailer-assignment";
+
+// Remorque attelée à l'affectation : second alias de vehicles, le premier étant le camion.
+const trailerVehicles = alias(vehicles, "assignment_trailer");
 import { getDriverCpcEligibility } from "@shared/constants/driver-cpc-eligibility";
 import { withAssignmentsCpcVerdict } from "../lib/mission-driver-cpc";
 import { toFieldErrors } from "@shared/errors";
@@ -857,6 +862,13 @@ router.get("/", async (req, res) => {
             status: assignments.status,
             startedAt: assignments.startedAt,
             completedAt: assignments.completedAt,
+            trailerId: assignments.trailerId,
+            trailer: {
+              id: trailerVehicles.id,
+              registrationNumber: trailerVehicles.registrationNumber,
+              brand: trailerVehicles.brand,
+              model: trailerVehicles.model,
+            },
             vehicle: {
               id: vehicles.id,
               registrationNumber: vehicles.registrationNumber,
@@ -876,6 +888,7 @@ router.get("/", async (req, res) => {
           })
           .from(assignments)
           .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
+          .leftJoin(trailerVehicles, eq(assignments.trailerId, trailerVehicles.id))
           .leftJoin(drivers, eq(assignments.driverId, drivers.id))
           .where(eq(assignments.missionId, mission.id))
           .orderBy(asc(assignments.id));
@@ -976,6 +989,13 @@ router.get("/:id", async (req, res) => {
         startedAt: assignments.startedAt,
         completedAt: assignments.completedAt,
         assignedAt: assignments.assignedAt,
+        trailerId: assignments.trailerId,
+        trailer: {
+          id: trailerVehicles.id,
+          registrationNumber: trailerVehicles.registrationNumber,
+          brand: trailerVehicles.brand,
+          model: trailerVehicles.model,
+        },
         vehicle: {
           id: vehicles.id,
           registrationNumber: vehicles.registrationNumber,
@@ -998,6 +1018,7 @@ router.get("/:id", async (req, res) => {
       })
       .from(assignments)
       .leftJoin(vehicles, eq(assignments.vehicleId, vehicles.id))
+      .leftJoin(trailerVehicles, eq(assignments.trailerId, trailerVehicles.id))
       .leftJoin(drivers, eq(assignments.driverId, drivers.id))
       .where(eq(assignments.missionId, missionId))
       .orderBy(asc(assignments.id));
@@ -2113,10 +2134,12 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
 
     let assignmentVehicleId: number | null = null;
     let assignmentDriverId: number | null = null;
+    let assignmentTrailerId: number | null = null;
 
     if (hasAssignment) {
       assignmentVehicleId = Number(missionData.assignment.vehicleId);
       assignmentDriverId = Number(missionData.assignment.driverId);
+      assignmentTrailerId = missionData.assignment.trailerId ? Number(missionData.assignment.trailerId) : null;
 
       if (!Number.isInteger(assignmentVehicleId) || !Number.isInteger(assignmentDriverId)) {
         return res.status(400).json({
@@ -2216,6 +2239,9 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
     // celle qui reçoit son affectation après coup (PATCH, POST /:id/assignments). Un brouillon reste brouillon.
     const withAssignment = assignmentVehicleId !== null && assignmentDriverId !== null;
     const newMission = await db.transaction(async (tx) => {
+      if (withAssignment && assignmentTrailerId) {
+        await assertTrailerAssignable(tx, { trailerId: assignmentTrailerId, vehicleId: assignmentVehicleId as number });
+      }
       if (withAssignment) {
         await lockPlanningResources(tx, assignmentVehicleId!, assignmentDriverId!);
         const clash = await findPlanningClash(tx, {
@@ -2237,12 +2263,13 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
             missionId: created.id,
             vehicleId: assignmentVehicleId,
             driverId: assignmentDriverId,
+            trailerId: assignmentTrailerId,
             status: "pending" as const,
           }),
         );
       }
       return created;
-    });
+    }).catch((error) => { throw trailerConflictToAppError(error); });
 
     await broadcastMissionUpdate("mission_created", newMission as unknown as Record<string, unknown>, {
       hasAssignment: withAssignment,
@@ -2278,6 +2305,7 @@ const updateMissionSchema = z.object({
   assignment: z.object({
     vehicleId: idSchema,
     driverId: idSchema,
+    trailerId: idSchema.optional().nullable(),
   }).optional().nullable(),
 });
 
@@ -2542,6 +2570,10 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
       } else {
         const assignmentPayload = payload.assignment;
         const { vehicleId, driverId } = assignmentPayload;
+        const trailerId: number | null = assignmentPayload.trailerId ? Number(assignmentPayload.trailerId) : null;
+        if (trailerId !== null && (!Number.isInteger(trailerId) || trailerId <= 0)) {
+          return res.status(400).json({ message: "Affectation invalide (remorque)." });
+        }
         if (!Number.isInteger(vehicleId) || vehicleId <= 0 || !Number.isInteger(driverId) || driverId <= 0) {
           return res.status(400).json({ message: "Affectation invalide (véhicule/chauffeur)." });
         }
@@ -2632,11 +2664,13 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
         if (existingAssignment?.id) {
           const current = existingAssignment;
           writeAssignment = async (tx) => {
+            if (trailerId) await assertTrailerAssignable(tx, { trailerId, vehicleId, excludeAssignmentId: current.id });
             await tx
               .update(assignments)
               .set({
                 vehicleId,
                 driverId,
+                trailerId,
                 status: current.status === "in_progress" ? "in_progress" : "pending",
                 updatedAt: new Date(),
               })
@@ -2644,7 +2678,8 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
           };
         } else {
           writeAssignment = async (tx) => {
-            await tx.insert(assignments).values({ missionId, vehicleId, driverId, status: "pending" });
+            if (trailerId) await assertTrailerAssignable(tx, { trailerId, vehicleId });
+            await tx.insert(assignments).values({ missionId, vehicleId, driverId, trailerId, status: "pending" });
           };
         }
 
@@ -2687,7 +2722,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
         .where(eq(missions.id, missionId))
         .returning();
       return row;
-    });
+    }).catch((error) => { throw trailerConflictToAppError(error); });
 
     await broadcastMissionUpdate("mission_updated", updatedMission as unknown as Record<string, unknown>, {
       source: "mission_edit",
@@ -2704,6 +2739,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
 const addAssignmentSchema = z.object({
   vehicleId: idSchema,
   driverId: idSchema,
+  trailerId: idSchema.optional().nullable(),
 });
 
 const editionBlockedMessage = (status: string) => `Mission ${status === "completed" ? "terminée" : "annulée"} : édition bloquée.`;
@@ -2717,6 +2753,7 @@ router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), validateB
     const missionId = parseMissionId(req.params.id);
     assertValidDbId(missionId, "ID mission invalide.");
     const { vehicleId, driverId } = req.body as z.infer<typeof addAssignmentSchema>;
+    const trailerId = (req.body as z.infer<typeof addAssignmentSchema>).trailerId ?? null;
     assertValidDbId(vehicleId, "Affectation invalide (véhicule/chauffeur).");
     assertValidDbId(driverId, "Affectation invalide (véhicule/chauffeur).");
 
@@ -2792,17 +2829,18 @@ router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), validateB
         driverId,
       });
       if (clash) throw new AppError(409, planningClashMessage(clash));
+      if (trailerId) await assertTrailerAssignable(tx, { trailerId, vehicleId });
 
-      const [assignment] = await tx.insert(assignments).values({ missionId, vehicleId, driverId, status: "pending" }).returning();
+      const [assignment] = await tx.insert(assignments).values({ missionId, vehicleId, driverId, trailerId, status: "pending" }).returning();
       const [updatedMission] =
         mission.status === "planned"
           ? await tx.update(missions).set({ status: "assigned", updatedAt: new Date() }).where(eq(missions.id, missionId)).returning()
           : await tx.select().from(missions).where(eq(missions.id, missionId));
       return { assignment, mission: updatedMission };
-    });
+    }).catch((error) => { throw trailerConflictToAppError(error); });
 
     // Après le commit : trame complète au personnel, trame réduite aux chauffeurs affectés (portée nominative).
-    await broadcastMissionUpdate("mission_updated", result.mission as unknown as Record<string, unknown>, { source: "mission_assignment_added", assignmentId: result.assignment.id }, req.requestId);
+    await broadcastMissionUpdate("mission_updated", result.mission as unknown as Record<string, unknown>, { source: "mission_assignment_added", assignmentId: result.assignment.id, trailerId: result.assignment.trailerId }, req.requestId);
     return res.status(201).json(result.assignment);
   } catch (error) {
     next(error);

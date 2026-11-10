@@ -750,6 +750,30 @@ export async function reportVehicleDocumentTypeGaps(client: Queryable, log: Warn
  * server/db/migrations/20261103_drivers_user_id_unique.sql : tests/unit/server/drivers-user-id-unique-schema.test.ts
  * compare les deux. Doublons existants : index non posé, rien supprimé, écart relu par reportDriverUserIdUniqueGaps.
  */
+/**
+ * Remorque d'une affectation (assignments.trailer_id) et unicité « une remorque par attelage actif ». Doit rester
+ * identique à server/db/migrations/20261110_assignments_trailer.sql :
+ * tests/unit/server/assignments-trailer-schema.test.ts compare les deux. Index non posé si des doublons
+ * existent, rien supprimé, écart relu par reportAssignmentsTrailerGaps.
+ */
+export const ASSIGNMENTS_TRAILER_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+ALTER TABLE assignments ADD COLUMN IF NOT EXISTS trailer_id integer REFERENCES vehicles(id) ON DELETE SET NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'uq_assignments_trailer_active') THEN
+    IF EXISTS (SELECT 1 FROM assignments WHERE trailer_id IS NOT NULL AND status IN ('pending', 'accepted', 'in_progress') GROUP BY trailer_id HAVING count(*) > 1) THEN
+      RAISE WARNING 'uq_assignments_trailer_active non posé : remorques attelées à plusieurs affectations actives';
+    ELSE
+      CREATE UNIQUE INDEX uq_assignments_trailer_active ON assignments (trailer_id) WHERE trailer_id IS NOT NULL AND status IN ('pending', 'accepted', 'in_progress');
+    END IF;
+  END IF;
+EXCEPTION WHEN lock_not_available OR unique_violation THEN
+  RAISE WARNING 'uq_assignments_trailer_active non posé : verrou indisponible ou doublon apparu pendant la création';
+END $$;`;
+
 export const DRIVERS_USER_ID_UNIQUE_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
 SET LOCAL lock_timeout = '5s';
 
@@ -991,6 +1015,25 @@ export async function reportDriverUserIdUniqueGaps(client: Queryable, log: WarnL
       : "Index uq_drivers_user_id non posé : verrou de table indisponible, nouvel essai au démarrage suivant.",
   );
   return { missing: true, duplicates };
+}
+
+/**
+ * Relit pg_indexes après ASSIGNMENTS_TRAILER_SQL : si uq_assignments_trailer_active manque, journalise chaque
+ * remorque attelée à plusieurs affectations actives pour que l'exploitation corrige à la main.
+ */
+export async function reportAssignmentsTrailerGaps(client: Queryable, log: WarnLogger = initLog) {
+  const idx = await client.query(
+    `SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'uq_assignments_trailer_active'`,
+  );
+  if (idx.rows.length > 0) return;
+  const dup = await client.query(
+    `SELECT trailer_id, array_agg(id ORDER BY id) AS assignment_ids FROM assignments
+     WHERE trailer_id IS NOT NULL AND status IN ('pending', 'accepted', 'in_progress')
+     GROUP BY trailer_id HAVING count(*) > 1`,
+  );
+  for (const row of dup.rows as Array<{ trailer_id: number; assignment_ids: number[] }>) {
+    log.warn({ trailerId: row.trailer_id, assignmentIds: row.assignment_ids }, "Remorque attelée à plusieurs affectations actives : uq_assignments_trailer_active non posé");
+  }
 }
 
 /**
@@ -2188,6 +2231,9 @@ export async function initializeDatabase() {
     // Un pneu actif par position — jumelle de server/db/migrations/20261107_vehicle_tires_active_position_unique.sql.
     await pool.query(VEHICLE_TIRES_ACTIVE_POSITION_UNIQUE_SQL);
     await reportVehicleTireActivePositionGaps(pool);
+    // Remorque par affectation — jumelle de server/db/migrations/20261110_assignments_trailer.sql.
+    await pool.query(ASSIGNMENTS_TRAILER_SQL);
+    await reportAssignmentsTrailerGaps(pool);
     // Contrôles inopinés QHSE (lot Q1) — jumelle de server/db/migrations/20261105_qhse_inspections.sql.
     await pool.query(QHSE_INSPECTIONS_SQL);
     // Cycle de vie du véhicule — jumelle de server/db/migrations/20261105_vehicle_lifecycle.sql.
