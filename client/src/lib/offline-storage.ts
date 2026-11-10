@@ -1,5 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { clientLogger } from "@/lib/logger";
+import { applyRestoredQueries } from "@/lib/offline-restore";
 import { pendingServerLogout } from "@/lib/pending-logout";
 import {
   DRIVER_READ_PROFILE,
@@ -119,15 +120,6 @@ export async function expireOfflineSession(queryClient: QueryClient, userId: num
 const readFlag = (flag: string): boolean => isFeatureKey(flag) && isOfflineFlagEnabled(flag);
 
 /**
- * À la restauration, les drapeaux ne sont pas encore connus au démarrage hors ligne (la requête des
- * drapeaux ne peut pas aboutir) : tant qu'ils sont inconnus, on relit ce qui a été écrit, et cela
- * n'a été écrit que drapeaux allumés. Une fois connus, ils s'appliquent comme à l'écriture.
- */
-function restoreFlagReader(queryClient: QueryClient): (flag: string) => boolean {
-  return queryClient.getQueryData([FEATURE_FLAGS_PATH]) === undefined ? () => true : readFlag;
-}
-
-/**
  * Persiste dans IndexedDB les seules requêtes de la liste blanche, dans le
  * magasin de l'utilisateur actif.
  */
@@ -163,19 +155,11 @@ export async function restoreQueryClientFromIndexedDB(queryClient: QueryClient):
   const userId = getActiveOfflineUserId();
   if (userId === null) return 0;
   try {
-    const queries = await offlineScope.loadCache(userId, Date.now(), restoreFlagReader(queryClient));
+    const queries = await offlineScope.loadCache(userId, Date.now(), readFlag);
     // L'utilisateur a pu changer pendant la lecture : ne rien appliquer.
     if (getActiveOfflineUserId() !== userId) return 0;
 
-    let restoredCount = 0;
-    for (const item of queries) {
-      if (queryClient.getQueryData(item.queryKey) !== undefined) continue;
-      queryClient.setQueryData(item.queryKey, item.state.data, {
-        updatedAt: typeof item.state.dataUpdatedAt === "number" ? item.state.dataUpdatedAt : undefined,
-      });
-      restoredCount++;
-    }
-    return restoredCount;
+    return applyRestoredQueries(queryClient, queries);
   } catch (err) {
     clientLogger.warn("Échec de restauration du cache IndexedDB", { err });
     return 0;

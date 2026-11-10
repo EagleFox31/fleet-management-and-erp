@@ -1,5 +1,6 @@
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 import {
   createOfflineScope,
@@ -11,6 +12,12 @@ import {
   type CachedQueryLike,
   type OfflineKv,
 } from "@/lib/offline-user-scope";
+import { applyRestoredQueries } from "@/lib/offline-restore";
+import {
+  DRIVER_CACHE_SHAPES,
+  DRIVER_ME_MISSION_SHAPE,
+  shapeKeyPaths,
+} from "@/lib/offline-driver-projection";
 import { formatOfflineStamp, offlineBannerText } from "@/lib/offline-data-banner";
 import { OfflineDataBannerView } from "@/components/offline/offline-data-banner";
 
@@ -53,7 +60,7 @@ describe("lecture hors ligne du chauffeur : sélection", () => {
     ]),
   ];
 
-  it("garde ses missions en cours ou livrées, avec leurs sous-ressources et le solde", () => {
+  it("garde ses missions en cours ou livrées et le prix du litre, rien d'autre (cache <= écran)", () => {
     const picked = selectPersistableQueries(
       [
         ...base,
@@ -61,43 +68,18 @@ describe("lecture hors ligne du chauffeur : sélection", () => {
         query(["/api/missions/1/fuel-records"], { missionId: 1, missionStatus: "in_progress", records: [] }),
         query(["/api/missions/1/launch-readiness"], { ready: true }),
         query(["/api/missions/2/pod-files"], { files: [] }),
-        query(["/api/fuel-card/balance"], { balance: 100 }),
+        query(["/api/fuel-card/balance"], { balance: 100, averagePricePerLiter: 700 }),
       ],
       flagsOn,
     );
-    expect(keysOf(picked)).toEqual([
-      ME,
-      "/api/missions/1",
-      "/api/missions/1/fuel-records",
-      "/api/missions/1/launch-readiness",
-      "/api/missions/2/pod-files",
-      "/api/fuel-card/balance",
-    ]);
-  });
-
-  it("refuse la mission d'un autre chauffeur, même avec un identifiant plausible", () => {
-    const picked = selectPersistableQueries(
-      [...base, detail(1, "in_progress", 99), detail(9, "in_progress"), query(["/api/missions/9/pod-files"], { files: [] })],
-      flagsOn,
-    );
-    expect(keysOf(picked)).toEqual([ME]);
-  });
-
-  it("refuse une mission hors in_progress/delivered, dans /me comme dans le détail", () => {
-    const picked = selectPersistableQueries(
-      [
-        ...base,
-        detail(3, "assigned"),
-        detail(4, "completed"),
-        detail(1, "completed"),
-        query(["/api/missions/2/fuel-records"], { missionId: 2, missionStatus: "completed", records: [] }),
-        query(["/api/missions/3/launch-readiness"], { ready: false }),
-      ],
-      flagsOn,
-    );
-    expect(keysOf(picked)).toEqual([ME]);
+    expect(keysOf(picked)).toEqual([ME, "/api/fuel-card/balance"]);
     const me = picked[0]!.state.data as { missions: Array<{ id: number }> };
     expect(me.missions.map((m) => m.id)).toEqual([1, 2]);
+  });
+
+  it("refuse une mission hors in_progress/delivered dans /me", () => {
+    const me = selectPersistableQueries([...base], flagsOn)[0]!.state.data as { missions: Array<{ id: number; status: string }> };
+    expect(me.missions.map((m) => m.status).sort()).toEqual(["delivered", "in_progress"]);
   });
 
   it("ne garde jamais la fiche personnelle du chauffeur (permis, CNI, naissance, CPC)", () => {
@@ -128,7 +110,7 @@ describe("lecture hors ligne du chauffeur : sélection", () => {
   });
 
   it("ne retient rien sans l'ancre /api/drivers/me valide (doute : ne pas persister)", () => {
-    const orphans = [detail(1, "in_progress"), query(["/api/fuel-card/balance"], { balance: 1 })];
+    const orphans = [query(["/api/fuel-card/balance"], { averagePricePerLiter: 1 })];
     expect(selectPersistableQueries(orphans, flagsOn)).toEqual([]);
     expect(selectPersistableQueries([query([ME], { driver: null, missions: [] }), ...orphans], flagsOn)).toEqual([]);
     expect(selectPersistableQueries([query([ME], { driver: driverRow, missions: [] }, "error"), ...orphans], flagsOn)).toEqual([]);
@@ -136,7 +118,7 @@ describe("lecture hors ligne du chauffeur : sélection", () => {
   });
 
   it("drapeaux éteints : aucune requête chauffeur retenue", () => {
-    const all = [...base, detail(1, "in_progress")];
+    const all = [...base, query(["/api/fuel-card/balance"], { averagePricePerLiter: 1 })];
     expect(selectPersistableQueries(all)).toEqual([]);
     expect(selectPersistableQueries(all, (f) => f === "driver-offline")).toEqual([]);
     expect(selectPersistableQueries(all, (f) => f === "offline-writes")).toEqual([]);
@@ -174,7 +156,7 @@ function memoryKv() {
 }
 
 describe("lecture hors ligne du chauffeur : cloison par compte", () => {
-  const driverQueries = [meOf([{ id: 1, status: "in_progress" }]), detail(1, "in_progress")];
+  const driverQueries = [meOf([{ id: 1, status: "in_progress" }]), query(["/api/fuel-card/balance"], { averagePricePerLiter: 700 })];
 
   it("le second compte du même appareil ne lit rien du premier", async () => {
     const { kv } = memoryKv();
@@ -223,7 +205,7 @@ describe("lecture hors ligne du chauffeur : cloison par compte", () => {
 });
 
 describe("lecture hors ligne du chauffeur : extinction, session expirée, âge", () => {
-  const driverQueries = [meOf([{ id: 1, status: "in_progress" }]), detail(1, "in_progress")];
+  const driverQueries = [meOf([{ id: 1, status: "in_progress" }]), query(["/api/fuel-card/balance"], { averagePricePerLiter: 700 })];
   const queueOf = (userId: number) => ({ version: 2, userId, actions: [{ id: "a" }] });
 
   it("drapeaux connus et éteints : la copie de lecture est supprimée à la réécriture", async () => {
@@ -313,47 +295,62 @@ describe("lecture hors ligne du chauffeur : liste blanche de champs", () => {
     }
     return out;
   };
-  const SECRETS = [
-    "podUrl", "workflowData", "validatedBy", "email", "fuelBudget", "roadExpensesBudget", "contingencyBudget",
-    "budgets", "budgetSuggestion", "fuel", "amount", "unitPrice", "totalAmount", "balance", "fuelBalance",
-    "totalCredits", "totalDebits", "lastCredit", "lastDebit", "uploadedByName", "detail", "cniNumber", "licenseNumber",
-    "contactPerson", "phone", "contact", "telephone",
+  const FORBIDDEN = [
+    "podUrl", "workflowData", "validatedBy", "email", "fuelBudget", "roadExpensesBudget", "contingencyBudget", "budgets",
+    "budgetSuggestion", "amount", "unitPrice", "totalAmount", "balance", "fuelBalance", "totalCredits", "totalDebits",
+    "lastCredit", "lastDebit", "cniNumber", "licenseNumber", "contactPerson", "phone", "contact", "telephone",
+    "missionType", "actualFuelCost", "cargo", "client", "assignment", "assignments",
   ];
-  const fat = (extra: Record<string, unknown> = {}) => ({
-    id: 11, status: "in_progress", orderNumber: "M-11", cargo: "ciment", assignments: [{ driverId: 7, id: 1, secret: "x", vehicle: { id: 2, registrationNumber: "LT-1", vin: "VIN" } }],
-    assignment: { driverId: 7, notes: "n" }, client: { name: "ACME", phone: "6", email: "a@b.c", contactPerson: "Bob", taxId: "T" },
-    podUrl: "/x", workflowData: { a: 1 }, validatedBy: 3, fuelBudget: 10, budgets: { a: 1 }, driver: { cniNumber: "C" }, ...extra,
+
+  it("l'instantané des clés vient des formes elles-mêmes, pas d'une fixture", () => {
+    const paths = Object.entries(DRIVER_CACHE_SHAPES).flatMap(([route, shape]) => shapeKeyPaths(shape).map((k) => `${route} ${k}`));
+    expect(paths).toMatchSnapshot();
+    const names = paths.map((k) => k.split(".").pop()!);
+    for (const f of FORBIDDEN) expect(names, f).not.toContain(f);
   });
 
-  it("une enveloppe persistée ne contient aucune clé hors liste blanche (récursif)", () => {
-    const qs = [
-      meOf([{ id: 11, status: "in_progress" }]),
-      query(["/api/missions/11"], fat()),
-      query(["/api/missions/11/fuel-records"], {
-        missionId: 11, missionStatus: "in_progress", totalQuantity: 5, totalAmount: 9,
-        records: [{ id: 1, date: "d", quantity: 5, mileage: 100, stationName: "S", amount: 9, unitPrice: 2, paymentMode: "cash" }],
-      }),
-      query(["/api/missions/11/launch-readiness"], {
-        missionId: 11, missionStatus: "in_progress", canLaunch: true, summary: { total: 1, passed: 1, failed: 0, warnings: 0 },
-        checks: [{ key: "budget_fuel", label: "Budget", passed: true, blocking: true, detail: "500 FCFA" }],
-        fuel: { balance: 1 }, budgets: { fuelBudget: 1 }, budgetSuggestion: { a: 1 },
-      }),
-      query(["/api/missions/11/pod-files"], { files: [{ id: 1, originalName: "a.jpg", mime: "image/jpeg", sizeBytes: 3, uploadedAt: "t", uploadedByName: "Moi" }] }),
-      query(["/api/fuel-card/balance"], { balance: 99, fuelBalance: 3, totalCredits: 1, totalDebits: 1, lastCredit: { a: 1 }, averagePricePerLiter: 700, priceSource: "real" }),
-    ];
-    const persisted = selectPersistableQueries(qs, flagsOn);
-    expect(persisted).toHaveLength(6);
-    const keys = collectKeys(persisted.map((q) => q.state.data));
-    const names = [...keys].map((k) => k.split(".").pop()!);
-    for (const secret of SECRETS) expect(names, secret).not.toContain(secret);
-    expect([...keys].sort()).toMatchSnapshot();
+  it("une enveloppe persistée n'a aucune clé hors des formes, même chargée de champs en trop (mutation)", () => {
+    const fatMission = {
+      id: 11, status: "in_progress", orderNumber: "M-11", pickupAddress: "A", clientName: "ACME", vehicleRegistration: "LT-1",
+      missionType: "export", actualFuelCost: 12, cargo: { description: "ciment" }, podUrl: "/x", workflowData: { a: 1 },
+      client: { name: "ACME", email: "a@b.c", phone: "6" }, assignment: { driverId: 7 }, fuelBudget: 10,
+    };
+    const me = query([ME], { driver: { ...driverRow, extra: 1 }, missions: [fatMission] });
+    const balance = query(["/api/fuel-card/balance"], {
+      balance: 99, fuelBalance: 3, totalCredits: 1, lastCredit: { a: 1 }, averagePricePerLiter: 700, priceSource: "real", missionType: "x",
+    });
+    const persisted = selectPersistableQueries([me, balance], flagsOn);
+    expect(persisted).toHaveLength(2);
+    for (const q of persisted) {
+      const allowed = new Set(shapeKeyPaths(DRIVER_CACHE_SHAPES[q.queryKey[0] as string]!));
+      const got = [...collectKeys(q.state.data)];
+      expect(got.filter((k) => !allowed.has(k)), String(q.queryKey[0])).toEqual([]);
+    }
+    const text = JSON.stringify(persisted.map((q) => q.state.data));
+    for (const f of ["missionType", "actualFuelCost", "podUrl", "workflowData", "fuelBudget", "a@b.c", "cargo"]) expect(text).not.toContain(f);
   });
 
-  it("le détail garde le nom du client et les points A/B, sans contact ni e-mail", () => {
-    const [, d] = selectPersistableQueries([meOf([{ id: 11, status: "in_progress" }]), query(["/api/missions/11"], fat({ pickupLat: 1, pickupLng: 2 }))], flagsOn);
-    const data = d!.state.data as Record<string, any>;
-    expect(data.client).toEqual({ name: "ACME" });
-    expect(data.pickupLat).toBe(1);
-    expect(data.cargo).toBe("ciment");
+  it("une clé ajoutée à une forme change l'instantané (la liste se relit à ce moment)", () => {
+    const widened = { ...(DRIVER_ME_MISSION_SHAPE as Record<string, unknown>), missionType: true } as typeof DRIVER_ME_MISSION_SHAPE;
+    expect(shapeKeyPaths(widened)).toContain(".missionType");
+    expect(shapeKeyPaths(DRIVER_ME_MISSION_SHAPE)).not.toContain(".missionType");
   });
 });
+
+describe("restauration du cache hors ligne", () => {
+  it("une copie restaurée est marquée périmée et ne remplace pas une donnée déjà en mémoire", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(["/api/fuel-card/balance"], { fresh: true });
+    const items = [
+      { queryKey: [ME], state: { data: { driver: { id: 7 }, missions: [] }, dataUpdatedAt: 1_000 } },
+      { queryKey: ["/api/fuel-card/balance"], state: { data: { old: true }, dataUpdatedAt: 1_000 } },
+    ];
+    expect(applyRestoredQueries(qc, items)).toBe(1);
+    expect(qc.getQueryData(["/api/fuel-card/balance"])).toEqual({ fresh: true });
+    expect(qc.getQueryData([ME])).toEqual({ driver: { id: 7 }, missions: [] });
+    expect(qc.getQueryState([ME])!.isInvalidated).toBe(true);
+    expect(qc.getQueryState([ME])!.dataUpdatedAt).toBe(1_000);
+    expect(qc.getQueryState(["/api/fuel-card/balance"])!.isInvalidated).toBe(false);
+  });
+});
+

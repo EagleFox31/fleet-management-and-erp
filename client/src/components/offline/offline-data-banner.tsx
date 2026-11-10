@@ -18,6 +18,23 @@ function useOnline(): boolean {
   return online;
 }
 
+/** Vrai quand la lecture hors ligne est activée (les deux drapeaux) et que l'appareil est sans réseau. */
+export function useOfflineReadActive(): boolean {
+  const driverOffline = useFeature("driver-offline");
+  const offlineWrites = useFeature("offline-writes");
+  const online = useOnline();
+  return driverOffline && offlineWrites && !online;
+}
+
+/** Remplace un écran dont les chiffres ne peuvent pas être juste sur la copie réduite gardée hors ligne. */
+export function OfflineUnavailable({ what }: { what: string }) {
+  return (
+    <div role="status" data-testid="offline-unavailable" className="rounded-2xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
+      {what} : indisponible hors ligne.
+    </div>
+  );
+}
+
 /** Affichage seul : rien si le texte est absent. */
 export function OfflineDataBannerView({ text, className }: { text: string | null; className?: string }) {
   if (!text) return null;

@@ -1,8 +1,10 @@
 /**
- * Liste blanche de champs du cache hors ligne du chauffeur (cache minimal, décision 7 de V5b).
- * Logique pure. Une forme dit ce qui est gardé : `true` pour une valeur simple, un objet pour
- * un sous-objet, `[forme]` pour un tableau. Toute clé absente de la forme est retirée, à
- * n'importe quelle profondeur ; une valeur de type inattendu est retirée aussi.
+ * Liste blanche de champs du cache hors ligne du chauffeur (cache minimal, decision 7 de V5b).
+ * Regle : le cache ne contient rien de plus que ce que l'ecran chauffeur lit
+ * (`client/src/pages/driver/dashboard.tsx` : sa fiche, ses missions, le prix du litre).
+ * Logique pure. Une forme dit ce qui est garde : `true` pour une valeur simple, un objet pour
+ * un sous-objet, `[forme]` pour un tableau. Toute cle absente de la forme est retiree, a
+ * n'importe quelle profondeur ; une valeur de type inattendu est retiree aussi.
  */
 
 export type FieldShape = true | { [key: string]: FieldShape } | [FieldShape];
@@ -25,44 +27,32 @@ export function pickFields(value: unknown, shape: FieldShape): unknown {
   return out;
 }
 
-const VEHICLE: FieldShape = { id: true, registrationNumber: true };
+/** Chemins de cles d'une forme (`a.b`, `a[].b`) : sert d'instantane de ce que le cache peut contenir. */
+export function shapeKeyPaths(shape: FieldShape, prefix = ""): string[] {
+  if (shape === true) return [];
+  if (Array.isArray(shape)) return shapeKeyPaths(shape[0], `${prefix}[]`);
+  return Object.entries(shape).flatMap(([key, sub]) => [`${prefix}.${key}`, ...shapeKeyPaths(sub, `${prefix}.${key}`)]);
+}
 
-const ASSIGNMENT: FieldShape = {
-  id: true,
-  driverId: true,
-  status: true,
-  startedAt: true,
-  completedAt: true,
-  vehicleId: true,
-  trailerId: true,
-  vehicle: VEHICLE,
-  trailer: VEHICLE,
-};
-
-/** Missions de `/api/drivers/me` : ce que le tableau de bord chauffeur affiche. */
+/** Missions de `/api/drivers/me` : exactement l'interface `Mission` du tableau de bord chauffeur. */
 export const DRIVER_ME_MISSION_SHAPE: FieldShape = {
   id: true,
   orderNumber: true,
   status: true,
   pickupAddress: true,
-  deliveryAddress: true,
   pickupDate: true,
+  deliveryAddress: true,
   deliveryDate: true,
   actualDeliveryDate: true,
   actualDepartureDate: true,
-  assignmentStatus: true,
   estimatedDistance: true,
   actualDistance: true,
+  specialInstructions: true,
   clientName: true,
   vehicleRegistration: true,
   vehicleBrand: true,
   vehicleModel: true,
   vehicleId: true,
-  specialInstructions: true,
-  pickupLat: true,
-  pickupLng: true,
-  deliveryLat: true,
-  deliveryLng: true,
 };
 
 export const DRIVER_ME_SHAPE: FieldShape = {
@@ -70,55 +60,17 @@ export const DRIVER_ME_SHAPE: FieldShape = {
   missions: [DRIVER_ME_MISSION_SHAPE],
 };
 
-/** Détail d'une mission : références, dates, lieux (libellés et points A/B), véhicule, cargaison, consignes, contact. */
-export const MISSION_DETAIL_SHAPE: FieldShape = {
-  id: true,
-  orderNumber: true,
-  status: true,
-  currentStep: true,
-  pickupAddress: true,
-  pickupDate: true,
-  pickupLat: true,
-  pickupLng: true,
-  deliveryAddress: true,
-  deliveryDate: true,
-  deliveryLat: true,
-  deliveryLng: true,
-  completedAt: true,
-  cargo: true,
-  weight: true,
-  volume: true,
-  specialInstructions: true,
-  client: { name: true },
-  assignment: ASSIGNMENT,
-  assignments: [ASSIGNMENT],
-};
-
-/** Pleins de la mission : date, litres, kilométrage, station. Aucun montant (non affiché au chauffeur). */
-export const MISSION_FUEL_SHAPE: FieldShape = {
-  missionId: true,
-  missionStatus: true,
-  totalQuantity: true,
-  records: [{ id: true, date: true, quantity: true, mileage: true, stationName: true }],
-};
-
-export const LAUNCH_READINESS_SHAPE: FieldShape = {
-  missionId: true,
-  missionStatus: true,
-  canLaunch: true,
-  summary: { total: true, passed: true, failed: true, warnings: true },
-  checks: [{ key: true, label: true, passed: true, blocking: true, status: true }],
-};
-
-export const POD_FILES_SHAPE: FieldShape = {
-  files: [{ id: true, originalName: true, mime: true, sizeBytes: true, uploadedAt: true }],
-};
-
-/** Solde carte : seul le prix de référence est lu par le formulaire de plein, le montant n'est pas affiché. */
+/** Solde carte : seul le prix de reference est lu par le formulaire de plein, le montant n'est pas affiche. */
 export const FUEL_CARD_BALANCE_SHAPE: FieldShape = {
   averagePricePerLiter: true,
   averagePricePerLiterUsed: true,
   averagePricePerLiterReal: true,
   averagePricePerLiterFallback: true,
   priceSource: true,
+};
+
+/** Toutes les formes persistees par le profil chauffeur, par requete. */
+export const DRIVER_CACHE_SHAPES: Readonly<Record<string, FieldShape>> = {
+  "/api/drivers/me": DRIVER_ME_SHAPE,
+  "/api/fuel-card/balance": FUEL_CARD_BALANCE_SHAPE,
 };

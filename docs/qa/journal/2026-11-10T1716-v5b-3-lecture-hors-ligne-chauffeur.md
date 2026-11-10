@@ -21,3 +21,11 @@
 - Session expirée (401) : `dropUserReadCache` supprime le cache de lecture du compte, la file d'envois est gardée. Compteur propre au cache, pour qu'une sauvegarde en vol n'efface pas la file.
 - Âge maximal du cache contenant des données chauffeur : `DRIVER_CACHE_MAX_AGE_MS` = 72 h (les autres profils gardent 7 jours).
 - Constat : l'utilisateur actif n'est tenu qu'en mémoire (`offline-user-scope.ts`), activé à la connexion ou par un `/api/auth/me` réussi (`session-resume.ts`). Au démarrage hors ligne (`unreachable`), aucun compte n'est activé : rien n'est restauré. La lecture hors ligne ne sert donc que si l'application reste ouverte (perte de réseau en cours de session). E2e non tenté, noté en dette.
+
+### Reserves de relecture
+
+- Regle cache <= ecran appliquee : le tableau de bord chauffeur (`pages/driver/dashboard.tsx`) ne lit que `/api/drivers/me` et `/api/fuel-card/balance`. Detail mission, pleins, check-list de lancement et pieces de preuve (aucun ecran chauffeur ne les lit) sortent de la liste blanche, ainsi que leur controle d'appartenance. La forme des missions de `/me` suit exactement l'interface `Mission` de l'ecran. Corrige au passage la forme de `cargo` (jsonb) : le champ n'est plus persiste.
+- Copie restauree marquee perimee (`applyRestoredQueries`, `offline-restore.ts`) : plus de copie reduite affichee comme fraiche pendant `staleTime` ; hors ligne, elle reste visible.
+- Instantane : les chemins de cles viennent des formes elles-memes (`shapeKeyPaths(DRIVER_CACHE_SHAPES)`). Test de mutation : ajouter `missionType` ou `actualFuelCost` a une forme fait echouer l'instantane. Correction de la phrase precedente : ce n'est pas "toute cle ajoutee au cache" qui echoue, c'est toute cle ajoutee a une forme (le filtre retire de toute facon une cle absente de la forme).
+- Onglet « Mes performances » : « indisponible hors ligne » (la copie ne contient que les missions en cours ou livrees, les chiffres seraient faux), sous les deux drapeaux.
+- Lecteur de drapeaux a la restauration : faux tant qu'ils sont inconnus (le lecteur indulgent est supprime ; sans compte actif au demarrage hors ligne il ne servait a rien).
