@@ -45,13 +45,14 @@ describe("marqueur offline-resume : contenu", () => {
     const user = { id: 7, role: "driver", email: "chauffeur@x.cm", name: "Paul Mbarga", username: "pmbarga", token: "tok" };
     expect(await resume.record(user, ON, T0)).toBe(true);
     const stored = h.raw()!;
-    expect(Object.keys(stored).sort()).toEqual(["expiresAt", "flags", "lastOnlineAt", "profile", "userId", "version"]);
+    expect(Object.keys(stored).sort()).toEqual(["expiresAt", "flags", "lastOnlineAt", "maxSeenAt", "profile", "userId", "version"]);
     expect(stored).toEqual({
       version: 1,
       userId: 7,
       profile: "driver",
       lastOnlineAt: T0,
       expiresAt: T0 + RESUME_TTL_MS,
+      maxSeenAt: T0,
       flags: { "driver-offline": true, "offline-writes": true },
     });
     const json = JSON.stringify([...h.store.entries()]);
@@ -93,12 +94,11 @@ describe("marqueur offline-resume : échéance", () => {
 
   it("plusieurs relances hors ligne : expiresAt et lastOnlineAt ne bougent pas", async () => {
     await resume.record({ id: 7, role: "driver" }, ON, T0);
-    const before = structuredClone(h.raw());
     for (const hours of [1, 5, 20, 40, 71]) {
       expect((await resume.read(T0 + hours * 3600_000))?.userId).toBe(7);
       expect((await resume.peek(T0 + hours * 3600_000))?.expiresAt).toBe(T0 + RESUME_TTL_MS);
+      expect(h.raw()).toMatchObject({ lastOnlineAt: T0, expiresAt: T0 + RESUME_TTL_MS });
     }
-    expect(h.raw()).toEqual(before);
   });
 
   it("un contact réseau (touch) repousse l'échéance du même compte", async () => {
@@ -229,4 +229,62 @@ describe("marqueur offline-resume : purge", () => {
       expect(h.raw()).toBeUndefined();
     },
   );
+});
+
+describe("marqueur offline-resume : horloge reculée (maxSeenAt)", () => {
+  const H = 3600_000;
+  it("une lecture hors ligne fait monter maxSeenAt sans repousser l'échéance", async () => {
+    await resume.record({ id: 7, role: "driver" }, ON, T0);
+    await resume.read(T0 + 10 * H);
+    expect(h.raw()).toMatchObject({ maxSeenAt: T0 + 10 * H, lastOnlineAt: T0, expiresAt: T0 + RESUME_TTL_MS });
+  });
+
+  it("horloge reculée de plus de 5 minutes sous la dernière heure vue : refusé", async () => {
+    await resume.record({ id: 7, role: "driver" }, ON, T0);
+    await resume.read(T0 + 10 * H);
+    expect(await resume.read(T0 + 2 * H)).toBeNull();
+    expect(await resume.peek(T0 + 2 * H)).toBeNull();
+  });
+
+  it("recul de moins de 5 minutes toléré, maxSeenAt ne redescend pas", async () => {
+    await resume.record({ id: 7, role: "driver" }, ON, T0);
+    await resume.read(T0 + 10 * H);
+    expect((await resume.read(T0 + 10 * H - 4 * 60_000))?.userId).toBe(7);
+    expect(h.raw()!.maxSeenAt).toBe(T0 + 10 * H);
+  });
+
+  it("marqueur écrit sans maxSeenAt (avant ce correctif) : lisible, borné par lastOnlineAt", async () => {
+    await resume.record({ id: 7, role: "driver" }, ON, T0);
+    const legacy = { ...h.raw()! };
+    delete legacy.maxSeenAt;
+    h.store.set(`${RESUME_DB}/${RESUME_KEY}`, legacy);
+    expect((await resume.read(T0 + H))?.userId).toBe(7);
+    expect(await resume.read(T0 - 10 * 60_000)).toBeNull();
+  });
+
+  it("maxSeenAt inférieur à lastOnlineAt : marqueur falsifié, refusé", async () => {
+    await resume.record({ id: 7, role: "driver" }, ON, T0);
+    h.store.set(`${RESUME_DB}/${RESUME_KEY}`, { ...h.raw()!, maxSeenAt: T0 - 1 });
+    expect(await resume.read(T0 + H)).toBeNull();
+  });
+});
+
+describe("marqueur offline-resume : drapeau éteint reçu en ligne", () => {
+  it("touch avec un drapeau éteint supprime le marqueur tout de suite", async () => {
+    await resume.record({ id: 7, role: "driver" }, ON, T0);
+    expect(await resume.touch(7, { ...ON, "offline-writes": false }, T0 + 1000)).toBe(false);
+    expect(h.raw()).toBeUndefined();
+  });
+
+  it("record avec un drapeau éteint n'écrit rien et supprime l'ancien marqueur", async () => {
+    await resume.record({ id: 7, role: "driver" }, ON, T0);
+    expect(await resume.record({ id: 7, role: "driver" }, { ...ON, "driver-offline": false }, T0 + 1000)).toBe(false);
+    expect(h.raw()).toBeUndefined();
+  });
+
+  it("drapeaux inconnus (null) : le marqueur est gardé", async () => {
+    await resume.record({ id: 7, role: "driver" }, ON, T0);
+    expect(await resume.touch(7, null, T0 + 1000)).toBe(true);
+    expect(h.raw()).toBeDefined();
+  });
 });

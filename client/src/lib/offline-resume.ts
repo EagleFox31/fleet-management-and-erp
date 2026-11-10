@@ -29,7 +29,12 @@ export const RESUME_VERSION = 1;
 export const RESUME_REVOKED_KEY = "fleetos-offline-resume-revoked";
 /** Même durée que la copie de lecture du chauffeur (`DRIVER_CACHE_MAX_AGE_MS`). */
 export const RESUME_TTL_MS = 72 * 60 * 60 * 1000;
-/** Un dernier contact plus loin dans le futur que ceci trahit une horloge reculée : marqueur refusé. */
+/**
+ * Recul d'horloge toléré. `maxSeenAt` ne fait que monter (dernier contact réseau ou dernière lecture
+ * hors ligne) : une heure plus de 5 minutes en arrière de cette valeur trahit une horloge reculée,
+ * marqueur refusé. Risque résiduel : aucune heure de confiance hors ligne, donc un recul avant la
+ * première lecture hors ligne qui suit le dernier contact reste invisible (borné par les 72 h).
+ */
 const CLOCK_SKEW_MS = 5 * 60 * 1000;
 
 /** Sous-ensemble de `OfflineKv` dont le marqueur a besoin. */
@@ -55,6 +60,8 @@ export interface ResumeMarker {
   profile: string;
   lastOnlineAt: number;
   expiresAt: number;
+  /** Plus grande heure vue sur cet appareil ; ne fait que monter, ne repousse jamais `expiresAt`. */
+  maxSeenAt: number;
   flags: FlagSnapshot;
 }
 
@@ -89,16 +96,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function parseMarker(raw: unknown): ResumeMarker | null {
   if (!isRecord(raw) || raw.version !== RESUME_VERSION) return null;
   const { userId, profile, lastOnlineAt, expiresAt, flags } = raw;
+  const maxSeenAt = raw.maxSeenAt === undefined ? lastOnlineAt : raw.maxSeenAt;
   if (typeof userId !== "number" || !Number.isInteger(userId) || userId <= 0) return null;
   if (typeof profile !== "string") return null;
   if (typeof lastOnlineAt !== "number" || !Number.isFinite(lastOnlineAt)) return null;
   if (typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) return null;
   // L'échéance se déduit du dernier contact : une valeur écrite plus loin est une falsification.
   if (expiresAt !== lastOnlineAt + RESUME_TTL_MS) return null;
+  if (typeof maxSeenAt !== "number" || !Number.isFinite(maxSeenAt) || maxSeenAt < lastOnlineAt) return null;
   if (!isRecord(flags)) return null;
   const clean: FlagSnapshot = {};
   for (const name of resumeFlagNames()) clean[name] = flags[name] === true;
-  return { version: RESUME_VERSION, userId, profile, lastOnlineAt, expiresAt, flags: clean };
+  return { version: RESUME_VERSION, userId, profile, lastOnlineAt, expiresAt, maxSeenAt, flags: clean };
 }
 
 type Verdict = { ok: true; marker: ResumeMarker; profile: OfflineReadProfile } | { ok: false };
@@ -106,7 +115,7 @@ type Verdict = { ok: true; marker: ResumeMarker; profile: OfflineReadProfile } |
 function judge(raw: unknown, now: number, profiles: readonly OfflineReadProfile[]): Verdict {
   const marker = parseMarker(raw);
   if (!marker) return { ok: false };
-  if (marker.lastOnlineAt > now + CLOCK_SKEW_MS) return { ok: false };
+  if (now < marker.maxSeenAt - CLOCK_SKEW_MS) return { ok: false };
   if (now > marker.expiresAt) return { ok: false };
   const profile = profiles.find((p) => p.resumeOffline && p.id === marker.profile);
   if (!profile) return { ok: false };
@@ -182,6 +191,11 @@ export function createOfflineResume(
           await revokeMarker(null);
           return false;
         }
+        // Drapeau éteint reçu en ligne : plus de reprise hors ligne, le marqueur part tout de suite.
+        if (flags !== null && !profile.flags.every((flag) => snapshot(flags)[flag] === true)) {
+          await revokeMarker(user.id);
+          return false;
+        }
         const previous = parseMarker(await readRaw());
         const fallback = previous && previous.userId === user.id ? previous.flags : undefined;
         const marker: ResumeMarker = {
@@ -190,6 +204,7 @@ export function createOfflineResume(
           profile: profile.id,
           lastOnlineAt: now,
           expiresAt: now + RESUME_TTL_MS,
+          maxSeenAt: now,
           flags: snapshot(flags, fallback),
         };
         await kv.set(RESUME_DB, RESUME_KEY, marker);
@@ -214,10 +229,16 @@ export function createOfflineResume(
           await drop();
           return false;
         }
+        const ownProfile = profiles.find((p) => p.id === marker.profile);
+        if (flags !== null && ownProfile && !ownProfile.flags.every((flag) => snapshot(flags)[flag] === true)) {
+          await revokeMarker(userId);
+          return false;
+        }
         const next: ResumeMarker = {
           ...marker,
           lastOnlineAt: Math.max(now, marker.lastOnlineAt),
           expiresAt: Math.max(now, marker.lastOnlineAt) + RESUME_TTL_MS,
+          maxSeenAt: Math.max(now, marker.lastOnlineAt, marker.maxSeenAt),
           flags: snapshot(flags, marker.flags),
         };
         await kv.set(RESUME_DB, RESUME_KEY, next);
@@ -226,8 +247,9 @@ export function createOfflineResume(
     },
 
     /**
-     * Lecture au démarrage hors ligne. N'écrit jamais, sauf pour supprimer un marqueur illisible,
-     * échu, d'un profil sans reprise ou dont un drapeau est éteint.
+     * Lecture au démarrage hors ligne. N'écrit que `maxSeenAt` (qui ne fait que monter) ou, pour
+     * supprimer, un marqueur illisible, échu, d'un profil sans reprise, d'horloge reculée ou dont un
+     * drapeau est éteint. L'échéance n'est jamais repoussée.
      */
     read(now: number = Date.now()): Promise<ResumeGrant | null> {
       return run(async () => {
@@ -244,6 +266,10 @@ export function createOfflineResume(
           return null;
         }
         const { marker } = verdict;
+        // Seule écriture d'une lecture : `maxSeenAt` monte, jamais `expiresAt` ni `lastOnlineAt`.
+        if (now > marker.maxSeenAt) {
+          await kv.set(RESUME_DB, RESUME_KEY, { ...marker, maxSeenAt: now }).catch(() => undefined);
+        }
         return {
           userId: marker.userId,
           profile: marker.profile,
@@ -255,11 +281,11 @@ export function createOfflineResume(
     },
 
     /** Échéance pour l'affichage (bandeau), sans aucun effet de bord. */
-    peek(now: number = Date.now()): Promise<{ expiresAt: number } | null> {
+    peek(now: number = Date.now()): Promise<{ userId: number; expiresAt: number } | null> {
       return run(async () => {
         if (isRevoked()) return null;
         const verdict = judge(await readRaw(), now, profiles);
-        return verdict.ok ? { expiresAt: verdict.marker.expiresAt } : null;
+        return verdict.ok ? { userId: verdict.marker.userId, expiresAt: verdict.marker.expiresAt } : null;
       });
     },
 

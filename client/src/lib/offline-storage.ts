@@ -4,7 +4,9 @@ import { applyRestoredQueries } from "@/lib/offline-restore";
 import { pendingServerLogout } from "@/lib/pending-logout";
 import {
   DRIVER_READ_PROFILE,
+  confirmOfflineSession,
   getActiveOfflineUserId,
+  markOfflineSessionUnconfirmed,
   setActiveOfflineUserId,
   subscribeActiveOfflineUser,
 } from "@/lib/offline-user-scope";
@@ -17,6 +19,7 @@ import {
   cancelScheduledReplay,
   enqueueOfflineWrite,
   isOfflineFlagEnabled,
+  replayOfflineQueue,
   replayOnReconnect,
   startOfflineQueueRuntime,
 } from "@/lib/offline-queue";
@@ -51,6 +54,9 @@ export interface OfflineAction {
   idempotencyKey?: string;
 }
 
+/** Relevé à chaque déconnexion, expiration ou changement de compte : une reprise en cours qui le voit bouger s'abandonne. */
+let sessionGeneration = 0;
+
 /**
  * Appelé à chaque connexion et à chaque restauration de session. Si l'utilisateur
  * change, le cache TanStack du précédent est vidé, ses copies hors ligne et
@@ -61,7 +67,14 @@ export function activateOfflineUser(
   userId: number,
   options: { broadcast?: boolean } = {},
 ): void {
-  if (getActiveOfflineUserId() === userId) return;
+  // Session confirmée par le serveur (connexion ou /me) : si le compte avait été rouvert depuis le
+  // marqueur, la file qui attendait cette confirmation peut enfin partir.
+  const wasUnconfirmed = confirmOfflineSession(userId);
+  if (getActiveOfflineUserId() === userId) {
+    if (wasUnconfirmed) void replayOfflineQueue({ ignoreBackoff: true });
+    return;
+  }
+  sessionGeneration += 1;
   queryClient.clear();
   setActiveOfflineUserId(userId);
   // Autre compte : le marqueur de reprise de l'ancien ne doit pas survivre (celui du nouveau est écrit après /me).
@@ -85,12 +98,17 @@ export function activateOfflineUser(
 export async function purgeOfflineSession(
   queryClient: QueryClient,
   options: { broadcast?: boolean } = {},
-): Promise<void> {
+): Promise<boolean> {
+  let complete = true;
+  sessionGeneration += 1;
   const active = getActiveOfflineUserId();
   setActiveOfflineUserId(null);
   cancelScheduledReplay();
   // Le marqueur de reprise part en premier : plus aucun démarrage hors ligne ne rouvre ce compte.
-  await offlineResume.clear(active).catch(logResumeFailure);
+  await offlineResume.clear(active).catch((err) => {
+    complete = false;
+    logResumeFailure(err);
+  });
   // Les autres onglets de l'appareil se purgent aussi (la file est partagée entre onglets).
   if (options.broadcast !== false) sessionChannel.post({ type: "logout" });
   try {
@@ -102,8 +120,10 @@ export async function purgeOfflineSession(
   try {
     await offlineScope.purgeAll(active, { dropOtherQueues: true });
   } catch (err) {
+    complete = false;
     clientLogger.error("Purge du stockage hors ligne en échec", { err });
   }
+  return complete;
 }
 
 /**
@@ -114,6 +134,7 @@ export async function purgeOfflineSession(
  */
 export async function expireOfflineSession(queryClient: QueryClient, userId: number): Promise<void> {
   if (getActiveOfflineUserId() !== userId) return;
+  sessionGeneration += 1;
   setActiveOfflineUserId(null);
   cancelScheduledReplay();
   try {
@@ -182,18 +203,29 @@ export function isNetworkSuccess(event: { type: string; action?: { type?: string
 }
 
 /**
+ * Seules les réponses réseau de `/api/feature-flags` et `/api/auth/me` prolongent la reprise : une
+ * lecture quelconque (liste servie puis rafraîchie, copie restaurée) n'identifie pas la session.
+ */
+export function isContactProof(queryKey: readonly unknown[]): boolean {
+  return queryKey[0] === FEATURE_FLAGS_PATH || queryKey[0] === "/api/auth/me";
+}
+
+/**
  * Démarrage sans réseau : si le marqueur de reprise est valide (profil de lecture, 72 h, drapeaux
  * allumés au dernier contact), le compte devient l'utilisateur hors ligne actif et SA copie de
- * lecture est restaurée (marquée périmée, relue dès que le réseau répond). LECTURE SEULE : ni la
- * file d'envois ni les drapeaux d'écriture ne sont touchés ; le cookie reste l'unique preuve
- * d'identité, `/api/auth/me` revalide au retour du réseau. Renvoie vrai si un compte a été rouvert.
+ * lecture est restaurée (marquée périmée, relue dès que le réseau répond). LECTURE SEULE : la file
+ * d'envois n'est PAS rejouée (le compte reste « non confirmé » pour `replayOfflineQueue`) tant qu'un
+ * `/api/auth/me` authentifié ou une connexion n'a pas confirmé la session dans cette page ; le cookie
+ * reste l'unique preuve d'identité. Renvoie vrai si un compte a été rouvert.
  */
 export async function resumeOfflineRead(queryClient: QueryClient, now: number = Date.now()): Promise<boolean> {
   if (getActiveOfflineUserId() !== null) return false;
+  // Une déconnexion (autre onglet) ou un changement de compte pendant les lectures asynchrones annule la reprise.
+  const generation = sessionGeneration;
   const grant = await offlineResume.read(now);
   if (!grant) return false;
-  // Une connexion a pu avoir lieu pendant la lecture du marqueur : ne rien écraser.
-  if (getActiveOfflineUserId() !== null) return false;
+  if (getActiveOfflineUserId() !== null || generation !== sessionGeneration) return false;
+  markOfflineSessionUnconfirmed(grant.userId);
   setActiveOfflineUserId(grant.userId);
   await restoreQueryClientFromIndexedDB(queryClient, grant.isFlagOn, now);
   return true;
@@ -318,7 +350,7 @@ export function setupOfflinePersistence(queryClient: QueryClient): () => void {
   // démarrage hors ligne). Écriture espacée d'une minute, sauf quand les drapeaux viennent d'arriver.
   let lastContactWrite = 0;
   const unsubscribeContact = queryClient.getQueryCache().subscribe((event) => {
-    if (!isNetworkSuccess(event)) return;
+    if (!isNetworkSuccess(event) || !isContactProof(event.query.queryKey)) return;
     const flagsArrived = event.query.queryKey[0] === FEATURE_FLAGS_PATH;
     const now = Date.now();
     if (!flagsArrived && now - lastContactWrite < RESUME_TOUCH_INTERVAL_MS) return;

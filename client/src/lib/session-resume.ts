@@ -1,7 +1,7 @@
 import type { SessionCheck } from "./session-check";
 import type { PendingLogoutOutcome } from "./pending-logout";
 import type { User } from "./auth";
-import { clientLogger } from "./logger";
+import { clientLogger } from "@/lib/logger";
 
 /**
  * Reprise de session au démarrage de l'application (seul chemin d'amorçage).
@@ -27,8 +27,10 @@ export interface SessionResumeDeps {
   getActiveUserId(): number | null;
   activateUser(userId: number): void;
   expireUser(userId: number): Promise<void>;
-  /** Purge locale de la déconnexion (cache TanStack, magasins hors ligne, état navigateur). */
-  purgeLocal(): Promise<void>;
+  /** Purge locale de la déconnexion (cache TanStack, magasins hors ligne, état navigateur). `false` : purge incomplète. */
+  purgeLocal(): Promise<boolean | void>;
+  /** Remet le repère de déconnexion en attente quand la purge locale n'a pas abouti. */
+  markPendingLogout?(): void;
   /** Écrit le marqueur de reprise hors ligne après un /me réussi (ne lève jamais). */
   recordOnline(user: User): Promise<void>;
   /** Rouvre la lecture hors ligne depuis le marqueur ; vrai si un compte a été restauré. */
@@ -49,7 +51,14 @@ async function settle(op: () => Promise<unknown>): Promise<void> {
 export function createSessionResume(deps: SessionResumeDeps): () => Promise<SessionCheck> {
   return async function resumeSession(): Promise<SessionCheck> {
     const pending = await deps.flushPendingLogout();
-    if (pending !== "none") await deps.purgeLocal();
+    if (pending !== "none") {
+      const purged = await deps.purgeLocal();
+      if (purged === false) {
+        // Purge incomplète : le repère revient, on ne rouvre rien et on retentera au prochain démarrage.
+        deps.markPendingLogout?.();
+        return { status: "anonymous" };
+      }
+    }
     if (pending === "pending") {
       // La déconnexion n'a pas pu partir : l'utilisateur reste déconnecté localement.
       return { status: "anonymous" };
@@ -79,7 +88,8 @@ export function createSessionResume(deps: SessionResumeDeps): () => Promise<Sess
 export interface LogoutDeps {
   markPending(): void;
   clearPending(): void;
-  purgeLocal(): Promise<void>;
+  /** `false` : la purge locale n'a pas abouti, le repère de déconnexion reste. */
+  purgeLocal(): Promise<boolean | void>;
   postLogout(): Promise<void>;
 }
 
@@ -92,8 +102,9 @@ export interface LogoutDeps {
 export function createLogout(deps: LogoutDeps): () => Promise<void> {
   return async function logout(): Promise<void> {
     deps.markPending();
-    await deps.purgeLocal();
+    const purged = await deps.purgeLocal();
     await deps.postLogout();
-    deps.clearPending();
+    // Repère gardé tant que la purge locale n'a pas abouti : le prochain démarrage la reprend.
+    if (purged !== false) deps.clearPending();
   };
 }

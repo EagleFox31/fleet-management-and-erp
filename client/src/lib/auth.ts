@@ -80,9 +80,10 @@ export async function register(data: RegistrationData): Promise<User> {
 }
 
 /** Purge locale d'une déconnexion : cache TanStack, magasins hors ligne, état navigateur. Ne lève pas. */
-async function purgeLocalSession(): Promise<void> {
-  await purgeOfflineSession(queryClient);
+async function purgeLocalSession(): Promise<boolean> {
+  const complete = await purgeOfflineSession(queryClient);
   purgeBrowserUserState();
+  return complete;
 }
 
 /**
@@ -115,6 +116,7 @@ export const resumeSession = createSessionResume({
   restoreOffline: () => resumeOfflineRead(queryClient),
   clearResume: () => offlineResume.clear(),
   purgeLocal: purgeLocalSession,
+  markPendingLogout: () => pendingServerLogout.mark(),
 });
 
 export function isAdmin(user: User | null): boolean {

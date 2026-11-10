@@ -13,6 +13,19 @@ export function formatOfflineStamp(updatedAt: number | undefined | null): string
 }
 
 /**
+ * Échéance à afficher pour un marqueur de reprise : seulement s'il appartient au compte actif de la
+ * page et n'est pas échu. Sinon null (aucune session hors ligne à annoncer).
+ */
+export function resumeDeadlineFor(
+  found: { userId: number; expiresAt: number } | null,
+  activeUserId: number | null,
+  now: number,
+): number | null {
+  if (!found || activeUserId === null || found.userId !== activeUserId) return null;
+  return now > found.expiresAt ? null : found.expiresAt;
+}
+
+/**
  * Le bandeau n'existe que hors ligne et avec une lecture réussie à citer. `expiresAt` : fin de la
  * session hors ligne (dernier contact réseau + 72 h), quand le marqueur de reprise la connaît.
  */

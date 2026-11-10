@@ -5,12 +5,15 @@ const idb = vi.hoisted(() => ({
   dbs: new Map<string, Map<string, unknown>>(),
   // Suppression IndexedDB en panne, pour la pierre tombale.
   failDelOf: null as string | null,
+  // Lecture en vol : la valeur est lue, puis rendue après la porte (course avec un logout).
+  gate: null as Promise<void> | null,
 }));
 
 vi.mock("idb-keyval", () => ({
   createStore: (db: string) => db,
   get: async (key: string, store?: string) => {
     const value = idb.dbs.get(store ?? "keyval-store")?.get(key);
+    if (idb.gate && store === "fleetos-offline-resume") await idb.gate;
     return value === undefined ? undefined : structuredClone(value);
   },
   set: async (key: string, value: unknown, store?: string) => {
@@ -42,6 +45,7 @@ import {
   refreshOfflineResume,
   resumeOfflineRead,
   isNetworkSuccess,
+  isContactProof,
 } from "@/lib/offline-storage";
 import { offlineResume } from "@/lib/offline-kv";
 import { RESUME_DB, RESUME_KEY, RESUME_REVOKED_KEY, RESUME_TTL_MS } from "@/lib/offline-resume";
@@ -91,6 +95,7 @@ beforeEach(() => {
   vi.stubGlobal("window", fakeWindow);
   lsData.clear();
   idb.failDelOf = null;
+  idb.gate = null;
   idb.dbs.clear();
   setActiveOfflineUserId(null);
 });
@@ -151,11 +156,10 @@ describe("restauration au démarrage hors ligne", () => {
 
   it("plusieurs relances hors ligne : l'échéance ne bouge pas", async () => {
     await onlineSession(7);
-    const before = structuredClone(markerRaw());
     for (const h of [1, 10, 30, 60]) {
       expect(await resumeOfflineRead(coldStart(), T0 + h * 3600_000)).toBe(true);
+      expect(markerRaw()).toMatchObject({ lastOnlineAt: T0, expiresAt: T0 + RESUME_TTL_MS });
     }
-    expect(markerRaw()).toEqual(before);
   });
 
   it("le compte B ne lit jamais la copie de A", async () => {
@@ -204,11 +208,11 @@ describe("écriture et rafraîchissement du marqueur", () => {
     expect(markerRaw()).toEqual(before);
   });
 
-  it("une extinction du drapeau constatée en ligne est reportée dans le marqueur", async () => {
+  it("une extinction du drapeau constatée en ligne supprime le marqueur tout de suite", async () => {
     const client = await onlineSession(7);
     client.setQueryData([FLAGS], { "driver-offline": false, "offline-writes": true });
     await refreshOfflineResume(client, T0 + 1000);
-    expect((markerRaw()!.flags as Record<string, boolean>)["driver-offline"]).toBe(false);
+    expect(markerRaw()).toBeUndefined();
     expect(await resumeOfflineRead(coldStart(), T0 + 2000)).toBe(false);
   });
 });
@@ -360,5 +364,50 @@ describe("pierre tombale : suppression IndexedDB en échec à la déconnexion", 
     const before = structuredClone(markerRaw());
     await refreshOfflineResume(client, T0 + 60_000);
     expect(markerRaw()).toEqual(before);
+  });
+});
+
+describe("audit : course avec une déconnexion et double échec de purge", () => {
+  it("logout livré pendant la lecture du marqueur : aucune requête restaurée, aucun compte actif", async () => {
+    await onlineSession(7);
+    let release!: () => void;
+    idb.gate = new Promise<void>((resolve) => (release = resolve));
+    const client = coldStart();
+    const pending = resumeOfflineRead(client, T0 + 1000);
+    await tick(5);
+    // Autre onglet : déconnexion, pendant que le marqueur est déjà lu en mémoire.
+    onSessionChannelMessage(client, { type: "logout" });
+    await tick(5);
+    release();
+    expect(await pending).toBe(false);
+    expect(getActiveOfflineUserId()).toBeNull();
+    expect(client.getQueryCache().getAll()).toEqual([]);
+  });
+
+  it("purge complète : purgeOfflineSession renvoie vrai", async () => {
+    await onlineSession(7);
+    expect(await purgeOfflineSession(new QueryClient(), { broadcast: false })).toBe(true);
+  });
+
+  it("marqueur impossible à supprimer ET pierre impossible à poser : purge incomplète (faux)", async () => {
+    await onlineSession(7);
+    idb.failDelOf = RESUME_DB;
+    fakeWindow.localStorage.setItem = () => {
+      throw new Error("quota");
+    };
+    try {
+      expect(await purgeOfflineSession(new QueryClient(), { broadcast: false })).toBe(false);
+    } finally {
+      fakeWindow.localStorage.setItem = (k: string, v: string) => void lsData.set(k, v);
+    }
+  });
+});
+
+describe("audit : seules les réponses de session prolongent la reprise", () => {
+  it("clés qui prouvent un contact : drapeaux et /api/auth/me, rien d'autre", () => {
+    expect(isContactProof([FLAGS])).toBe(true);
+    expect(isContactProof(["/api/auth/me"])).toBe(true);
+    expect(isContactProof([ME])).toBe(false);
+    expect(isContactProof(["/api/missions"])).toBe(false);
   });
 });

@@ -24,7 +24,16 @@ export async function checkSession(
     const response = await fetchImpl("/api/auth/me", { credentials: "include", signal: controller.signal });
     if (response.status === 401) return { status: "anonymous" };
     if (!response.ok) return { status: "unreachable", httpStatus: response.status };
-    return { status: "authenticated", user: (await response.json()) as User };
+    // Une redirection (portail captif) ou une 200 qui n'est pas du JSON est une réponse HTTP, pas un
+    // réseau coupé : jamais de restauration hors ligne sur elle.
+    if (response.redirected) return { status: "unreachable", httpStatus: response.status };
+    let user: User;
+    try {
+      user = (await response.json()) as User;
+    } catch {
+      return { status: "unreachable", httpStatus: response.status };
+    }
+    return { status: "authenticated", user };
   } catch {
     return { status: "unreachable" };
   } finally {

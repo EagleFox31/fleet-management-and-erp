@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createSessionResume, type SessionResumeDeps } from "../../../client/src/lib/session-resume";
+import { resumeDeadlineFor } from "../../../client/src/lib/offline-data-banner";
+import { createLogout, createSessionResume, type SessionResumeDeps } from "../../../client/src/lib/session-resume";
 import type { SessionCheck } from "../../../client/src/lib/session-check";
 
 const driver = { id: 7, username: "d", name: "D", email: "d@x", role: "driver" };
@@ -98,5 +99,88 @@ describe("reprise de session : restauration hors ligne (V5b-3b)", () => {
     });
     expect(await resume()).toEqual({ status: "unreachable" });
     expect(calls).toEqual(["restore"]);
+  });
+});
+
+describe("reprise de session : réponse non JSON et purge (audit)", () => {
+  it.each([
+    ["200 text/html", { status: "unreachable", httpStatus: 200 } as SessionCheck],
+    ["redirection", { status: "unreachable", httpStatus: 302 } as SessionCheck],
+  ])("%s : restoreOffline jamais appelé", async (_label, session) => {
+    const h = harness({ session });
+    await h.resume();
+    expect(h.calls).not.toContain("restore");
+  });
+
+  function withPending(outcome: "sent" | "pending", purged: boolean | void) {
+    const calls: string[] = [];
+    const resume = createSessionResume({
+      flushPendingLogout: async () => outcome,
+      checkSession: async () => {
+        calls.push("me");
+        return { status: "unreachable" };
+      },
+      getActiveUserId: () => null,
+      activateUser: () => undefined,
+      expireUser: async () => undefined,
+      purgeLocal: async () => {
+        calls.push("purge");
+        return purged;
+      },
+      markPendingLogout: () => calls.push("mark"),
+      recordOnline: async () => undefined,
+      restoreOffline: async () => {
+        calls.push("restore");
+        return true;
+      },
+      clearResume: async () => undefined,
+    });
+    return { resume, calls };
+  }
+
+  it("déconnexion en attente puis réseau coupé : purge, aucune restauration", async () => {
+    const h = withPending("pending", undefined);
+    expect(await h.resume()).toEqual({ status: "anonymous" });
+    expect(h.calls).toEqual(["purge"]);
+  });
+
+  it("déconnexion envoyée mais purge locale incomplète : repère remis, aucune restauration", async () => {
+    const h = withPending("sent", false);
+    expect(await h.resume()).toEqual({ status: "anonymous" });
+    expect(h.calls).toEqual(["purge", "mark"]);
+  });
+});
+
+describe("déconnexion : le repère reste tant que la purge locale n'a pas abouti", () => {
+  const build = (purged: boolean | void) => {
+    const calls: string[] = [];
+    const logout = createLogout({
+      markPending: () => calls.push("mark"),
+      clearPending: () => calls.push("clear"),
+      purgeLocal: async () => purged,
+      postLogout: async () => void calls.push("post"),
+    });
+    return { logout, calls };
+  };
+  it("purge complète : repère effacé après le POST", async () => {
+    const h = build(true);
+    await h.logout();
+    expect(h.calls).toEqual(["mark", "post", "clear"]);
+  });
+  it("purge incomplète, POST réussi : repère gardé", async () => {
+    const h = build(false);
+    await h.logout();
+    expect(h.calls).toEqual(["mark", "post"]);
+  });
+});
+
+describe("bandeau : échéance du marqueur du compte actif", () => {
+  it("autre compte, aucun compte actif, ou échu : aucune échéance", () => {
+    const found = { userId: 7, expiresAt: 1000 };
+    expect(resumeDeadlineFor(found, 7, 500)).toBe(1000);
+    expect(resumeDeadlineFor(found, 8, 500)).toBeNull();
+    expect(resumeDeadlineFor(found, null, 500)).toBeNull();
+    expect(resumeDeadlineFor(found, 7, 1001)).toBeNull();
+    expect(resumeDeadlineFor(null, 7, 500)).toBeNull();
   });
 });

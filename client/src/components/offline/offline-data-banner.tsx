@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { WifiOff } from "lucide-react";
 import { useFeature } from "@/hooks/use-feature";
-import { offlineBannerText } from "@/lib/offline-data-banner";
+import { offlineBannerText, resumeDeadlineFor } from "@/lib/offline-data-banner";
+import { getActiveOfflineUserId, subscribeActiveOfflineUser } from "@/lib/offline-user-scope";
 import { offlineResume } from "@/lib/offline-kv";
 import { clientLogger } from "@/lib/logger";
 
@@ -24,25 +25,35 @@ function useOnline(): boolean {
  * Échéance de la session hors ligne (marqueur `offline-resume`), lue seulement sans réseau. Non nulle :
  * les drapeaux étaient allumés au dernier contact, ce qui vaut quand l'appli a démarré hors ligne et que
  * la requête des drapeaux n'a pas pu répondre. Lecture seule : rien n'est écrit, l'échéance ne bouge pas.
+ * Le marqueur doit appartenir au compte actif, et l'échéance est appliquée pendant que l'appli tourne.
  */
 function useOfflineResumeUntil(online: boolean): number | null {
   const [until, setUntil] = useState<number | null>(null);
+  const activeUserId = useSyncExternalStore(subscribeActiveOfflineUser, getActiveOfflineUserId, getActiveOfflineUserId);
   useEffect(() => {
     if (online) {
       setUntil(null);
       return;
     }
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     offlineResume
       .peek()
       .then((found) => {
-        if (!cancelled) setUntil(found?.expiresAt ?? null);
+        if (cancelled) return;
+        const deadline = resumeDeadlineFor(found, activeUserId, Date.now());
+        setUntil(deadline);
+        if (deadline !== null) {
+          // setTimeout plafonne à ~24 jours ; 72 h tient largement.
+          timer = setTimeout(() => setUntil(null), Math.max(0, deadline - Date.now()));
+        }
       })
       .catch((err) => clientLogger.warn("Échéance de la session hors ligne illisible", { err }));
     return () => {
       cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
     };
-  }, [online]);
+  }, [online, activeUserId]);
   return until;
 }
 
