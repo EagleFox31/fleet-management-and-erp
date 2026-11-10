@@ -15,7 +15,7 @@ import { deleteClientInvoicesWhere } from "../support/money-override";
  * aux factures et à la création de mission depuis un plein ne porte ni taux de retenue, ni
  * retenues, ni net figés. La trame de création de mission ne part plus aux comptes client.
  */
-const ACTORS = { admin: "admin", logistics: "logistics", driver: "driver", client: "client" } as const;
+const ACTORS = { admin: "admin", logistics: "logistics", driver: "driver", technician: "technician", client: "client" } as const;
 type Actor = keyof typeof ACTORS;
 const FORBIDDEN_KEYS: readonly string[] = [...CLIENT_FINANCE_FIELDS, ...CLIENT_INVOICE_FINANCE_FIELDS];
 
@@ -113,6 +113,12 @@ describe("champs finance absents des jointures client hors finance", { timeout: 
     const recipients = [...resolveRecipients(normalizeScope(data.scope, null), index)];
     expect(recipients).not.toContain("client");
     expect(recipients).toEqual(expect.arrayContaining(["admin", "logistics"]));
+    // Moindre donnée : ni chauffeur ni technicien ne reçoivent la trame du personnel, et la trame ne
+    // porte que des identifiants (le contact client et les montants du plein se relisent par HTTP).
+    expect(recipients).not.toContain("driver");
+    expect(recipients).not.toContain("technician");
+    expect(Object.keys(data.payload).sort()).toEqual(["fuelRecordId", "missionId"]);
+    expect(data.payload).toEqual({ missionId, fuelRecordId });
   });
 
   it("GET /api/operations/missions : chauffeur affecté et logistique, client joint sans taux", async () => {

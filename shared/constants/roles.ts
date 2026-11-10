@@ -464,9 +464,25 @@ export const VEHICLE_DOCUMENT_EVENT_ROLES: readonly AppRole[] = STAFF_ROLES.filt
  * Destinataires de la trame complète des événements de mission (création, modification, statut,
  * plein) : le routeur missions est réservé au personnel (`isStaff`) et la trame porte client,
  * adresses, coûts et plein de toute la flotte. Le chauffeur affecté reçoit à part une trame
- * réduite à l'identifiant ; un client ne reçoit rien (AGENTS.md §11).
+ * réduite à l'identifiant ; un client ne reçoit rien (AGENTS.md §11). Le technicien non plus
+ * (moindre donnée) : aucun de ses écrans ne lit les missions ni les fiches chauffeur.
  */
-export const MISSION_EVENT_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "driver");
+export const MISSION_EVENT_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "driver" && role !== "technician");
+
+/**
+ * Lecteurs de l'annuaire des chauffeurs (liste, fiche d'un autre, statuts et alertes CPC, missions
+ * d'un chauffeur) : le personnel sans le chauffeur ni le technicien, qui n'ont aucun écran dessus.
+ * Le chauffeur lit sa propre fiche (`/api/drivers/me`, `/api/drivers/:id` sur la sienne).
+ */
+export const DRIVER_DIRECTORY_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter(
+  (role) => role !== "driver" && role !== "technician",
+);
+
+/**
+ * Lecteurs des preuves de livraison (POD) d'une mission : le personnel sans le technicien. Le
+ * chauffeur y reste, cloisonné à ses missions par la garde du routeur POD.
+ */
+export const MISSION_POD_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "technician");
 
 /**
  * Destinataires des événements du catalogue pièces (création, modification, suppression, ajustement

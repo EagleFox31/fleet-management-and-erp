@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
 import { and, eq, desc, isNull, like } from "drizzle-orm";
 import { db } from "../db";
@@ -10,6 +10,7 @@ import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { driverEventScopes } from "../lib/driver-realtime";
 import { toFieldErrors } from "@shared/errors";
+import { DRIVER_DIRECTORY_READ_ROLES, type AppRole } from "@shared/constants/roles";
 import { toExpiryDateOnly } from "@shared/constants/expiry-day";
 import { bodyIdSchema } from "@shared/contracts/common";
 import { CPC_TRAINING_DATE_FUTURE_MESSAGE, isCpcTrainingDateInFuture } from "../lib/driver-cpc-input";
@@ -186,7 +187,27 @@ router.get("/me", async (req, res, next) => {
   }
 });
 
-router.get("/:id/missions", async (req, res, next) => {
+/**
+ * Annuaire des chauffeurs (moindre donnée) : le chauffeur ne lit que sa propre fiche, le reste du
+ * personnel passe par DRIVER_DIRECTORY_READ_ROLES (ni technicien ni autre chauffeur).
+ */
+const driverSelfOrDirectory = async (req: Request, _res: Response, next: NextFunction) => {
+  try {
+    const role = req.user?.role as AppRole | undefined;
+    if (role === "driver") {
+      const driverId = parseRouteId(req.params.id, "ID de chauffeur invalide");
+      const driverScope = await driverScopeOf(req.user);
+      if (!driverScope?.includes(driverId)) throw new AppError(403, OUT_OF_DRIVER_PROFILE_MESSAGE);
+      return next();
+    }
+    if (!role || !DRIVER_DIRECTORY_READ_ROLES.includes(role)) throw new AppError(403, "Accès non autorisé");
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
+router.get("/:id/missions", driverSelfOrDirectory, async (req, res, next) => {
   try {
     const driverId = parseRouteId(req.params.id, "ID de chauffeur invalide");
 
@@ -224,7 +245,7 @@ router.get("/:id/missions", async (req, res, next) => {
   }
 });
 
-router.get("/:id", async (req, res, next) => {
+router.get("/:id", driverSelfOrDirectory, async (req, res, next) => {
   try {
     const driverId = parseRouteId(req.params.id, "ID de chauffeur invalide");
 
