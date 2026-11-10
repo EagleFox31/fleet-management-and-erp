@@ -14,15 +14,16 @@ import { createE2EUser } from "./helpers/test-data";
  * - Mouvements de pneus : le magasinier retrouve le montage du jour (pneu, immatriculation).
  * - Anomalies carburant : un plein au-delà de la capacité du réservoir (règle tank-overflow) apparaît ;
  *   la logistique le traite, le chef d'atelier le consulte sans bouton « Traiter ».
- * Les deux listes sont triées par date décroissante : les données sont datées du jour pour être en tête.
+ * Les données sont datées du jour (UTC) ; chaque assertion cible la ligne par son identifiant, sans dépendre de l'ordre de tri.
  */
 
 const ids = createIdBag();
 const tireIds: number[] = [];
 const anomalyKeys: string[] = [];
-let warehouse: E2ECredentials;
-let logistics: E2ECredentials;
-let workshopManager: E2ECredentials;
+type E2EUser = E2ECredentials & { id: number };
+let warehouse: E2EUser;
+let logistics: E2EUser;
+let workshopManager: E2EUser;
 const today = new Date().toISOString().slice(0, 10);
 
 test.beforeAll(async () => {
