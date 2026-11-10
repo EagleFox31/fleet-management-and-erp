@@ -15,6 +15,15 @@ export const VEHICLE_POSITIONS_PATH = "/api/vehicle-positions";
 /** Trace d'une mission : `/api/missions/<id>/track`. */
 export const missionTrackPath = (missionId: number): string => `/api/missions/${missionId}/track`;
 
+/** Dépôt des positions du chauffeur : `POST /api/driver/missions/<id>/positions` (lot <= 50, idempotent par clientPointId). */
+export const driverMissionPositionsPath = (missionId: number): string => `/api/driver/missions/${missionId}/positions`;
+
+export const driverPositionsResponseSchema = z.object({
+  accepted: z.number().int().min(0),
+  duplicates: z.number().int().min(0),
+  rejected: z.number().int().min(0),
+});
+
 /** Points A/B d'une mission : `PATCH /api/missions/<id>/geo`. */
 export const missionGeoPath = (missionId: number): string => `/api/missions/${missionId}/geo`;
 
