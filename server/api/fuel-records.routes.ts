@@ -57,11 +57,14 @@ router.get("/fuel-records/vehicle/:vehicleId", isAnyUser, async (req, res, next)
     await assertVehicleSubresourcesReadable(req, vehicleId);
     const records = await fuelService.getFuelRecordsByVehicleId(vehicleId);
     return res.status(200).json(
-      records.map((record: FuelRecord) => ({
-        ...record,
-        pricePerLiter: record.quantity > 0 ? Number(record.cost) / record.quantity : 0,
-        totalCost: Number(record.cost),
-      })),
+      withoutFuelCardBalance(
+        req.user,
+        records.map((record: FuelRecord) => ({
+          ...record,
+          pricePerLiter: record.quantity > 0 ? Number(record.cost) / record.quantity : 0,
+          totalCost: Number(record.cost),
+        })),
+      ),
     );
   } catch (err) {
     if (err instanceof AppError) return next(err);
@@ -103,7 +106,7 @@ router.get("/fuel-records", isAnyUser, async (req, res, next) => {
       }
       records.sort((a, b) => (b.date ? new Date(b.date).getTime() : 0) - (a.date ? new Date(a.date).getTime() : 0));
     }
-    return res.status(200).json(records.map(withPrice));
+    return res.status(200).json(withoutFuelCardBalance(req.user, records.map(withPrice)));
   } catch (err) {
     if (err instanceof AppError) return next(err);
     return next(withLogContext(new AppError(500, "Erreur serveur", { cause: err }), { event: "lecture des pleins en échec" }));

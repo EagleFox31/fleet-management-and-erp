@@ -438,6 +438,11 @@ export function canReadTechnicianReport(role: string | null | undefined): boolea
  */
 export const STAFF_ROLES: readonly AppRole[] = ALL_APP_ROLES.filter((role) => role !== "client");
 /**
+ * Personnel hors chauffeur : fiches client (coordonnées, créateur) et leurs trames temps réel. Le chauffeur
+ * lit le nom du client sur sa mission, jamais la fiche (moindre donnée, lot « chauffeur »).
+ */
+export const STAFF_EXCEPT_DRIVER_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "driver");
+/**
  * Saisie d'exploitation sur un véhicule (kilométrage, position de maintenance, incident) : le
  * personnel moins le comptable, qui consulte sans saisir. `isStaff` ne suffit pas : il s'ouvre
  * à tout nouveau rôle du personnel sans que le diff le montre. Le lecteur est exclu ici aussi, en plus
