@@ -1,5 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fakeIndexedDb } from "../../support/fake-indexeddb";
 
 // Reprise hors ligne et rejeu de la file : un compte rouvert depuis le marqueur n'envoie rien
 // tant que /api/auth/me n'a pas confirmé la session dans cette page.
@@ -75,19 +76,6 @@ async function queuedSession(userId: number) {
   vi.stubGlobal("navigator", { onLine: true });
 }
 
-/** IndexedDB factice : énumère les bases du faux idb-keyval et accepte leur suppression (sans bruit sur stderr). */
-function fakeIndexedDb() {
-  return {
-    databases: async () => Array.from(idb.dbs.keys()).map((name) => ({ name })),
-    deleteDatabase: (name: string) => {
-      idb.dbs.delete(name);
-      const request: { onsuccess?: () => void } = {};
-      queueMicrotask(() => request.onsuccess?.());
-      return request;
-    },
-  };
-}
-
 beforeEach(() => {
   idb.dbs.clear();
   lsData.clear();
@@ -98,7 +86,7 @@ beforeEach(() => {
   fetchMock.mockResolvedValue(new Response(JSON.stringify({ id: 7, role: "driver" }), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal("window", fakeWindow);
-  vi.stubGlobal("indexedDB", fakeIndexedDb());
+  vi.stubGlobal("indexedDB", fakeIndexedDb(idb.dbs));
   setActiveOfflineUserId(null);
 });
 
