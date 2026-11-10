@@ -257,6 +257,9 @@ export async function resumeOfflineRead(queryClient: QueryClient, now: number = 
     return null;
   }
   markOfflineSessionUnconfirmed(grant.userId);
+  // Même règle que activateOfflineUser (S1) : l'appareil est rouvert au nom de ce compte, les tampons GPS
+  // d'un autre compte (laissés par une session expirée) sont détruits et l'époque avance.
+  purgeGpsBuffersOfOthers(grant.userId);
   setActiveOfflineUserId(grant.userId);
   await restoreQueryClientFromIndexedDB(queryClient, grant.isFlagOn, now);
   return { userId: grant.userId, profile: grant.profile, expiresAt: grant.expiresAt };
