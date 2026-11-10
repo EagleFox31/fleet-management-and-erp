@@ -27,7 +27,8 @@ const VERSION_FORMAT = 'YYYY-MM-DD"T"HH24:MI:SS.US';
 /**
  * Valide un bon de carburant (identifiant de `fuel_records`). La mise à jour est conditionnée à l'état
  * `pending` et, si l'écran l'envoie, à la `version` affichée : deux validations simultanées n'en
- * écrivent qu'une, l'autre reçoit 409, comme un bon déjà validé ou modifié depuis son affichage.
+ * écrivent qu'une, l'autre reçoit 409, comme un bon déjà validé ou modifié depuis son affichage. Un bon annulé
+ * (suppression douce) ou inconnu répond 404, jamais 409.
  */
 export async function validateFuelVoucher(userId: number, id: number, version?: string): Promise<FuelVoucherValidationResponse> {
   const now = new Date();

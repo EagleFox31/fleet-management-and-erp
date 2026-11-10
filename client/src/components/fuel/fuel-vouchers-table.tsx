@@ -46,7 +46,7 @@ export function FuelVouchersTable({ readOnly = false }: { readOnly?: boolean }) 
 
   const mutation = useMutation({
     // La version affichée part avec la validation : un bon modifié depuis son affichage répond 409.
-    mutationFn: async ({ id, version }: { id: number; version: string }) =>
+    mutationFn: async ({ id, version }: { id: number; version?: string }) =>
       fuelVoucherValidationResponseSchema.parse(
         await (await apiRequest("POST", validateFuelVoucherPath(id), { version } satisfies FuelVoucherValidateBody)).json(),
       ),

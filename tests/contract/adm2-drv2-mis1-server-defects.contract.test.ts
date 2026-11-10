@@ -308,6 +308,8 @@ describe("DRV2-1/2 : POST /api/driver/breakdowns", { timeout: 180000 }, () => {
   it("échec dans la transaction après l'insertion de l'OT : aucun OT ne subsiste (rollback)", async () => {
     const marker = uniqueTestToken("ROLLBACK");
     const failingDb = {
+      // Lecture du véhicule avant la transaction (404 sur véhicule inexistant) : base réelle.
+      select: (...args: Parameters<typeof db.select>) => db.select(...args),
       transaction: (fn: (tx: unknown) => Promise<unknown>) =>
         db.transaction((tx) =>
           fn(
