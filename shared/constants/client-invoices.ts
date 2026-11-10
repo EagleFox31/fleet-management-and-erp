@@ -37,3 +37,31 @@ export function statusAfterBalanceChange(
   if (newBalance < amountTTC) return "partial";
   return "pending";
 }
+
+export const toCents = (value: string | number): number => Math.round(Number(value) * 100);
+
+/**
+ * Montants d'un avoir en centimes : TVA au taux de la facture (ex. 19.25 ou 0), calcul en entiers, arrondi au
+ * centime. Source unique : le service qui l'enregistre et l'écran qui en montre l'aperçu.
+ */
+export function creditNoteAmounts(amountHt: number, vatRate: string | number | null | undefined) {
+  const htCents = toCents(amountHt);
+  const rateBp = Math.round(Number(vatRate ?? 0) * 100); // 19.25 % -> 1925
+  const vatCents = Math.round((htCents * rateBp) / 10000);
+  return { htCents, vatCents, ttcCents: htCents + vatCents };
+}
+
+/**
+ * Plus grand HT (en unités, 2 décimales) dont le TTC tient dans le solde : l'avoir est plafonné au solde
+ * (remboursement hors v1). 0 si le solde est nul ou négatif.
+ */
+export function maxCreditNoteHtOf(balance: string | number, vatRate: string | number | null | undefined): number {
+  const balanceCents = toCents(balance);
+  if (!(balanceCents > 0)) return 0;
+  const rateBp = Math.round(Number(vatRate ?? 0) * 100);
+  let htCents = Math.floor((balanceCents * 10000) / (10000 + rateBp));
+  const ttcOf = (cents: number) => creditNoteAmounts(cents / 100, vatRate).ttcCents;
+  while (htCents > 0 && ttcOf(htCents) > balanceCents) htCents -= 1;
+  while (ttcOf(htCents + 1) <= balanceCents) htCents += 1;
+  return htCents / 100;
+}

@@ -1,5 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { clientLogger } from "@/lib/logger";
+import { purgeGpsBuffersOfOthers } from "@/lib/gps-tracking";
 import { applyRestoredQueries } from "@/lib/offline-restore";
 import { pendingServerLogout } from "@/lib/pending-logout";
 import { purgeBrowserUserState } from "@/lib/form-draft-storage";
@@ -77,6 +78,9 @@ export function activateOfflineUser(
     return;
   }
   sessionGeneration += 1;
+  // Tampons GPS : même règle que la file hors ligne (S1). L'époque avance, les envois en vol de l'ancien
+  // compte s'arrêtent, ses tampons sont détruits (jamais envoyés sous le cookie du nouveau).
+  purgeGpsBuffersOfOthers(userId);
   queryClient.clear();
   setActiveOfflineUserId(userId);
   // Autre compte : le marqueur de reprise de l'ancien ne doit pas survivre (celui du nouveau est écrit après /me).
@@ -264,6 +268,9 @@ export async function resumeOfflineRead(queryClient: QueryClient, now: number = 
     return null;
   }
   markOfflineSessionUnconfirmed(grant.userId);
+  // Même règle que activateOfflineUser (S1) : l'appareil est rouvert au nom de ce compte, les tampons GPS
+  // d'un autre compte (laissés par une session expirée) sont détruits et l'époque avance.
+  purgeGpsBuffersOfOthers(grant.userId);
   setActiveOfflineUserId(grant.userId);
   await restoreQueryClientFromIndexedDB(queryClient, grant.isFlagOn, now);
   return { userId: grant.userId, profile: grant.profile, expiresAt: grant.expiresAt };

@@ -3746,3 +3746,22 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `resolve.preserveSymlinks: true` dans `vitest.contract.config.ts` : échec, donc écarté.
 - **Prévention** : consigne dans `tests/README.md` (section Postgres local) avec le symptôme exact et les deux parades. Prévention documentaire seulement : un garde automatique (refuser de démarrer si la racine vitest et le chemin réel du runner diffèrent par la casse ou par une jonction) reste à faire si le piège revient.
 - **Leçon généralisée** : sous Windows, un même fichier peut avoir plusieurs orthographes (casse de la lettre de lecteur, jonction, lien). Un outil qui identifie ses modules par chemin peut alors en charger deux copies. Devant une erreur qui touche aussi un test de référence sain, comparer d'abord le chemin réel et le chemin d'appel avant de soupçonner le code.
+
+## 2026-11-10 — La faille S1 du changement de compte s'est répétée sur le tampon GPS
+
+- **Contexte** : la file hors ligne détruit les données de l'ancien compte quand un autre se connecte (S1, `activateOfflineUser` et message `session-changed`). Le tampon GPS (#678) ne s'accrochait qu'à la déconnexion.
+- **Cause racine** : l'époque de purge GPS n'avançait qu'à la déconnexion (`purgeBrowserUserState`). Session de A expirée, panneau GPS de A resté ouvert dans l'onglet 1, B se connecte dans l'onglet 2 : le flush et le rejeu de A partaient avec le cookie de B.
+- **Classification** : cloison entre comptes, régression d'une règle connue (même famille que #56 et V5b-2b).
+- **Résolution** : `purgeGpsBuffersOfOthers` appelé par `activateOfflineUser` (donc aussi par `session-changed`) ; l'époque est relevée par l'appelant et passée à `sendBuffered` ; le paquet déclare son propriétaire (`X-Offline-Owner`), le serveur répond 409 `OFFLINE_OWNER_MISMATCH` s'il diffère de la session.
+- **Prévention vérifiable** : `tests/unit/client/gps-account-switch.test.ts` rejoue le scénario A/B (autre onglet et même onglet). Règle : tout stockage local par utilisateur s'abonne au canal de changement de compte (`activateOfflineUser`) et son test A/B le prouve ; sans ce test, le stockage n'est pas livré.
+- **Leçon généralisée** : une règle de cloison se branche sur l'événement « le compte actif change », pas sur la déconnexion seule ; la déconnexion n'est qu'un cas.
+
+## 2026-11-11 — « Clé de requête » affiché à l'utilisateur sur un rejeu refusé (#685, #691)
+
+- **Contexte** : l'idempotence des écritures d'argent (avoirs, échéances, trésorerie, saisies chauffeur) repose sur une `requestKey` générée par le client. Le serveur refuse en 409 une même clé avec un autre contenu.
+- **Symptôme** : relecture de #685 : un comptable qui modifie le montant d'un avoir après une coupure réseau lit « Cette clé de requête est déjà utilisée… », qu'il ne peut ni comprendre ni corriger. Le même terme existait dans 12 chaînes de `server/` et `shared/`.
+- **Cause racine** : le message d'erreur a été écrit du point de vue du mécanisme (la clé) et non de l'action de l'utilisateur (sa saisie) ; chaque service a recopié le message du précédent.
+- **Classification** : near miss UX, règle connue (pas de libellé technique dans l'UI) non outillée, donc répétée.
+- **Résolution** : messages métier autour de « saisie », avec la conduite à tenir (recharger, recommencer) ; constantes partagées pour les avoirs, assertées à l'identique par le contrat.
+- **Prévention vérifiable** : `tests/unit/server/request-key-jargon-hygiene.test.ts` (AST) échoue sur toute chaîne de `server/` ou `shared/` contenant « clé de requête » ou « clé d'idempotence », hors arguments de journal ; liste gelée vide.
+- **Leçon généralisée** : un message d'erreur décrit ce que l'utilisateur a fait et ce qu'il peut faire, jamais le mécanisme qui l'a refusé. Une règle de vocabulaire qui revient se transforme en garde automatique.

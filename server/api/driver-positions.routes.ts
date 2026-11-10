@@ -3,7 +3,11 @@ import { routeIdSchema } from "@shared/contracts/common";
 import { requireFeature } from "../lib/feature-flags";
 import { gpsBatchSchema, parseOsmandReport, toGpsPoint } from "../lib/gps-points";
 import { AppError } from "../lib/app-error";
+import { OFFLINE_OWNER_HEADER } from "../lib/idempotency-config";
+import { moduleLogger } from "../lib/logger";
+import { offlineOwnerMismatch, ownerHeaderMatches } from "../lib/offline-owner";
 import { authorize } from "../middleware/auth";
+import { createKeyedRateLimiter } from "../middleware/keyed-rate-limit";
 import { activeMissionIdOf, ingestDriverPositions } from "../services/vehicle-positions-service";
 
 /**
@@ -24,8 +28,54 @@ import { activeMissionIdOf, ingestDriverPositions } from "../services/vehicle-po
  * avec le jeton d'appareil (lot balises).
  *
  * Les positions sont exclues du journal d'audit (server/lib/audit-config.ts).
+ *
+ * Débit plafonné (seau à jetons, server/middleware/keyed-rate-limit.ts), au-delà : 429 `GPS_RATE_LIMITED`
+ * avec Retry-After ; le client garde le paquet en tampon (`shouldDropBatch`) et le renvoie au vidage suivant.
+ * - Paquets : par chauffeur et par mission. Le téléphone vide son tampon toutes les 2 min ; la rafale
+ *   (20 par défaut = tampon plein de 1 000 points / 50 par paquet) laisse partir d'un coup un tampon
+ *   accumulé hors ligne, puis un paquet toutes les 10 s.
+ * - OsmAnd : par chauffeur seulement, la mission n'étant connue que dans le handler (un chauffeur n'a
+ *   qu'une mission en route). Un relevé par requête : rafale 30, puis un relevé toutes les 5 s.
+ * Réglages : GPS_BATCH_BURST, GPS_BATCH_REFILL_SECONDS, GPS_OSMAND_BURST, GPS_OSMAND_REFILL_SECONDS.
  */
 const router = Router();
+const log = moduleLogger("driver-positions");
+
+export const GPS_RATE_DEFAULTS = { batchBurst: 20, batchRefillSeconds: 10, osmandBurst: 30, osmandRefillSeconds: 5 };
+
+const positive = (raw: string | undefined, fallback: number) => {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
+const RATE_MESSAGE = "Positions envoyées trop souvent. Elles restent sur le téléphone et repartiront automatiquement.";
+
+/**
+ * Mission de l'URL validée AVANT le limiteur (400 sinon) : la clé ne reçoit qu'un identifiant
+ * normalisé. Sans cela, un id brut (16 Ko × 10 000 clés) gonflait la mémoire, un flot d'id distincts
+ * évinçait la vraie clé du chauffeur (quota remis à zéro), et `07` contournait le quota de `7`.
+ */
+const missionIdParam: RequestHandler = (req, _res, next) => {
+  const parsed = routeIdSchema.safeParse(req.params.id);
+  next(parsed.success ? undefined : parsed.error);
+};
+
+export const batchRateLimit = createKeyedRateLimiter({
+  // Constante de repli : inatteignable derrière missionIdParam, garde la clé bornée si l'ordre change.
+  keyOf: (req) => `${req.user!.id}:${routeIdSchema.safeParse(req.params.id).data ?? "invalide"}`,
+  capacity: () => Math.max(1, Math.floor(positive(process.env.GPS_BATCH_BURST, GPS_RATE_DEFAULTS.batchBurst))),
+  refillMs: () => positive(process.env.GPS_BATCH_REFILL_SECONDS, GPS_RATE_DEFAULTS.batchRefillSeconds) * 1000,
+  code: "GPS_RATE_LIMITED",
+  message: RATE_MESSAGE,
+});
+
+const osmandRateLimit = createKeyedRateLimiter({
+  keyOf: (req) => String(req.user!.id),
+  capacity: () => Math.max(1, Math.floor(positive(process.env.GPS_OSMAND_BURST, GPS_RATE_DEFAULTS.osmandBurst))),
+  refillMs: () => positive(process.env.GPS_OSMAND_REFILL_SECONDS, GPS_RATE_DEFAULTS.osmandRefillSeconds) * 1000,
+  code: "GPS_RATE_LIMITED",
+  message: RATE_MESSAGE,
+});
 
 const jsonOnly: RequestHandler = (req, _res, next) => {
   if (!req.is("application/json")) {
@@ -33,6 +83,18 @@ const jsonOnly: RequestHandler = (req, _res, next) => {
     return;
   }
   next();
+};
+
+/**
+ * Propriétaire déclaré du paquet (`X-Offline-Owner`, posé par le tampon du navigateur) : le cookie est
+ * partagé entre onglets, un autre compte connecté entre-temps ne doit pas recevoir les points de l'ancien.
+ * Sans l'en-tête, la requête passe comme avant.
+ */
+const ownerMatchesSession: RequestHandler = (req, _res, next) => {
+  if (req.get(OFFLINE_OWNER_HEADER) === undefined || ownerHeaderMatches(req, req.user?.id)) return next();
+  // Pas d'identifiant dans le journal : seulement le fait.
+  log.warn({ requestId: req.requestId }, "positions différées refusées : la session n'est pas celle de leur propriétaire");
+  next(offlineOwnerMismatch());
 };
 
 const postBatch: RequestHandler = async (req, res, next) => {
@@ -60,7 +122,7 @@ const postOsmand: RequestHandler = async (req, res, next) => {
   }
 };
 
-router.post("/driver/missions/:id/positions", requireFeature("gps"), authorize(["driver"]), jsonOnly, postBatch);
-router.post("/driver/positions", requireFeature("gps"), authorize(["driver"]), jsonOnly, postOsmand);
+router.post("/driver/missions/:id/positions", requireFeature("gps"), authorize(["driver"]), jsonOnly, missionIdParam, ownerMatchesSession, batchRateLimit, postBatch);
+router.post("/driver/positions", requireFeature("gps"), authorize(["driver"]), jsonOnly, osmandRateLimit, postOsmand);
 
 export default router;

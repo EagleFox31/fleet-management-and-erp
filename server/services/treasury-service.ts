@@ -127,11 +127,11 @@ const sameEntry = (e: TreasuryEntry, input: Comparable, withLinks: boolean) =>
   (withLinks ? [...COMPARED, ...LINKS] : COMPARED).every((field) => (e[field] ?? null) === (input[field] ?? null));
 
 function replay(existing: TreasuryEntry, input: CreateTreasuryEntryInput): { entry: TreasuryEntry; replayed: boolean } {
-  if (!sameEntry(existing, input, true)) throw new AppError(409, "Cette clé de requête a déjà servi pour une autre écriture.");
+  if (!sameEntry(existing, input, true)) throw new AppError(409, "Une autre écriture a déjà été enregistrée pour cette saisie. Rechargez la page pour voir les écritures enregistrées.");
   return { entry: existing, replayed: true };
 }
 
-const KEY_CONFLICT = "Cette clé de requête a déjà servi pour une autre opération.";
+const KEY_CONFLICT = "Une autre opération a déjà été enregistrée pour cette saisie. Rechargez la page pour voir les opérations enregistrées.";
 
 export const treasuryService = {
   /** Type d'un compte, ou `null` s'il n'existe pas : contrôle d'accès avant toute lecture du livre. */
@@ -268,7 +268,7 @@ export const treasuryService = {
       const same =
         sameEntry(out, { ...shared, accountId: input.fromAccountId, direction: "out" }, false) &&
         sameEntry(inn, { ...shared, accountId: input.toAccountId, direction: "in" }, false);
-      if (!same) throw new AppError(409, "Cette clé de requête a déjà servi pour un autre virement.");
+      if (!same) throw new AppError(409, "Un autre virement a déjà été enregistré pour cette saisie. Rechargez la page pour voir les virements enregistrés.");
       return { entries: [out, inn] as [TreasuryEntry, TreasuryEntry], replayed: true };
     };
     const already = await replayOf();

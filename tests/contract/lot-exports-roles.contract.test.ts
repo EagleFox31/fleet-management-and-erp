@@ -124,6 +124,7 @@ describe("garde isStaff au montage (T-62)", { timeout: 60000 }, () => {
       "/api/clients": ["technician", "driver"],
       "/api/drivers": ["technician", "driver"],
       "/api/missions": ["technician"],
+      "/api/operations/missions": ["technician"],
     };
     for (const role of refused[path] ?? []) {
       it(`${path} : ${role} 403 (hors périmètre de lecture)`, async () => {

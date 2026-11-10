@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
+import { batchRateLimit } from "../../server/api/driver-positions.routes";
 import { resetVehiclePositionBroadcasts } from "../../server/lib/vehicle-position-realtime";
 import { assignments, drivers, missions, vehiclePositions } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
@@ -95,6 +96,20 @@ describe("ingestion par paquets", { timeout: 120000 }, () => {
     const rows = await db.select().from(vehiclePositions).where(eq(vehiclePositions.missionId, missionId));
     expect(rows).toHaveLength(2);
     expect(rows.every((r) => r.source === "phone" && r.driverId === driverAId)).toBe(true);
+  });
+
+  it("paquet d'un autre propriétaire (X-Offline-Owner) : 409 OFFLINE_OWNER_MISMATCH, rien d'écrit ; propriétaire correct : accepté", async () => {
+    const own = String(session.userIdOf("driverA"));
+    const batch = { points: [point({ recordedAt: minutesAgo(5), lat: 4.07 })] };
+    const url = `/api/driver/missions/${missionId}/positions`;
+    const before = (await db.select().from(vehiclePositions).where(eq(vehiclePositions.missionId, missionId))).length;
+    const foreign = await session.call("POST", url, { actor: "driverA", body: batch, headers: { "X-Offline-Owner": String(Number(own) + 1) } });
+    expect(foreign.status, JSON.stringify(foreign.body)).toBe(409);
+    expect(foreign.body).toMatchObject({ code: "OFFLINE_OWNER_MISMATCH" });
+    const after = await db.select().from(vehiclePositions).where(eq(vehiclePositions.missionId, missionId));
+    expect(after).toHaveLength(before);
+    const mine = await session.call("POST", url, { actor: "driverA", body: batch, headers: { "X-Offline-Owner": own } });
+    expect(mine.status, JSON.stringify(mine.body)).toBe(201);
   });
 
   it("refuse futur, trop ancien et hors fenêtre de mission", async () => {
@@ -288,6 +303,73 @@ describe("plafond de points par mission", { timeout: 120000 }, () => {
     const mixed = await session.call("POST", `/api/driver/missions/${m.id}/positions`, { actor: "driverA", body: { points: [known, point()] } });
     expect(mixed.status, JSON.stringify(mixed.body)).toBe(409);
     expect(mixed.body).toMatchObject({ code: "GPS_MISSION_CAP_REACHED" });
+  });
+});
+
+describe("débit plafonné par chauffeur et par mission", { timeout: 120000 }, () => {
+  it("au-delà de la rafale : 429 GPS_RATE_LIMITED + Retry-After, rien d'écrit ; une autre mission reste ouverte", async () => {
+    const saved = { burst: process.env.GPS_BATCH_BURST, refill: process.env.GPS_BATCH_REFILL_SECONDS };
+    process.env.GPS_BATCH_BURST = "3";
+    process.env.GPS_BATCH_REFILL_SECONDS = "3600";
+    try {
+      const fresh = async () => {
+        const [m] = await db.insert(missions).values({ orderNumber: uniqueTestToken("MIS"), pickupAddress: "TEST A", deliveryAddress: "TEST B", status: "in_progress" } as any).returning();
+        missionIds.push(m.id);
+        await db.insert(assignments).values({ missionId: m.id, vehicleId, driverId: driverAId, status: "in_progress", startedAt: new Date(Date.now() - 30 * 60_000) } as any);
+        return m.id;
+      };
+      const limited = await fresh();
+      for (let i = 0; i < 3; i++) {
+        const ok = await session.call("POST", `/api/driver/missions/${limited}/positions`, { actor: "driverA", body: { points: [point()] } });
+        expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+      }
+      const blocked = await session.call("POST", `/api/driver/missions/${limited}/positions`, { actor: "driverA", body: { points: [point()] } });
+      expect(blocked.status, JSON.stringify(blocked.body)).toBe(429);
+      expect(blocked.body).toMatchObject({ code: "GPS_RATE_LIMITED" });
+      expect(blocked.body.message).toMatch(/restent sur le téléphone/);
+      expect(Number(blocked.headers.get("retry-after"))).toBeGreaterThan(0);
+      const rows = await db.select({ id: vehiclePositions.id }).from(vehiclePositions).where(eq(vehiclePositions.missionId, limited));
+      expect(rows).toHaveLength(3);
+
+      const other = await fresh();
+      const open = await session.call("POST", `/api/driver/missions/${other}/positions`, { actor: "driverA", body: { points: [point()] } });
+      expect(open.status, JSON.stringify(open.body)).toBe(201);
+    } finally {
+      if (saved.burst === undefined) delete process.env.GPS_BATCH_BURST;
+      else process.env.GPS_BATCH_BURST = saved.burst;
+      if (saved.refill === undefined) delete process.env.GPS_BATCH_REFILL_SECONDS;
+      else process.env.GPS_BATCH_REFILL_SECONDS = saved.refill;
+    }
+  });
+});
+
+describe("clé du limiteur : identifiant de mission validé avant", { timeout: 120000 }, () => {
+  it("id non numérique ou long : 400 sans clé créée ; `0<id>` partage le quota de `<id>`", async () => {
+    const saved = { burst: process.env.GPS_BATCH_BURST, refill: process.env.GPS_BATCH_REFILL_SECONDS };
+    process.env.GPS_BATCH_BURST = "1";
+    process.env.GPS_BATCH_REFILL_SECONDS = "3600";
+    try {
+      const [m] = await db.insert(missions).values({ orderNumber: uniqueTestToken("MIS"), pickupAddress: "TEST A", deliveryAddress: "TEST B", status: "in_progress" } as any).returning();
+      missionIds.push(m.id);
+      await db.insert(assignments).values({ missionId: m.id, vehicleId, driverId: driverAId, status: "in_progress", startedAt: new Date(Date.now() - 30 * 60_000) } as any);
+
+      const before = batchRateLimit.size();
+      for (const id of ["x".repeat(4000), "abc", "1e3", "-1", `${"9".repeat(40)}`]) {
+        const res = await session.call("POST", `/api/driver/missions/${id}/positions`, { actor: "driverA", body: { points: [point()] } });
+        expect(res.status, id.slice(0, 20)).toBe(400);
+      }
+      expect(batchRateLimit.size()).toBe(before);
+
+      const ok = await session.call("POST", `/api/driver/missions/${m.id}/positions`, { actor: "driverA", body: { points: [point()] } });
+      expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+      const padded = await session.call("POST", `/api/driver/missions/0${m.id}/positions`, { actor: "driverA", body: { points: [point()] } });
+      expect(padded.status, JSON.stringify(padded.body)).toBe(429);
+    } finally {
+      if (saved.burst === undefined) delete process.env.GPS_BATCH_BURST;
+      else process.env.GPS_BATCH_BURST = saved.burst;
+      if (saved.refill === undefined) delete process.env.GPS_BATCH_REFILL_SECONDS;
+      else process.env.GPS_BATCH_REFILL_SECONDS = saved.refill;
+    }
   });
 });
 
