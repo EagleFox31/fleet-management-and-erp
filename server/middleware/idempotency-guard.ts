@@ -67,7 +67,7 @@ export function idempotencyGuard(
     if (!userId) return next();
     const key = rawKey.trim();
     if (!IDEMPOTENCY_KEY_PATTERN.test(key)) {
-      return next(new AppError(400, "Clé d'idempotence invalide."));
+      return next(new AppError(400, "Saisie non reconnue. Rechargez la page et recommencez."));
     }
 
     const requestHash = hashRequest(method, path, req.body);
@@ -93,7 +93,7 @@ export function idempotencyGuard(
       return next(new AppError(409, message, { code: "IDEMPOTENCY_IN_PROGRESS" }));
     }
     if (outcome.kind === "mismatch") {
-      return next(new AppError(422, "Cette clé d'idempotence a déjà servi pour une autre opération."));
+      return next(new AppError(422, "Une autre opération a déjà été enregistrée pour cette saisie. Rechargez la page pour voir ce qui a été enregistré."));
     }
 
     let settled = false;

@@ -8,6 +8,16 @@ import { z } from "zod";
 export const CREDIT_NOTE_REASON_MIN = 3;
 export const CREDIT_NOTE_REASON_MAX = 500;
 
+/**
+ * Refus d'un rejeu (même saisie, autre avoir). Lus à l'écran : jamais « clé de requête », terme technique
+ * (tests/unit/server/request-key-jargon-hygiene.test.ts).
+ */
+export const CREDIT_NOTE_KEY_CONFLICT_MESSAGE =
+  "Un autre avoir a déjà été enregistré pour cette saisie. Rechargez la facture pour voir les avoirs enregistrés.";
+export const CREDIT_NOTE_KEY_OTHER_INVOICE_MESSAGE =
+  "Cette saisie a déjà servi pour un avoir sur une autre facture. Fermez la fenêtre et recommencez la saisie.";
+const CREDIT_NOTE_KEY_INVALID_MESSAGE = "La saisie de l'avoir est incomplète. Fermez la fenêtre et recommencez.";
+
 /** Décimal strictement positif à 2 chiffres au plus (nombre ou chaîne), ramené à un nombre. */
 const positiveAmount = z
   .union([z.string(), z.number()], { errorMap: () => ({ message: "Le montant de l'avoir est obligatoire." }) })
@@ -24,10 +34,10 @@ export const createClientCreditNoteSchema = z.object({
     .min(CREDIT_NOTE_REASON_MIN, `Le motif doit faire au moins ${CREDIT_NOTE_REASON_MIN} caractères.`)
     .max(CREDIT_NOTE_REASON_MAX, `Le motif ne doit pas dépasser ${CREDIT_NOTE_REASON_MAX} caractères.`),
   requestKey: z
-    .string({ required_error: "La clé de requête est obligatoire." })
+    .string({ required_error: CREDIT_NOTE_KEY_INVALID_MESSAGE })
     .trim()
-    .min(8, "La clé de requête est trop courte.")
-    .max(100, "La clé de requête est trop longue."),
+    .min(8, CREDIT_NOTE_KEY_INVALID_MESSAGE)
+    .max(100, CREDIT_NOTE_KEY_INVALID_MESSAGE),
 });
 
 export type CreateClientCreditNoteInput = z.infer<typeof createClientCreditNoteSchema>;
