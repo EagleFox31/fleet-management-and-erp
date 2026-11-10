@@ -3,6 +3,7 @@ import { dirname, join, relative, resolve } from "path";
 import { fileURLToPath } from "url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
+import { idSchema, routeIdSchema } from "../../../shared/contracts/common";
 import { MAX_DB_INTEGER_ID, parseRouteId, routeIdOrNaN } from "../../../server/lib/route-id";
 import { countBoundRequestConversions, isRequestPart, looseNumericValue, unwrapValue } from "../../support/request-id-scan";
 import { sourceFiles, stripComments } from "../../support/route-guard-scan";
@@ -41,8 +42,12 @@ const API_DIR = join(ROOT, "server/api");
 /** Occurrences relevées le 5 novembre 2026. Ne peut que rétrécir. */
 const FROZEN: Record<string, number> = {};
 
-/** Lectures lâches restantes dans `server/routes.ts` (gelé) : PATCH users et toggle admin-users, traités ailleurs. Ne peut que baisser. */
-const ROUTES_TS_FROZEN = 2;
+/**
+ * Lectures lâches restantes dans `server/routes.ts` (gelé). Les deux dernières (PATCH users et toggle
+ * admin-users, journalisées : `parseInt("0x3e")` valait 62 sans entrée d'audit) sont passées à
+ * `routeIdOrNaN` le 10 novembre 2026 (#631). Reste à zéro.
+ */
+const ROUTES_TS_FROZEN = 0;
 
 /** `parseInt(req.params…)`, `Number.parseInt(String(req.params.id), 10)`, `Number(request.params.id)`, `+req.params.id`, `parseFloat`. */
 export function countLooseParamReads(source: string): number {
@@ -311,5 +316,54 @@ describe("lecture des ids de route : parseRouteId, cliquet sur les lectures lâc
         expect.objectContaining({ status: 400, message: "Identifiant invalide." }),
       );
     }
+  });
+});
+
+/**
+ * Même règle par Zod : `routeIdSchema` (chiffres seuls), jamais `idSchema` sur un paramètre de route.
+ * `idSchema` (`z.coerce.number`) lit `0x3e`, `%2062` (" 62") et `6.2e1` comme 62 : la route écrit sur
+ * l'objet 62 alors que le journal d'audit, qui lit `\d+` dans le chemin, ne la voit pas (#631).
+ *
+ * Gelé : `shared/contracts/fuel-vouchers.ts`, verrouillé par un autre chantier (drapeau `fuel-vouchers`
+ * coupé) ; à corriger à son activation. La liste ne peut que rétrécir.
+ */
+const KNOWN_LOOSE_ZOD_PARAM_IDS = ["shared/contracts/fuel-vouchers.ts"];
+
+/** `idSchema` sur `req.params`, ou dans un schéma de paramètres de route (`*ParamsSchema = z.object({ ... })`). */
+export function readsLooseZodParamId(source: string): boolean {
+  const text = stripComments(source);
+  const onParams = text.split(/\r?\n/).some((line) => /\bidSchema\b/.test(line) && /req\.params/.test(line));
+  const inParamsSchema = /[pP]aramsSchema\s*=\s*z\s*\.object\(\{[^}]*\bidSchema\b/.test(text);
+  return onParams || inParamsSchema;
+}
+
+describe("ids de route par Zod : routeIdSchema, jamais idSchema", () => {
+  it("détecte les deux formes", () => {
+    expect(readsLooseZodParamId("const paramsSchema = z.object({ id: idSchema });")).toBe(true);
+    expect(readsLooseZodParamId("const id = idSchema.safeParse(req.params.id);")).toBe(true);
+    expect(readsLooseZodParamId("const paramsSchema = z.object({ id: routeIdSchema });")).toBe(false);
+    expect(readsLooseZodParamId("const body = z.object({ vehicleId: idSchema });")).toBe(false);
+  });
+
+  it(
+    "aucun idSchema sur un paramètre de route hors liste gelée",
+    () => {
+      const offenders = [...sourceFiles(join(ROOT, "server")), ...sourceFiles(join(ROOT, "shared"))]
+        .filter((file) => readsLooseZodParamId(readFileSync(file, "utf8")))
+        .map((file) => relative(ROOT, file).replace(/\\/g, "/"))
+        .sort();
+      expect(offenders).toEqual(KNOWN_LOOSE_ZOD_PARAM_IDS);
+    },
+    REPO_SCAN_TIMEOUT_MS,
+  );
+
+  it("routeIdSchema refuse ce que idSchema convertit", () => {
+    for (const loose of ["0x3e", " 62", "6.2e1", "62 ", "+62", "62.0"]) {
+      expect(idSchema.safeParse(loose).success, loose).toBe(true);
+      expect(routeIdSchema.safeParse(loose).success, loose).toBe(false);
+    }
+    expect(routeIdSchema.parse("62")).toBe(62);
+    expect(routeIdSchema.safeParse("0").success).toBe(false);
+    expect(routeIdSchema.safeParse(String(MAX_DB_INTEGER_ID + 1)).success).toBe(false);
   });
 });

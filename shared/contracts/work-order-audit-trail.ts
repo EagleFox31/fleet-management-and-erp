@@ -5,10 +5,10 @@
  */
 import { z } from "zod";
 import { auditLogRowSchema } from "./audit-logs";
-import { idSchema } from "./common";
+import { routeIdSchema } from "./common";
 
 export const workOrderAuditTrailPath = (id: number) => `/api/work-orders/${id}/audit-trail`;
-export const workOrderAuditTrailParamsSchema = z.object({ id: idSchema });
+export const workOrderAuditTrailParamsSchema = z.object({ id: routeIdSchema });
 
 export const workOrderAuditTrailResponseSchema = z.array(auditLogRowSchema);
 

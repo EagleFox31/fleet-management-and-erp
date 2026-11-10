@@ -39,6 +39,7 @@ import {
   workOrders,
 } from "../../shared/schema";
 import { deleteClientInvoicesWhere } from "../../tests/support/money-override";
+import { cleanupPodFiles } from "../../tests/support/pod";
 
 export const DEMO_ACCOUNTS = {
   technician: { username: "tech1", password: "tech123", name: "Paul Mbarga", role: "technician" },
@@ -373,6 +374,7 @@ async function seedLogistics(): Promise<void> {
   if (old.length > 0) {
     const oldIds = old.map((m) => m.id);
     await deleteClientInvoicesWhere(inArray(clientInvoices.missionId, oldIds));
+    await cleanupPodFiles(oldIds);
     await db.delete(assignments).where(inArray(assignments.missionId, oldIds));
     await db.delete(missions).where(inArray(missions.id, oldIds));
   }

@@ -15,6 +15,8 @@ export type ApiErrorCode =
   | "CONFLICT"
   /** 409 sur une écriture rattachée à un véhicule retiré (L3) : refus prononcé avant toute écriture. */
   | "VEHICLE_RETIRED"
+  /** 409 d'une écriture rejouable dont la même clé d'idempotence est encore en cours : le client réessaie plus tard, avec la même clé. */
+  | "IDEMPOTENCY_IN_PROGRESS"
   | "RATE_LIMITED"
   | "INTERNAL";
 
@@ -34,6 +36,7 @@ export const STATUS_MESSAGES: Record<ApiErrorCode, string> = {
   NOT_FOUND: "L'élément demandé n'existe plus ou a été déplacé.",
   CONFLICT: "Cet élément a été modifié entre-temps. Rechargez la page puis réessayez.",
   VEHICLE_RETIRED: "Véhicule retiré : le restaurer avant de le modifier.",
+  IDEMPOTENCY_IN_PROGRESS: "Cet envoi est déjà en cours de traitement. Réessayez dans un instant.",
   RATE_LIMITED: "Trop de tentatives. Patientez un instant avant de réessayer.",
   INTERNAL: "Une erreur technique est survenue. Réessayez dans un instant.",
 };

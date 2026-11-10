@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { eq } from "drizzle-orm";
 import { db } from "../../server/db";
 import { clientInvoices, missions } from "../../shared/schema";
+import { tinyPdf } from "../../tests/support/pod";
 import { beat, loginThroughForm } from "./helpers";
 import { assertLocalDatabase, DEMO_ACCOUNTS, DEMO_MISSION, seedDemo } from "./seed-demo";
 
@@ -79,6 +80,15 @@ test("démo logistique : de la création de la mission à la facture client", as
   // Livraison.
   await page.getByTestId("button-transition-mission-status-header").click();
   await expect.poll(missionStatus, { timeout: 30_000 }).toBe("delivered");
+  await beat(page, 1500);
+
+  // Preuve de livraison : sans elle, la facture reste fermée.
+  await page.getByTestId("button-pod-deposit-header-input").setInputFiles({
+    name: "bon-de-livraison.pdf",
+    mimeType: "application/pdf",
+    buffer: tinyPdf("demo-logistique"),
+  });
+  await expect(page.getByTestId("pod-list")).toContainText("bon-de-livraison.pdf", { timeout: 30_000 });
   await beat(page, 1500);
 
   // Clôture : aucun plein rattaché (motif), frais de route réels.

@@ -45,6 +45,7 @@ const TYPE_BY_CODE: Record<ApiError['code'], ErrorType> = {
   NOT_FOUND: ErrorType.NOT_FOUND,
   CONFLICT: ErrorType.CONFLICT,
   VEHICLE_RETIRED: ErrorType.CONFLICT,
+  IDEMPOTENCY_IN_PROGRESS: ErrorType.CONFLICT,
   RATE_LIMITED: ErrorType.CONFLICT,
   INTERNAL: ErrorType.SERVER,
 };
