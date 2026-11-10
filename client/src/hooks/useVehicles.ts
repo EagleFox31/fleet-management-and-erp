@@ -2,12 +2,11 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { invalidateVehicleLifecycleQueries } from "@/lib/vehicle-lifecycle-cache";
 import { vehiclesService } from "@/services/vehiclesService";
+import { useAllVehicles } from "@/hooks/use-all-vehicles";
 
 export function useVehicles() {
-  const allVehiclesQuery = useQuery<any>({
-    queryKey: ['/api/vehicles'],
-    enabled: true,
-  });
+  // Flotte complète : `["/api/vehicles"]` sans `limit` ne rendait que 10 véhicules.
+  const allVehiclesQuery = useAllVehicles();
 
   const statsQuery = useQuery<any>({
     queryKey: ['/api/vehicles/stats'],

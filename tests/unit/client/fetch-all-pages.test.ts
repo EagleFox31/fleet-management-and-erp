@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   fetchAllPages,
   fetchAllUsers,
+  fetchAllParts,
   fetchAllVehicles,
   fetchFuelRecords,
   REPORT_MAX_USERS,
@@ -173,5 +174,23 @@ describe("lecture paginée générique", () => {
     await expect(
       fetchAllPages(fetchFn, { path: "/api/x", listKey: "rows", pageSize: 10, unreadable: "illisible", tooMany: () => "trop" }),
     ).rejects.toBeInstanceOf(ReportRefusedError);
+  });
+});
+
+describe("lecture complète des pièces", () => {
+  it("1 500 pièces : 2 pages de 1000, toutes lues ; une page en échec refuse la liste", async () => {
+    const all = items(1500);
+    const calls: string[] = [];
+    const fetchFn = async (url: string) => {
+      calls.push(url);
+      const params = new URL(url, "http://x").searchParams;
+      const limit = Number(params.get("limit") ?? 10);
+      const offset = Number(params.get("offset") ?? 0);
+      return { ok: true, status: 200, json: async () => ({ parts: all.slice(offset, offset + limit), total: all.length }) };
+    };
+    await expect(fetchAllParts(fetchFn)).resolves.toHaveLength(1500);
+    expect(calls).toEqual(["/api/parts?limit=1000&offset=0", "/api/parts?limit=1000&offset=1000"]);
+    const failing = async () => ({ ok: false, status: 500, json: async () => ({ message: "x" }) });
+    await expect(fetchAllParts(failing)).rejects.toThrow("Les pièces n'ont pas pu être lues en entier");
   });
 });

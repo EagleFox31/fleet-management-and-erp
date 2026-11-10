@@ -1,0 +1,16 @@
+## 2026-11-10T18:25:53+01:00 — Lectures paginées par défaut : liste gelée vidée (rotations de pneus)
+- **Statut** : fait (PR, empilée sur #666)
+- **Quoi** :
+  - La dernière entrée gelée du garde-fou (`inventory/tires/index.tsx: 1`) était la lecture des rotations, pas la liste des pneus. La liste passe déjà par `fetchAllTires` (#619) et l'erreur de page s'affiche par `tiresPageState`. L'erreur des rotations s'affiche déjà par `InlineQueryError` (`rotationsView`).
+  - `GET /api/tire-rotations` lit `limit` et `offset` mais ne les applique pas. Elle rend `tiresService.getTireRotations()` en entier, un tableau nu. Sa lecture sans `limit` n'est donc pas tronquée. La route sort de `DEFAULT_LIMITS` et passe dans `UNPAGINATED`, et `FROZEN` est vide.
+  - `server/routes.ts` n'est pas modifié (fichier gelé) : le `limit` lu sans effet y reste.
+- **Comment tester (QA)** :
+  - `tests/unit/client/default-paginated-reads-hygiene.test.ts`, nouveau cas « /api/tire-rotations : rend toute la liste ». Il vérifie l'appel sans argument du service et la réponse `json(rotations)`. Rouge vérifié en remplaçant l'appel par `getTireRotations({ limit })` (1 échec), vert après restauration.
+  - Campagnes : tsc 0, unitaires client verts.
+- **Pourquoi** : le cliquet ne doit geler que des lectures réellement tronquées. Une route qui rend tout n'a pas besoin de lecteur paginé. Si elle se met à paginer, le test échoue et elle repasse dans `DEFAULT_LIMITS`, avec un lecteur paginé.
+- **RAIDER** :
+  - A : comportement lu dans le source serveur, non supposé.
+  - D : cliquet conservé, liste gelée vide, tout nouveau lecteur échoue.
+  - E : aucun code produit modifié hors commentaire.
+  - Ne s'appliquent pas : R, I et Retroactive (garde-fou seul, lecture seule).
+- **Reste / risques** : une route qui rend tout grossit sans borne. La pagination des rotations est à faire dans un routeur `server/api/` le jour où le volume le demande, avec `fetchAllPages` côté client.

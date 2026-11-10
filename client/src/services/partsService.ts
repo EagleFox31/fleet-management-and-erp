@@ -1,4 +1,5 @@
 import { partsApi, tiresApi } from "@/lib/api-calls";
+import { fetchAllParts, fetchAllTires } from "@/lib/fetch-all-pages";
 
 export interface Part {
   id: number;
@@ -54,9 +55,8 @@ export interface TireRotation {
 
 export const partsService = {
   async getAllParts(): Promise<Part[]> {
-    const response = await partsApi.getAll();
-    const data = await response.json();
-    return data;
+    // Toutes les pages : sans `limit`, la route ne rend que 10 pièces, dans `{ parts, total }`.
+    return fetchAllParts<Part>();
   },
 
   async getPartById(id: number): Promise<Part> {
@@ -94,9 +94,8 @@ export const partsService = {
   },
 
   async getAllTires(): Promise<Tire[]> {
-    const response = await tiresApi.getAll();
-    const data = await response.json();
-    return data;
+    // Toutes les pages : sans `limit`, la route ne rend que 20 pneus, dans `{ tires, total }`.
+    return fetchAllTires<Tire>();
   },
 
   async getTireById(id: number): Promise<Tire> {
