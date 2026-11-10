@@ -127,6 +127,70 @@ describe("trigger client_invoices_issued_locked", { timeout: 60_000 }, () => {
     expect(after.balance).toBe("1000.00");
   });
 
+  it("solde borné : jamais en hausse (pas de réouverture d'une facture payée), jamais négatif ; baisse jusqu'à 0 acceptée", async () => {
+    const invoice = await makeInvoice();
+    const id = invoice.id;
+    await expectLocked(() => db.execute(sql`UPDATE client_invoices SET balance = balance + 1 WHERE id = ${id}`), "hausse");
+    await expectLocked(() => db.execute(sql`UPDATE client_invoices SET balance = -0.01 WHERE id = ${id}`), "négatif");
+    await db.execute(sql`UPDATE client_invoices SET status = 'partial', balance = 50000 WHERE id = ${id}`);
+    await db.execute(sql`UPDATE client_invoices SET status = 'paid', balance = 0 WHERE id = ${id}`);
+    expect(await invoiceRow(id)).toMatchObject({ status: "paid", balance: "0.00" });
+    // Réouverture d'une facture payée : le solde remonterait.
+    await expectLocked(
+      () => db.execute(sql`UPDATE client_invoices SET status = 'pending', balance = amount_ttc WHERE id = ${id}`),
+      "réouverture",
+    );
+    await expectLocked(() => db.execute(sql`UPDATE client_invoices SET balance = 0.01 WHERE id = ${id}`), "hausse après solde");
+    expect(await invoiceRow(id)).toMatchObject({ status: "paid", balance: "0.00" });
+    // Sous levée explicite (restauration), le solde peut être réécrit.
+    await db.transaction(async (tx) => {
+      await withMoneyOverride(tx, "test : solde réécrit");
+      await tx.execute(sql`UPDATE client_invoices SET balance = 10 WHERE id = ${id}`);
+      throw new Error("rollback");
+    }).catch((error: Error) => expect(error.message).toBe("rollback"));
+  });
+
+  it("paiement exact à la tolérance flottante près : solde rendu jamais négatif, facture payée", async () => {
+    // 100 - 100.005 vaut -0.00499999... en flottant : sous la tolérance de 0,005, donc accepté.
+    const invoice = await makeInvoice({ amountHT: "100.00", vatAmount: "0.00", amountTTC: "100.00" });
+    const result = await clientBillingService.recordPayment(invoice.id, {
+      amount: 100.005,
+      paymentDate: "2026-01-20",
+      paymentMethod: "cash",
+      reference: uniqueTestToken("pay"),
+      userId,
+    });
+    expect(result.status).toBe("paid");
+    expect(result.newBalance).toBe(0);
+    expect(await invoiceRow(invoice.id)).toMatchObject({ status: "paid", balance: "0.00" });
+  });
+
+  it("dépôt refusé sur une facture payée ou annulée, y compris annulée dans le même UPDATE", async () => {
+    const cancelledNow = await makeInvoice();
+    await expectLocked(
+      () =>
+        db.execute(sql`
+          UPDATE client_invoices SET status = 'cancelled', deposited_at = '2026-02-01', deposited_by = ${userId}
+          WHERE id = ${cancelledNow.id}`),
+      "annulée et déposée d'un coup",
+    );
+    const paidNow = await makeInvoice();
+    await expectLocked(
+      () =>
+        db.execute(sql`
+          UPDATE client_invoices SET status = 'paid', balance = 0, deposited_at = '2026-02-01', deposited_by = ${userId}
+          WHERE id = ${paidNow.id}`),
+      "payée et déposée d'un coup",
+    );
+    const paidBefore = await makeInvoice();
+    await db.execute(sql`UPDATE client_invoices SET status = 'paid', balance = 0 WHERE id = ${paidBefore.id}`);
+    await expectLocked(
+      () => db.execute(sql`UPDATE client_invoices SET deposited_at = '2026-02-01', deposited_by = ${userId} WHERE id = ${paidBefore.id}`),
+      "déposée après paiement",
+    );
+    for (const id of [cancelledNow.id, paidNow.id, paidBefore.id]) expect((await invoiceRow(id)).depositedAt).toBeNull();
+  });
+
   it("la suppression est refusée, même d'une facture sans paiement", async () => {
     const invoice = await makeInvoice();
     await expectLocked(() => db.execute(sql`DELETE FROM client_invoices WHERE id = ${invoice.id}`));

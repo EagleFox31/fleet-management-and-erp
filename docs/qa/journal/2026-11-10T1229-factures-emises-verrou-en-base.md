@@ -18,3 +18,9 @@
 - Intégration factures, trésorerie, tableaux de bord, recette : 11 fichiers, 55/55.
 - `tsc --noEmit` : 0 erreur. `check:tests` : aucune erreur. Unitaires : 3783 verts, seul `db-pool-options` échoue (node_modules local, connu).
 - Idempotence : migration rejouée deux fois sur la base locale, comptes, empreinte des lignes, définitions des triggers et de la fonction identiques avant et après.
+
+## Corrections de relecture sécurité (2026-11-10)
+- **Quoi** : le solde d'une facture émise ne fait plus que baisser, jamais sous zéro ; le dépôt est refusé sur une facture payée ou annulée, y compris quand le même `UPDATE` change le statut.
+- **Comment** : deux conditions dans `client_invoices_issued_lock()` (migration et jumelle identiques) ; `recordPayment` arrondit le nouveau solde au centime et le borne à 0, sinon la tolérance de 0,005 laissait un reste négatif.
+- **Pourquoi** : une hausse du solde rouvrait une facture payée ; `SET status='cancelled', deposited_at=…` contournait le refus du dépôt sur facture annulée.
+- **Preuves** : intégration du trigger rouge (3 échecs) puis verte 15/15 ; contrats facturation, créances, retenues, paiements 21 fichiers verts (deux délais de 5 s sous charge, verts seuls) ; tsc 0 ; check:tests 0.

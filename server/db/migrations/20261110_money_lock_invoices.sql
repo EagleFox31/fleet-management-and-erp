@@ -2,7 +2,8 @@
 -- modifie plus et ne se supprime plus, quel que soit l'appelant (route, script, SQL direct). Refus : check_violation,
 -- contrainte client_invoices_issued_locked, traduite en 409 lisible par server/lib/pg-errors.ts (moneyLockMessageOf).
 -- Liste blanche : status, balance, updated_at (retard, paiement) ; dépôt (deposited_at, withholding_vat_amount,
--- withholding_is_amount, net_payable, deposited_by) une seule fois, de « non déposée » vers une date et un auteur ;
+-- withholding_is_amount, net_payable, deposited_by) une seule fois, de « non déposée » vers une date et un auteur,
+-- sur une facture ni payée ni annulée ; solde en baisse seulement, jamais négatif ;
 -- deposited_by vers NULL seulement par l'action de clé étrangère (ON DELETE SET NULL d'un utilisateur supprimé,
 -- pg_trigger_depth() > 1). Une facture annulée (cancelled) est terminale : ni sortie, ni montant, ni dépôt.
 -- mission_id, client_id et created_by sont en NO ACTION : la clé étrangère refuse déjà la suppression d'une mission,
@@ -58,6 +59,13 @@ BEGIN
       USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
   END IF;
 
+  -- Solde : il ne fait que baisser (paiements), jamais sous zéro. Une hausse rouvrirait une facture payée ;
+  -- un solde déjà hors bornes (donnée ancienne) n'empêche pas de changer le statut tant qu'il ne bouge pas.
+  IF NEW.balance IS DISTINCT FROM OLD.balance AND (NEW.balance > OLD.balance OR NEW.balance < 0) THEN
+    RAISE EXCEPTION 'Facture émise : le solde ne fait que baisser, sans passer sous zéro.'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
+  END IF;
+
   -- Avoirs (PR5) : règle de credited_amount_ttc ici.
 
   -- Dépôt. Seul détachement permis après coup : deposited_by vers NULL par l'action de clé étrangère (suppression de
@@ -69,10 +77,12 @@ BEGIN
          IS NOT DISTINCT FROM (OLD.deposited_at, OLD.withholding_vat_amount, OLD.withholding_is_amount, OLD.net_payable) THEN
     RETURN NEW;
   END IF;
-  -- Sinon le dépôt se pose une seule fois, sur une facture non déposée et non annulée, avec sa date et son auteur.
+  -- Sinon le dépôt se pose une seule fois, avec sa date et son auteur, sur une facture en attente de paiement
+  -- avant comme après l'UPDATE (ni payée ni annulée, comme finance-receivables-service.depositInvoice).
   IF (NEW.deposited_at, NEW.withholding_vat_amount, NEW.withholding_is_amount, NEW.net_payable, NEW.deposited_by)
        IS DISTINCT FROM (OLD.deposited_at, OLD.withholding_vat_amount, OLD.withholding_is_amount, OLD.net_payable, OLD.deposited_by) THEN
-    IF OLD.deposited_at IS NOT NULL OR OLD.status = 'cancelled'
+    IF OLD.deposited_at IS NOT NULL OR OLD.status = 'cancelled' OR NEW.status = 'cancelled'
+       OR OLD.status = 'paid' OR NEW.status = 'paid'
        OR NEW.deposited_at IS NULL OR NEW.deposited_by IS NULL THEN
       RAISE EXCEPTION 'Facture émise : le dépôt se pose une seule fois, avec sa date et son auteur.'
         USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';

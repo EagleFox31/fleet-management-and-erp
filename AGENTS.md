@@ -404,7 +404,8 @@ Notes :
 - Facture client émise : immuable dès sa création (pas de brouillon). Trigger `trg_client_invoices_issued_lock`
   (migration `20261110_money_lock_invoices.sql`, jumelle `CLIENT_INVOICES_ISSUED_LOCK_SQL`), refus `check_violation`
   sur `client_invoices_issued_locked`, traduit en 409 par `moneyLockMessageOf`. Seuls passent `status`, `balance`,
-  `updated_at` et le dépôt, posé une seule fois avec sa date et son auteur. `cancelled` est terminal. Suppression et
+  `updated_at` et le dépôt, posé une seule fois avec sa date et son auteur, ni sur une facture payée ni sur une
+  annulée (même dans le même `UPDATE`). Le solde ne fait que baisser, jamais sous zéro. `cancelled` est terminal. Suppression et
   `TRUNCATE` refusés. Une correction passe par un avoir (PR5). Un test qui veut une facture déposée, orpheline ou
   liée à une mission la crée ainsi (`createTestClientInvoice`) : un `UPDATE` après coup est refusé.
 - Clôture automatique de la commande : `autoCloseDeliveredOrderIfFinanceDone`, `server/services/three-way-matching-service.ts` (l. 122-128). L'`UPDATE` du statut `completed` filtre sur l'identifiant seul, sans condition de statut ni verrou. Entrée gelée (1) de `tests/unit/server/status-update-cas-hygiene.test.ts`. Ne pas en ajouter d'autre.

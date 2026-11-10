@@ -65,7 +65,13 @@ describe("factures émises verrouillées : init-database et migration jumelle", 
     expect(sql).toContain("IF OLD.status = 'cancelled'\n     AND (NEW.status IS DISTINCT FROM OLD.status OR NEW.balance IS DISTINCT FROM OLD.balance) THEN");
     // deposited_by vers NULL : seulement par l'action de clé étrangère (UPDATE lancé depuis un trigger).
     expect(sql).toContain("IF NEW.deposited_by IS NULL AND OLD.deposited_by IS NOT NULL AND pg_trigger_depth() > 1");
-    expect(sql).toContain("IF OLD.deposited_at IS NOT NULL OR OLD.status = 'cancelled'");
+    // Dépôt : ni sur une facture annulée ou payée, même dans le même UPDATE.
+    expect(sql).toContain(
+      "IF OLD.deposited_at IS NOT NULL OR OLD.status = 'cancelled' OR NEW.status = 'cancelled'\n" +
+        "       OR OLD.status = 'paid' OR NEW.status = 'paid'",
+    );
+    // Solde : en baisse seulement, jamais négatif.
+    expect(sql).toContain("IF NEW.balance IS DISTINCT FROM OLD.balance AND (NEW.balance > OLD.balance OR NEW.balance < 0) THEN");
   });
 
   it("le message 409 de la contrainte existe et parle métier", () => {
