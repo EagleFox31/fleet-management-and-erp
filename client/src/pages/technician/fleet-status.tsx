@@ -22,6 +22,7 @@ import {
   RefreshCw
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import { useAllVehicles } from "@/hooks/use-all-vehicles";
 import { useState, useEffect } from "react";
 import { queryClient } from "@/lib/queryClient";
 import { InlineQueryError } from "@/components/ui/inline-query-error";
@@ -70,14 +71,7 @@ export default function FleetTechnicianPWA() {
   });
 
   // Données supplémentaires nécessaires pour le dashboard
-  const { data: vehicles, isLoading: vehiclesLoading, refetch: refetchVehicles } = useQuery<any>({
-    queryKey: ['/api/vehicles'],
-    staleTime: 0,
-    gcTime: 0,
-    retry: isOnline ? 3 : 0,
-    refetchOnWindowFocus: true,
-    refetchOnMount: true
-  });
+  const { data: vehicles, isLoading: vehiclesLoading, refetch: refetchVehicles } = useAllVehicles();
 
   const { data: maintenanceSchedules, isLoading: maintenanceLoading, error: maintenanceError, refetch: refetchMaintenance } = useQuery<any>({
     queryKey: ['/api/maintenance-schedules'],
@@ -158,7 +152,7 @@ export default function FleetTechnicianPWA() {
   console.log('🔍 [FLEET] Loading state:', dataLoading);
 
   // Calculer les statistiques des véhicules depuis l'API véhicules
-  const vehiclesList = (vehicles as any)?.vehicles || [];
+  const vehiclesList = vehicles ?? [];
   const vehicleStats = {
     total: vehiclesList.length,
     operational: vehiclesList.filter((v: any) => v.status === 'operational').length,
@@ -220,13 +214,13 @@ export default function FleetTechnicianPWA() {
 
   // Calculer les maintenances des 7 prochains jours depuis les données réelles
   const getUpcomingMaintenanceList = () => {
-    if (!Array.isArray(maintenanceSchedules) || !Array.isArray((vehicles as any)?.vehicles)) return [];
+    if (!Array.isArray(maintenanceSchedules) || !Array.isArray(vehicles)) return [];
 
     const now = new Date();
     const sevenDaysFromNow = new Date(now);
     sevenDaysFromNow.setDate(now.getDate() + 7);
 
-    const vehiclesList = (vehicles as any).vehicles;
+    const vehiclesList = vehicles;
 
     return maintenanceSchedules.filter((schedule: any) => {
       if (!schedule.scheduledDate) return false;
