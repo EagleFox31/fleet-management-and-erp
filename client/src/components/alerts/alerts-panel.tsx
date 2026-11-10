@@ -22,6 +22,7 @@ import {
 } from "@/components/design-system";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/useAuth";
+import { isReadOnlyRole } from "@/lib/read-only-role";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { cn, formatDate } from "@/lib/utils";
@@ -218,6 +219,8 @@ const formatAlertDate = (createdAt?: string): string => {
 export function AlertsPanel() {
   const [, setLocation] = useLocation();
   const { user } = useAuth();
+  // Lecteur : la garde serveur refuse « tout marquer lu » et la suppression ; on ne montre pas un bouton qui finit en 403.
+  const readOnly = isReadOnlyRole(user);
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
@@ -737,7 +740,7 @@ export function AlertsPanel() {
               </Button>
             ) : null}
 
-            {isPersistedAlert(alert) ? (
+            {isPersistedAlert(alert) && !readOnly ? (
               <Button
                 variant="ghost"
                 size="sm"
@@ -800,6 +803,7 @@ export function AlertsPanel() {
         icon={<AlertCircle className="h-5 w-5" />}
         actions={
           <div className="flex items-center gap-2">
+            {!readOnly && (
             <Button
               variant="outline"
               size="sm"
@@ -815,6 +819,7 @@ export function AlertsPanel() {
               )}
               Tout marquer lu
             </Button>
+            )}
             <Button variant="outline" size="sm" onClick={handleRefresh} className="h-8 gap-2 text-xs">
               <RefreshCw className="h-3.5 w-3.5" />
               Actualiser

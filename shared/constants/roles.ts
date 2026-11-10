@@ -45,6 +45,83 @@ export function canReadDriverPersonalData(role: string | null | undefined): bool
 }
 
 /**
+ * Rôles en lecture seule : aucune écriture métier, les écrans masquent leurs boutons d'action
+ * (`isReadOnlyRole`, côté client comme serveur).
+ */
+export const READ_ONLY_ROLES = ["viewer"] as const satisfies readonly AppRole[];
+
+/** Le rôle est normalisé comme sur le serveur : « Viewer », « lecteur » sont lus comme `viewer`. */
+export function isReadOnlyRole(role: string | null | undefined): boolean {
+  return (READ_ONLY_ROLES as readonly string[]).includes(normalizeRole(role));
+}
+
+/**
+ * Lecteur (`viewer`) : lecture seule sur tout le personnel. La garde `viewerReadOnlyGuard`
+ * (server/middleware) refuse toute écriture ; seules ces routes lui restent ouvertes, parce
+ * qu'elles n'écrivent rien de métier : session (ouvrir, fermer), libre-service sur sa propre
+ * ligne (mot de passe, parcours d'accueil, préférences de notification, lecture d'une alerte).
+ * Chemins tels qu'Express les voit sous `/api` ; un segment `:x` accepte toute valeur.
+ */
+export const VIEWER_WRITE_ALLOWED = [
+  { method: "POST", path: "/auth/login" },
+  { method: "POST", path: "/auth/pin-login" },
+  { method: "POST", path: "/auth/logout" },
+  { method: "POST", path: "/users/change-password" },
+  { method: "PATCH", path: "/onboarding/step" },
+  { method: "PATCH", path: "/onboarding/complete" },
+  { method: "PATCH", path: "/onboarding/mascot" },
+  { method: "PATCH", path: "/notifications/settings" },
+  { method: "PATCH", path: "/alerts/:id/read" },
+] as const;
+
+/** `/alerts/:id/read` accepte `/alerts/12/read` : comparaison segment par segment. */
+export function matchesAllowedWrite(method: string, path: string): boolean {
+  const target = path.replace(/\/+$/, "").split("/");
+  return VIEWER_WRITE_ALLOWED.some((a) => {
+    if (a.method !== method.toUpperCase()) return false;
+    const pattern = a.path.split("/");
+    return pattern.length === target.length && pattern.every((seg, i) => (seg.startsWith(":") ? target[i].length > 0 : seg === target[i]));
+  });
+}
+
+/** Alias de saisie ou de stockage d'un rôle (majuscules, français) ramenés au rôle canonique. */
+const ROLE_ALIASES: Record<string, AppRole> = {
+  admin: "admin",
+  administrateur: "admin",
+  workshop_manager: "workshop_manager",
+  gestionnaire_atelier: "workshop_manager",
+  "gestionnaire d'atelier": "workshop_manager",
+  technician: "technician",
+  technicien: "technician",
+  secretary: "secretary",
+  secretaire: "secretary",
+  "secrétaire": "secretary",
+  accountant: "accountant",
+  comptable: "accountant",
+  viewer: "viewer",
+  lecteur: "viewer",
+  logistics: "logistics",
+  logisticien: "logistics",
+  warehouse: "warehouse",
+  magasinier: "warehouse",
+  management: "management",
+  direction: "management",
+  directeur: "management",
+  dg: "management",
+  client: "client",
+  user: "user",
+};
+
+/** Rôle canonique d'une valeur stockée ou saisie ; inconnu → `user`. Partagé serveur / client. */
+export const normalizeRole = (role: string | null | undefined): AppRole => {
+  const normalized = (role || "").trim().toLowerCase();
+  const aliasRole = ROLE_ALIASES[normalized];
+  if (aliasRole) return aliasRole;
+  if ((ALL_APP_ROLES as readonly string[]).includes(normalized)) return normalized as AppRole;
+  return "user";
+};
+
+/**
  * Rôle applicatif — dérivé du schéma, jamais recopié.
  *
  * Il existait trois déclarations locales et divergentes de ce type
@@ -74,6 +151,7 @@ export const ROLE_LABELS: Record<AppRole, string> = {
   logistics: "Logisticien",
   warehouse: "Magasinier",
   management: "Direction",
+  viewer: "Lecteur",
   client: "Client",
   driver: "Chauffeur",
   user: "Utilisateur",
@@ -357,9 +435,12 @@ export const STAFF_ROLES: readonly AppRole[] = ALL_APP_ROLES.filter((role) => ro
 /**
  * Saisie d'exploitation sur un véhicule (kilométrage, position de maintenance, incident) : le
  * personnel moins le comptable, qui consulte sans saisir. `isStaff` ne suffit pas : il s'ouvre
- * à tout nouveau rôle du personnel sans que le diff le montre.
+ * à tout nouveau rôle du personnel sans que le diff le montre. Le lecteur est exclu ici aussi, en plus
+ * de la garde globale de lecture seule.
  */
-export const VEHICLE_OPERATION_WRITE_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "accountant");
+export const VEHICLE_OPERATION_WRITE_ROLES: readonly AppRole[] = STAFF_ROLES.filter(
+  (role) => role !== "accountant" && role !== "viewer",
+);
 
 /**
  * Coût d'un OT (taux horaire servi par `GET /api/work-orders/:id/labor-rate`) : le personnel

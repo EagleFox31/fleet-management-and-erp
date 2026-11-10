@@ -6,6 +6,7 @@ const ROLE_ALIASES: Record<string, AppRole> = {
   secretaire: "secretary",
   "secrétaire": "secretary",
   comptable: "accountant",
+  lecteur: "viewer",
   logisticien: "logistics",
   magasinier: "warehouse",
   directeur: "management",

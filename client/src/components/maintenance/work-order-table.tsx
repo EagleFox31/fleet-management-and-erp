@@ -11,6 +11,7 @@ import {
 import { WorkOrderEditModal } from "./work-order-edit-modal";
 import { useVehicle } from "@/context/vehicle-context";
 import { useAuth } from "@/hooks/useAuth";
+import { isReadOnlyRole } from "@/lib/read-only-role";
 import { appToast, invalidateAlertQueries } from "@/lib/app-toast";
 import { apiRequest } from "@/lib/queryClient";
 import {
@@ -426,7 +427,7 @@ export function WorkOrderTable({ onRowClick, vehicleId, initialStatusFilter, hid
             </Select>
           </div>
         )}
-        {vehicleId && user?.role !== "client" && (
+        {vehicleId && user?.role !== "client" && !isReadOnlyRole(user) && (
           <Button size="sm" onClick={handleAddWorkOrder} className="gap-2 h-8 text-xs ml-auto">
             <Plus className="h-3.5 w-3.5" /> Ajouter un OT
           </Button>
