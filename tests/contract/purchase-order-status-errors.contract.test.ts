@@ -37,7 +37,7 @@ function expectErrorContract(res: { body: any; headers: Headers }, code: string)
 async function call(method: string, path: string, body?: unknown) {
   const response = await fetch(baseUrl + path, {
     method,
-    headers: { Cookie: cookie, ...(body !== undefined ? { "Content-Type": "application/json" } : {}) },
+    headers: { Cookie: cookie, ...(body !== undefined || method !== "GET" ? { "Content-Type": "application/json" } : {}) },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   return { status: response.status, body: await response.json().catch(() => null), headers: response.headers };

@@ -64,9 +64,14 @@ function isBodyJsonSerializable(body: unknown): boolean {
 function buildHeaders(
   headers: HeadersInit | undefined,
   hasJsonBody: boolean,
+  method = "GET",
+  body?: unknown,
 ): HeadersInit | undefined {
   const merged = new Headers(headers);
-  if (hasJsonBody && !merged.has("Content-Type")) {
+  // Le serveur exige un type JSON ou multipart sur toute POST, corps ou non (anti-CSRF) ; un FormData
+  // garde le sien (boundary posé par le navigateur).
+  const bodylessWrite = body == null && ["POST", "PUT", "PATCH", "DELETE"].includes(method);
+  if ((hasJsonBody || bodylessWrite) && !merged.has("Content-Type")) {
     merged.set("Content-Type", "application/json");
   }
   return merged;
@@ -127,7 +132,7 @@ export async function apiRequest(
   const res = await fetch(resolvedUrl, {
     ...init,
     method,
-    headers: buildHeaders(init.headers, hasJsonBody),
+    headers: buildHeaders(init.headers, hasJsonBody, method, body),
     body: serializedBody,
     cache: init.cache ?? "no-store",
     credentials: init.credentials ?? "include",

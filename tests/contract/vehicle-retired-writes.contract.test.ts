@@ -185,7 +185,8 @@ describe("véhicule retiré : écritures rattachées refusées en 409", { timeou
       headers: { Cookie: actors.cookies.get("admin")!, "Content-Type": "application/x-www-form-urlencoded" },
       body: `vehicleId=%2B${R.vehicle}&date=${today}&quantity=1&cost=1`,
     });
-    expect(form.status).toBe(409);
+    // Le corps urlencoded n'atteint plus la route : refus 415 avant tout effet (anti-CSRF).
+    expect(form.status).toBe(415);
   });
 
   it("aucune ligne créée, modifiée ni supprimée", async () => {

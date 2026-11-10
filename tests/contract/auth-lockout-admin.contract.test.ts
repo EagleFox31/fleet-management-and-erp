@@ -37,7 +37,7 @@ async function login(role: TestUserRole) {
   return user;
 }
 async function call(method: string, path: string, role?: string) {
-  const res = await fetch(baseUrl + path, { method, headers: role ? { Cookie: cookies.get(role)! } : {} });
+  const res = await fetch(baseUrl + path, { method, headers: { "Content-Type": "application/json", ...(role ? { Cookie: cookies.get(role)! } : {}) } });
   return { status: res.status, body: await res.json().catch(() => null) };
 }
 

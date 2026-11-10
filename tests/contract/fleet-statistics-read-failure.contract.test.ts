@@ -60,7 +60,7 @@ afterEach(() => {
 
 afterAll(async () => {
   // Remet le cache à une valeur calculée (sinon -1 resterait pour les fichiers suivants).
-  await fetch(`${baseUrl}/api/statistics/fleet-kpi/refresh`, { method: "POST", headers: { Cookie: cookie } });
+  await fetch(`${baseUrl}/api/statistics/fleet-kpi/refresh`, { method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie } });
   await cleanupCreated(ids);
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 });
@@ -77,7 +77,7 @@ describe("panne de lecture du décompte de flotte", { timeout: 120000 }, () => {
     await poisonCache();
     failFleetCount();
     await expectReadableServerError(
-      await fetch(`${baseUrl}/api/statistics/fleet-kpi/refresh`, { method: "POST", headers: { Cookie: cookie } }),
+      await fetch(`${baseUrl}/api/statistics/fleet-kpi/refresh`, { method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie } }),
     );
     vi.restoreAllMocks();
     const [row] = await db.select().from(fleetKpiCache).where(eq(fleetKpiCache.id, 1));
