@@ -1,10 +1,12 @@
 import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
-import { fuelRecords, vehicles } from "../../shared/schema";
+import { assignments, drivers, fuelRecords, missions, users, vehicles } from "../../shared/schema";
+import { ALL_APP_ROLES, MISSION_READ_ROLES } from "../../shared/constants/roles";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
-import { createTestFuelRecord, createTestUser, createTestVehicle } from "../support/factories";
+import { TEST_USER_PASSWORD, createTestFuelRecord, createTestUser, createTestVehicle } from "../support/factories";
+import { uniqueTestToken } from "../support/ids";
 import { deleteFuelRecordsWhere } from "../support/money-override";
 
 /**
@@ -210,6 +212,118 @@ describe("GET des pleins : champs de mission hors MISSION_READ_ROLES", () => {
       for (const key of MISSION_KEYS) expect(row, `${path} ${key}`).not.toHaveProperty(key);
       expect(row.quantity, path).toBe(2);
     }
+  });
+
+  function rowOf(res: { body: unknown }, id: number) {
+    return (res.body as Array<Record<string, unknown>>).find((r) => r.id === id)!;
+  }
+
+  it("client : ni numéro de commande, ni client, ni destination sur les pleins de son véhicule", async () => {
+    const v = await vehicle({ ownerId: session.userIdOf("client") } as Parameters<typeof createTestVehicle>[0]);
+    const row = await createTestFuelRecord({ vehicleId: v.id, debitAmount: "0", creditAmount: "0", cost: "500.00", quantity: 2 });
+    ids.fuelRecordIds.push(row.id);
+    await db.update(fuelRecords).set({ orderNumber: "BC-TEST-C", clientName: "TEST CLIENT", destination: "TEST KRIBI" }).where(eq(fuelRecords.id, row.id));
+    for (const path of [`/api/fuel-records?vehicleId=${v.id}`, `/api/fuel-records/vehicle/${v.id}`, "/api/fuel-records"]) {
+      const res = await session.call("GET", path, { actor: "client" });
+      expect(res.status, path).toBe(200);
+      const found = rowOf(res, row.id);
+      expect(found, path).toBeTruthy();
+      for (const key of MISSION_KEYS) expect(found, `${path} ${key}`).not.toHaveProperty(key);
+    }
+  });
+
+  /**
+   * Rôle stocké hors enum : `normalizeRole` le lit `user`, rôle du personnel (MISSION_READ_ROLES).
+   * Les champs de mission des pleins suivent alors la lecture des missions, ni plus ni moins :
+   * servis si et seulement si GET /api/missions répond 200 au même compte.
+   */
+  it("rôle inconnu (hors enum) : champs de mission servis exactement comme la lecture des missions", async () => {
+    const { vehicleId, id } = await recordWithMission();
+    const user = await createTestUser({ role: "technician" });
+    ids.userIds.push(user.id);
+    const login = await fetch(`${session.baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: user.username, password: TEST_USER_PASSWORD }),
+    });
+    expect(login.status).toBe(200);
+    const headers = { Cookie: login.headers.get("set-cookie")!.split(";")[0] };
+    await db.update(users).set({ role: "pilote" as never }).where(eq(users.id, user.id));
+    const readsMissions = (await session.call("GET", "/api/missions", { headers })).status === 200;
+    for (const path of [`/api/fuel-records?vehicleId=${vehicleId}`, `/api/fuel-records/vehicle/${vehicleId}`]) {
+      const res = await session.call("GET", path, { headers });
+      if (res.status !== 200) {
+        expect(res.status, path).toBe(403);
+        continue;
+      }
+      const found = rowOf(res, id);
+      for (const key of MISSION_KEYS) expect(Object.hasOwn(found, key), `${path} ${key}`).toBe(readsMissions);
+    }
+  });
+
+  it("tout rôle hors MISSION_READ_ROLES est joué par ce contrat", () => {
+    const outside = ALL_APP_ROLES.filter((r) => !MISSION_READ_ROLES.includes(r)).sort();
+    expect(outside).toEqual(["client", "technician"]);
+  });
+
+  describe("chauffeur : champs de mission sur les pleins de SES missions seulement", () => {
+    const missionIds: number[] = [];
+    let driverId = 0;
+
+    async function mission(assignmentStatus?: string) {
+      const v = await vehicle();
+      const [m] = await db
+        .insert(missions)
+        .values({ orderNumber: uniqueTestToken("FRS"), pickupAddress: "TEST A", deliveryAddress: "TEST B", status: "assigned" } as any)
+        .returning();
+      missionIds.push(m.id);
+      if (assignmentStatus) await db.insert(assignments).values({ missionId: m.id, vehicleId: v.id, driverId, status: assignmentStatus } as any);
+      const row = await createTestFuelRecord({ vehicleId: v.id, debitAmount: "0", creditAmount: "0", cost: "500.00", quantity: 2 });
+      ids.fuelRecordIds.push(row.id);
+      await db
+        .update(fuelRecords)
+        .set({ missionId: m.id, orderNumber: "BC-TEST-D", clientName: "TEST CLIENT", destination: "TEST EDEA" })
+        .where(eq(fuelRecords.id, row.id));
+      return { vehicleId: v.id, id: row.id };
+    }
+
+    beforeAll(async () => {
+      const [d] = await db
+        .insert(drivers)
+        .values({ userId: session.userIdOf("driver"), firstName: "TEST", lastName: uniqueTestToken("drv"), cpcStatus: "FORME" } as any)
+        .returning();
+      driverId = d.id;
+    }, 60000);
+
+    afterAll(async () => {
+      if (missionIds.length) {
+        await deleteFuelRecordsWhere(inArray(fuelRecords.missionId, missionIds));
+        await db.delete(assignments).where(inArray(assignments.missionId, missionIds));
+        await db.delete(missions).where(inArray(missions.id, missionIds));
+      }
+      if (driverId) await db.delete(drivers).where(eq(drivers.id, driverId));
+    }, 60000);
+
+    it("sa mission (affectation vivante) : champs lus ; mission d'un autre ou affectation annulée : masqués", async () => {
+      const own = await mission("accepted");
+      const others = await mission();
+      const cancelled = await mission("cancelled");
+      for (const { vehicleId, id, kept } of [
+        { ...own, kept: true },
+        { ...others, kept: false },
+        { ...cancelled, kept: false },
+      ]) {
+        for (const path of [`/api/fuel-records?vehicleId=${vehicleId}`, `/api/fuel-records/vehicle/${vehicleId}`]) {
+          const res = await session.call("GET", path, { actor: "driver" });
+          expect(res.status, path).toBe(200);
+          const found = rowOf(res, id);
+          expect(found, path).toBeTruthy();
+          if (kept) expect(found, path).toMatchObject({ orderNumber: "BC-TEST-D", clientName: "TEST CLIENT", destination: "TEST EDEA" });
+          else for (const key of MISSION_KEYS) expect(found, `${path} ${key}`).not.toHaveProperty(key);
+          expect(found.quantity, path).toBe(2);
+        }
+      }
+    });
   });
 
   it("logistique et chef d'atelier (MISSION_READ_ROLES) : les champs de mission restent lisibles", async () => {
