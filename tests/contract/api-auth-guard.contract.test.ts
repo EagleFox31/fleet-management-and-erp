@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { getContractApp } from "../support/app";
-import { isSessionGuard } from "../../server/middleware/auth";
+import { collectRoutes, type Layer } from "../support/express-routes";
 
 /**
  * Toute route /api doit être précédée d'une garde de session (authenticate,
@@ -20,47 +20,6 @@ const PUBLIC_ROUTES = new Set<string>([
   "GET /api/auth/drivers-list", // écran de connexion PIN: id et nom des chauffeurs seulement
   "POST /api/auth/logout", // ferme la session, sans effet hors session
 ]);
-
-type Layer = {
-  route?: { path: string; methods: Record<string, boolean>; stack: Layer[] };
-  handle: ((...args: unknown[]) => unknown) & { stack?: Layer[] };
-  regexp: RegExp & { fast_slash?: boolean };
-  name?: string;
-};
-
-function mountPath(layer: Layer): string {
-  if (layer.regexp.fast_slash) return "";
-  return layer.regexp.source
-    .replace(/^\^/, "")
-    .replace(/\\\/\?\(\?=\\\/\|\$\)$/, "")
-    .replace(/\(\?:\(\[\^\\\/\]\+\?\)\)/g, ":param")
-    .replace(/\\\//g, "/");
-}
-
-function collectRoutes(
-  stack: Layer[],
-  prefix: string,
-  inheritedGuards: string[],
-  out: { key: string; guarded: boolean }[],
-) {
-  const guards = [...inheritedGuards];
-  for (const layer of stack) {
-    if (layer.route) {
-      const path = prefix + layer.route.path;
-      const guarded =
-        guards.some((g) => path === g || path.startsWith(g + "/") || g === "") ||
-        layer.route.stack.some((l) => isSessionGuard(l.handle));
-      for (const method of Object.keys(layer.route.methods)) {
-        out.push({ key: `${method.toUpperCase()} ${path}`, guarded });
-      }
-    } else if (layer.handle.stack) {
-      collectRoutes(layer.handle.stack, prefix + mountPath(layer), guards, out);
-    } else if (isSessionGuard(layer.handle)) {
-      // Garde posée par app.use / router.use: couvre les routes suivantes du préfixe.
-      guards.push(prefix + mountPath(layer));
-    }
-  }
-}
 
 describe("Garde de session sur l'API", () => {
   it("aucune route /api n'est accessible sans session, hors liste publique", async () => {

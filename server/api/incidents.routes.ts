@@ -7,7 +7,8 @@ import { createIncident, listIncidents } from "../services/incident-service";
 /**
  * Déclaration de panne (P-22). Les règles de périmètre vivent dans le service : client refusé,
  * chauffeur limité à ses véhicules en affectation active, personnel sans restriction.
- * `isAnyUser` charge `req.user` (AGENTS §11). Écriture : `isStaff` écarte le client dès la garde
+ * `isAnyUser` charge `req.user` (AGENTS §11). Écriture : `isVehicleOperationWriter` écarte le client,
+ * le comptable et le lecteur dès la garde
  * (le service le refuse aussi) ; le périmètre chauffeur reste tranché par le service.
  */
 const postIncident: RequestHandler = async (req, res, next) => {
