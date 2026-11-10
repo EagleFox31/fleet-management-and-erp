@@ -1,3 +1,4 @@
+import { appendFileSync } from "node:fs";
 import { expect, type Page } from "@playwright/test";
 
 /** Pause lisible à l'écran entre deux étapes visibles (vidéo de démonstration). */
@@ -40,4 +41,14 @@ export async function logoutThroughUi(page: Page, displayName: string): Promise<
   await page.getByRole("menuitem", { name: /Déconnexion/ }).click();
   await expect(page).toHaveURL(/\/(login)?$/, { timeout: 30_000 });
   await beat(page, 1000);
+}
+
+/**
+ * Repère de montage : si `DEMO_MARKS_FILE` est défini, ajoute une ligne `{label, t}` (t en ms, horloge
+ * murale) au fichier. Sert à caler la voix off sur les étapes filmées ; sans la variable, ne fait rien.
+ */
+export function mark(label: string): void {
+  const file = process.env.DEMO_MARKS_FILE;
+  if (!file) return;
+  appendFileSync(file, `${JSON.stringify({ label, t: Date.now() })}\n`);
 }
