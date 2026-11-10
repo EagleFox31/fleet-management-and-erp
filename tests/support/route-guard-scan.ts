@@ -473,10 +473,21 @@ function markerUsed(code: string, at: number, word: string): boolean {
  * Verdict sur une lecture. `fileGuards` : gardes posées sur tout le routeur (`router.use(garde)`)
  * ou à son montage (expressions ou jetons de `parseMounts`).
  */
+/**
+ * Garde chaînée en relais pur : la poignée écrite en ligne ne fait que rendre la main, `(_req, _res, next) => next()`.
+ * Elle n'envoie aucune donnée ; celle-ci part de la déclaration suivante du même chemin (souvent dans
+ * `server/routes.ts`), jugée pour elle-même par ce scan. Forme stricte : un seul appel `next()` sans argument.
+ */
+const PASS_THROUGH_HANDLER = /^\(\s*_?\w*\s*,\s*_?\w*\s*,\s*(\w+)\s*\)\s*=>\s*(?:\1\s*\(\s*\)|\{\s*(?:return\s+)?\1\s*\(\s*\)\s*;?\s*\})$/;
+export function isPassThroughGet(body: string): boolean {
+  return PASS_THROUGH_HANDLER.test(body.trim());
+}
+
 export function judgeGetRoute(route: GetRoute, kinds: GuardKinds, fileGuards: string[] = []): Verdict {
   const { restrictive, session } = classifyChain([...fileGuards, ...route.headerArgs], kinds);
   if (restrictive) return { ok: true };
   if (!session) return { ok: true }; // aucune garde de session : route publique, hors de ce contrôle
+  if (isPassThroughGet(route.body)) return { ok: true };
   const markers = isWorkOrderRead(route) ? [WORK_ORDER_MARKER] : SCOPE_MARKERS;
   if (scopeCheckedBeforeSend(route.body, markers)) return { ok: true };
   return { ok: false, reason: "session seule : aucun contrôle de cloison avant l'envoi de la donnée" };
