@@ -45,6 +45,8 @@ export const FILES_RECORD_PREFIX = "files:";
 export const LEGACY_RECORD_KEYS = ["fleetos-query-cache-v1", "fleetos-offline-queue-v1"] as const;
 /** Une copie plus ancienne est jetée à la lecture. */
 export const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/** Âge maximal d'un cache de lecture contenant des données du chauffeur (mission, pleins, fiche). */
+export const DRIVER_CACHE_MAX_AGE_MS = 72 * 60 * 60 * 1000;
 
 export function offlineDbName(userId: number): string {
   if (!Number.isInteger(userId) || userId <= 0) {
@@ -403,6 +405,19 @@ export function createOfflineScope(kv: OfflineKv) {
     }
   }
 
+  // Compteur propre au cache de lecture : l'abandonner ne touche pas la file d'écritures.
+  const cacheEpochs = new Map<string, number>();
+  const cacheEpochOfDb = (db: string) => cacheEpochs.get(db) ?? 0;
+
+  async function dropReadCacheOnly(db: string): Promise<void> {
+    cacheEpochs.set(db, cacheEpochOfDb(db) + 1);
+    try {
+      await kv.del(db, CACHE_RECORD_KEY);
+    } catch (err) {
+      clientLogger.warn("Échec de purge d'un cache hors ligne", { err, db });
+    }
+  }
+
   async function countQueued(db: string): Promise<number> {
     try {
       const saved = await kv.get<QueueEnvelope<unknown>>(db, QUEUE_RECORD_KEY);
@@ -460,6 +475,9 @@ export function createOfflineScope(kv: OfflineKv) {
     /** Nombre d'écritures en file (tous états) d'un compte, sans exiger qu'il soit actif. */
     queuedCount: (userId: number) => countQueued(offlineDbName(userId)),
 
+    /** Supprime le seul cache de lecture d'un compte (session expirée) ; sa file d'écritures est gardée. */
+    dropUserReadCache: (userId: number) => dropReadCacheOnly(offlineDbName(userId)),
+
     /** Compteur de purge du magasin d'un utilisateur, à relever avant une écriture asynchrone. */
     epochOf: (userId: number) => epochOfDb(offlineDbName(userId)),
 
@@ -468,15 +486,21 @@ export function createOfflineScope(kv: OfflineKv) {
       queries: readonly CachedQueryLike[],
       now = Date.now(),
       isFlagOn?: FlagReader,
+      options: { dropIfEmpty?: boolean } = {},
     ): Promise<number> {
       const db = offlineDbName(userId);
       const startedAt = epochOfDb(db);
+      const cacheStartedAt = cacheEpochOfDb(db);
       const persistable = selectPersistableQueries(queries, isFlagOn).map((q) => ({
         queryKey: q.queryKey,
         state: { data: q.state.data, dataUpdatedAt: q.state.dataUpdatedAt },
       }));
       // Rien à garder (cache pas encore rempli) : ne pas écraser la copie existante par du vide.
-      if (persistable.length === 0) return 0;
+      // Sauf si les drapeaux, connus et éteints, interdisent d'en garder une.
+      if (persistable.length === 0) {
+        if (options.dropIfEmpty) await dropReadCacheOnly(db);
+        return 0;
+      }
       const envelope: CacheEnvelope = {
         version: OFFLINE_SCHEMA_VERSION,
         userId,
@@ -484,6 +508,10 @@ export function createOfflineScope(kv: OfflineKv) {
         queries: persistable,
       };
       await kv.set(db, CACHE_RECORD_KEY, envelope);
+      if (epochOfDb(db) === startedAt && cacheEpochOfDb(db) !== cacheStartedAt) {
+        await kv.del(db, CACHE_RECORD_KEY);
+        return 0;
+      }
       if (epochOfDb(db) !== startedAt) {
         await clearDb(db);
         return 0;
@@ -499,7 +527,8 @@ export function createOfflineScope(kv: OfflineKv) {
         await kv.del(db, CACHE_RECORD_KEY);
         return [];
       }
-      if (now - saved.timestamp > CACHE_MAX_AGE_MS) {
+      const hasDriverData = Array.isArray(saved.queries) && saved.queries.some((q) => q.queryKey?.[0] === DRIVER_ME_PATH);
+      if (now - saved.timestamp > (hasDriverData ? DRIVER_CACHE_MAX_AGE_MS : CACHE_MAX_AGE_MS)) {
         await kv.del(db, CACHE_RECORD_KEY);
         return [];
       }

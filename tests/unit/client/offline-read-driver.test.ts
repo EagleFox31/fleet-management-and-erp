@@ -3,6 +3,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
   createOfflineScope,
+  CACHE_MAX_AGE_MS,
+  DRIVER_CACHE_MAX_AGE_MS,
+  QUEUE_RECORD_KEY,
   projectDriverMe,
   selectPersistableQueries,
   type CachedQueryLike,
@@ -219,6 +222,62 @@ describe("lecture hors ligne du chauffeur : cloison par compte", () => {
   });
 });
 
+describe("lecture hors ligne du chauffeur : extinction, session expirée, âge", () => {
+  const driverQueries = [meOf([{ id: 1, status: "in_progress" }]), detail(1, "in_progress")];
+  const queueOf = (userId: number) => ({ version: 2, userId, actions: [{ id: "a" }] });
+
+  it("drapeaux connus et éteints : la copie de lecture est supprimée à la réécriture", async () => {
+    const { kv } = memoryKv();
+    const scope = createOfflineScope(kv);
+    await scope.saveCache(10, driverQueries, 1_000, flagsOn);
+    expect((await scope.loadCache(10, 2_000, flagsOn)).length).toBe(2);
+    // Sans l'option, une réécriture vide ne touche pas à la copie existante.
+    await scope.saveCache(10, driverQueries, 1_500, () => false);
+    expect((await scope.loadCache(10, 2_000, flagsOn)).length).toBe(2);
+    await scope.saveCache(10, driverQueries, 1_600, () => false, { dropIfEmpty: true });
+    expect(await scope.loadCache(10, 2_000, flagsOn)).toEqual([]);
+  });
+
+  it("session expirée : le cache de lecture part, la file d'envois reste", async () => {
+    const { kv, dbs } = memoryKv();
+    const scope = createOfflineScope(kv);
+    await scope.saveCache(10, driverQueries, 1_000, flagsOn);
+    await kv.set("fleetos-offline-u10", QUEUE_RECORD_KEY, queueOf(10));
+    await scope.dropUserReadCache(10);
+    expect(await scope.loadCache(10, 2_000, flagsOn)).toEqual([]);
+    expect(dbs.get("fleetos-offline-u10")!.get(QUEUE_RECORD_KEY)).toEqual(queueOf(10));
+    expect(await scope.readQueue(10)).toHaveLength(1);
+  });
+
+  it("une sauvegarde en cours au moment de l'expiration ne ressuscite pas le cache et garde la file", async () => {
+    const { kv, dbs } = memoryKv();
+    const scope = createOfflineScope(kv);
+    await kv.set("fleetos-offline-u10", QUEUE_RECORD_KEY, queueOf(10));
+    const realSet = kv.set.bind(kv);
+    kv.set = async (db, key, value) => {
+      await realSet(db, key, value);
+      if (key === "query-cache") await scope.dropUserReadCache(10);
+    };
+    expect(await scope.saveCache(10, driverQueries, 1_000, flagsOn)).toBe(0);
+    expect(dbs.get("fleetos-offline-u10")!.has("query-cache")).toBe(false);
+    expect(dbs.get("fleetos-offline-u10")!.get(QUEUE_RECORD_KEY)).toEqual(queueOf(10));
+  });
+
+  it("le cache du chauffeur expire après 72 h, celui des autres profils garde 7 jours", async () => {
+    expect(DRIVER_CACHE_MAX_AGE_MS).toBe(72 * 3600 * 1000);
+    const h = 3600 * 1000;
+    const { kv } = memoryKv();
+    const scope = createOfflineScope(kv);
+    await scope.saveCache(10, driverQueries, 0, flagsOn);
+    expect((await scope.loadCache(10, 72 * h, flagsOn)).length).toBe(2);
+    expect(await scope.loadCache(10, 72 * h + 1, flagsOn)).toEqual([]);
+    const tech = [query(["/api/technician/my-work-orders"], [{ id: 5, vehicleId: 3 }])];
+    await scope.saveCache(11, tech, 0);
+    expect((await scope.loadCache(11, 100 * h)).length).toBe(1);
+    expect(await scope.loadCache(11, CACHE_MAX_AGE_MS + 1)).toEqual([]);
+  });
+});
+
 describe("bandeau hors ligne", () => {
   const stamp = new Date(2026, 10, 10, 14, 5).getTime();
 
@@ -258,6 +317,7 @@ describe("lecture hors ligne du chauffeur : liste blanche de champs", () => {
     "podUrl", "workflowData", "validatedBy", "email", "fuelBudget", "roadExpensesBudget", "contingencyBudget",
     "budgets", "budgetSuggestion", "fuel", "amount", "unitPrice", "totalAmount", "balance", "fuelBalance",
     "totalCredits", "totalDebits", "lastCredit", "lastDebit", "uploadedByName", "detail", "cniNumber", "licenseNumber",
+    "contactPerson", "phone", "contact", "telephone",
   ];
   const fat = (extra: Record<string, unknown> = {}) => ({
     id: 11, status: "in_progress", orderNumber: "M-11", cargo: "ciment", assignments: [{ driverId: 7, id: 1, secret: "x", vehicle: { id: 2, registrationNumber: "LT-1", vin: "VIN" } }],
@@ -289,10 +349,10 @@ describe("lecture hors ligne du chauffeur : liste blanche de champs", () => {
     expect([...keys].sort()).toMatchSnapshot();
   });
 
-  it("le détail garde le contact sur place et les points A/B, sans e-mail client", () => {
+  it("le détail garde le nom du client et les points A/B, sans contact ni e-mail", () => {
     const [, d] = selectPersistableQueries([meOf([{ id: 11, status: "in_progress" }]), query(["/api/missions/11"], fat({ pickupLat: 1, pickupLng: 2 }))], flagsOn);
     const data = d!.state.data as Record<string, any>;
-    expect(data.client).toEqual({ name: "ACME", phone: "6", contactPerson: "Bob" });
+    expect(data.client).toEqual({ name: "ACME" });
     expect(data.pickupLat).toBe(1);
     expect(data.cargo).toBe("ciment");
   });

@@ -13,3 +13,11 @@
 - Garde-fou : test récursif dans `tests/unit/client/offline-read-driver.test.ts` (aucune clé sensible, instantané des chemins de clés persistés). Toute clé ajoutée au cache fait échouer l'instantané et impose une relecture.
 - Serveur : `router.param("id")` (missions et preuves) et le contrôle explicite de `launch-readiness` vérifient l'appartenance au chauffeur ; aucun défaut serveur constaté. `fuel-card.routes.ts` non touché (son `console.error` reste).
 - Non fait (dette) : e2e Playwright hors ligne (`setOffline(true)` puis second compte) : demande Postgres local + serveur local avec drapeaux, non monté dans cette passe ; la cloison par compte est couverte en unitaire avec un stockage en mémoire.
+
+### Suite de l'audit sécurité
+
+- Contact client retiré du cache (`client: { name }` seulement) : aucun écran chauffeur ne lit contact ni téléphone. Instantané régénéré : seules `client.contactPerson` et `client.phone` disparaissent. Les noms `contactPerson`, `phone`, `contact`, `telephone` sont interdits dans le test récursif.
+- Drapeaux connus et éteints : la copie de lecture est supprimée à la prochaine sauvegarde (`saveCache(..., { dropIfEmpty })`).
+- Session expirée (401) : `dropUserReadCache` supprime le cache de lecture du compte, la file d'envois est gardée. Compteur propre au cache, pour qu'une sauvegarde en vol n'efface pas la file.
+- Âge maximal du cache contenant des données chauffeur : `DRIVER_CACHE_MAX_AGE_MS` = 72 h (les autres profils gardent 7 jours).
+- Constat : l'utilisateur actif n'est tenu qu'en mémoire (`offline-user-scope.ts`), activé à la connexion ou par un `/api/auth/me` réussi (`session-resume.ts`). Au démarrage hors ligne (`unreachable`), aucun compte n'est activé : rien n'est restauré. La lecture hors ligne ne sert donc que si l'application reste ouverte (perte de réseau en cours de session). E2e non tenté, noté en dette.

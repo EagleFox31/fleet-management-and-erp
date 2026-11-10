@@ -89,7 +89,7 @@ export const MISSION_DETAIL_SHAPE: FieldShape = {
   weight: true,
   volume: true,
   specialInstructions: true,
-  client: { name: true, contactPerson: true, phone: true },
+  client: { name: true },
   assignment: ASSIGNMENT,
   assignments: [ASSIGNMENT],
 };

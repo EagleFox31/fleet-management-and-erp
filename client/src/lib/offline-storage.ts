@@ -2,6 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { clientLogger } from "@/lib/logger";
 import { pendingServerLogout } from "@/lib/pending-logout";
 import {
+  DRIVER_READ_PROFILE,
   getActiveOfflineUserId,
   setActiveOfflineUserId,
   subscribeActiveOfflineUser,
@@ -108,6 +109,8 @@ export async function expireOfflineSession(queryClient: QueryClient, userId: num
     clientLogger.warn("Annulation des requêtes à l'expiration de session en échec", { err });
   }
   queryClient.clear();
+  // Session expirée : plus de lecture hors ligne pour ce compte (la file d'envois est gardée).
+  await offlineScope.dropUserReadCache(userId);
   // Envois gardés : l'utilisateur est prévenu qu'il doit se reconnecter pour qu'ils partent.
   void announceKeptSends(userId);
 }
@@ -131,6 +134,7 @@ function restoreFlagReader(queryClient: QueryClient): (flag: string) => boolean 
 export async function persistQueryClientToIndexedDB(queryClient: QueryClient): Promise<void> {
   const userId = getActiveOfflineUserId();
   if (userId === null) return;
+  const flagsKnown = queryClient.getQueryData([FEATURE_FLAGS_PATH]) !== undefined;
   try {
     await offlineScope.saveCache(
       userId,
@@ -144,6 +148,7 @@ export async function persistQueryClientToIndexedDB(queryClient: QueryClient): P
       })),
       Date.now(),
       readFlag,
+      { dropIfEmpty: flagsKnown && !DRIVER_READ_PROFILE.flags.every(readFlag) },
     );
   } catch (err) {
     clientLogger.warn("Échec de sauvegarde du cache dans IndexedDB", { err });
