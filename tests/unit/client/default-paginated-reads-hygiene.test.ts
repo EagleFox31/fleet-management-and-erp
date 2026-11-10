@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
-import { VEHICLES_PAGE_SIZE } from "../../../client/src/lib/fetch-all-pages";
+import { PARTS_PAGE_SIZE, VEHICLES_PAGE_SIZE } from "../../../client/src/lib/fetch-all-pages";
 import { WORK_ORDERS_PAGE_SIZE } from "../../../client/src/lib/fetch-all-work-orders";
 
 /**
@@ -35,24 +35,19 @@ const DEFAULT_LIMITS: Record<string, number> = {
   "/api/admin/users": 10,
   "/api/tire-inspections": 20,
   "/api/tire-inspections/recent": 10,
-  "/api/tire-rotations": 20,
 };
 
-const FROZEN: Record<string, number> = {
-  // Lot 2 : sélecteur de véhicule des rotations (sa requête écrit un tableau sous `["/api/vehicles"]`,
-  // clé que d'autres écrans lisent comme `{ vehicles, total }`), inspections récentes et rotations.
-  "client/src/pages/inventory/tires/index.tsx": 4,
-  // Lot 3, tuiles et agrégats : flotte et stock du technicien, OT par technicien, tableaux de bord.
-  "client/src/pages/technician/fleet-status.tsx": 2,
-  "client/src/pages/technicians/index.tsx": 1,
-  "client/src/pages/maintenance/gmao-dashboard.tsx": 1,
-  "client/src/pages/workshop-manager/dashboard.tsx": 1,
-  "client/src/pages/inventory/parts-database.tsx": 1,
-  // `getAll` des services et hooks génériques, sans appelant d'écran repéré : à vérifier, pas supprimé.
-  "client/src/lib/api-calls.ts": 4,
-  "client/src/hooks/useVehicles.ts": 1,
-  "client/src/hooks/useMaintenance.ts": 1,
+/**
+ * Routes qui lisent `limit` sans l'appliquer : elles rendent toute la liste, un tableau nu.
+ * Leur lecture sans `limit` n'est pas tronquée et n'est pas visée. Le second bloc vérifie
+ * qu'elles ne paginent toujours pas ; le jour où l'une pagine, elle repasse dans `DEFAULT_LIMITS`.
+ */
+const UNPAGINATED: Record<string, { call: string; reply: string }> = {
+  "/api/tire-rotations": { call: "tiresService.getTireRotations()", reply: "res.status(200).json(rotations)" },
 };
+
+/** Lecteurs restants, gelés par fichier. Vide : tout nouveau lecteur fait échouer le test. */
+const FROZEN: Record<string, number> = {};
 
 const ROOT = join(__dirname, "..", "..", "..");
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
@@ -205,9 +200,21 @@ describe("routes paginées par défaut : alignement sur le serveur", () => {
     });
   }
 
+  for (const [route, { call, reply }] of Object.entries(UNPAGINATED)) {
+    it(`${route} : rend toute la liste (limit lu mais non appliqué)`, () => {
+      const body = handler(route);
+      // Appel sans argument : ni limit ni offset ne sont transmis au service, la liste part entière.
+      expect(body).toContain(call);
+      expect(body).toContain(reply);
+      expect(Object.keys(DEFAULT_LIMITS)).not.toContain(route);
+    });
+  }
+
   it("tailles de page des lectures complètes ≤ plafonds serveur", () => {
     expect(VEHICLES_PAGE_SIZE).toBeLessThanOrEqual(constant(vehicleListSrc, "VEHICLE_LIST_MAX_LIMIT"));
     const workOrdersMax = Number(handler("/api/work-orders").match(/Math\.min\(Math\.max\(requestedLimit,\s*1\),\s*(\d+)\)/)?.[1]);
     expect(WORK_ORDERS_PAGE_SIZE).toBeLessThanOrEqual(workOrdersMax);
+    const partsMax = Number(handler("/api/parts").match(/Math\.min\(rawLimit,\s*(\d+)\)/)?.[1]);
+    expect(PARTS_PAGE_SIZE).toBeLessThanOrEqual(partsMax);
   });
 });

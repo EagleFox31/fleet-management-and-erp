@@ -1,4 +1,5 @@
 import { maintenanceApi } from "@/lib/api-calls";
+import { fetchAllWorkOrdersForScreen } from "@/lib/fetch-all-work-orders";
 import { maintenanceElapsedDays } from "@shared/constants/maintenance-due-day";
 
 export interface WorkOrder {
@@ -51,9 +52,8 @@ export interface MaintenanceStats {
 
 export const maintenanceService = {
   async getWorkOrders(): Promise<WorkOrder[]> {
-    const response = await maintenanceApi.getWorkOrders();
-    const data = await response.json();
-    return data;
+    // Toutes les pages : sans `limit`, la route ne rend que 50 OT, dans `{ workOrders, total }`.
+    return fetchAllWorkOrdersForScreen<WorkOrder>();
   },
 
   async getWorkOrderById(id: number): Promise<WorkOrder> {

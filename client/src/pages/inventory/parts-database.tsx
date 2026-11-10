@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAllParts } from "@/hooks/use-all-parts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +20,7 @@ import { Plus, Wrench, Package, FileText, Euro } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { userMessageOf } from "@/lib/api-error";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { useFormDraft } from "@/hooks/use-form-draft";
 import { FormDraftBadge, FormDraftDiscardButton } from "@/components/form-draft/form-draft-indicator";
 import { partCategoryDraft, partSpecificationDraft, partVariantDraft } from "@/lib/form-drafts";
@@ -50,9 +52,14 @@ export default function PartsDatabasePage() {
   const [selectedPartId, setSelectedPartId] = useState<number | null>(null);
 
   // Queries pour récupérer les données
-  const { data: parts = [], isLoading: partsLoading } = useQuery<any>({
-    queryKey: ["/api/parts"],
-  });
+  const {
+    data: parts = [],
+    isLoading: partsLoading,
+    isError: partsError,
+    error: partsErrorValue,
+    refetch: refetchParts,
+    isFetching: partsFetching,
+  } = useAllParts();
 
   const { data: categories = [], isLoading: categoriesLoading } = useQuery<any>({
     queryKey: ["/api/parts/categories"],
@@ -179,6 +186,21 @@ export default function PartsDatabasePage() {
           <Skeleton className="h-28 w-full rounded-xl" />
         </div>
         <Skeleton className="h-64 w-full rounded-xl" />
+      </div>
+    );
+  }
+
+  // Lecture refusée ou incomplète : le dire, jamais une liste vide.
+  if (partsError) {
+    return (
+      <div className="container mx-auto p-6">
+        <InlineQueryError
+          error={partsErrorValue}
+          fallback="Les pièces n'ont pas pu être lues. Réessayez."
+          onRetry={() => void refetchParts()}
+          isRetrying={partsFetching}
+          data-testid="parts-database-error"
+        />
       </div>
     );
   }

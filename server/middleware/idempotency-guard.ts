@@ -12,6 +12,7 @@ import {
   type IdempotencyRoute,
 } from "../lib/idempotency-config";
 import { hashRequest, idempotencyStore, type IdempotencyStore } from "../lib/idempotency-store";
+import { findIdempotentRoute, normalizeIdempotencyPath } from "@shared/idempotency-routes";
 import { moduleLogger } from "../lib/logger";
 import { API_PREFIX, routedPath } from "../lib/routed-path";
 
@@ -20,23 +21,7 @@ const findActiveSessionUser = async (id: number) => (await import("../services/s
 
 const log = moduleLogger("idempotency-guard");
 
-/** Chemin normalisé comme Express et le journal d'audit : sans casse, décodé, sans `/` final. */
-export function normalizeIdempotencyPath(path: string): string {
-  const rawPath = path.split("?")[0];
-  let decoded = rawPath;
-  try {
-    decoded = decodeURIComponent(rawPath);
-  } catch {
-    // Encodage invalide : on garde le chemin brut.
-  }
-  return decoded.toLowerCase().replace(/\/+$/, "") || "/";
-}
-
-/** Règle de la liste qui couvre l'écriture `method path`, ou `undefined`. */
-export function findIdempotentRoute(routes: readonly IdempotencyRoute[], method: string, path: string): IdempotencyRoute | undefined {
-  const clean = normalizeIdempotencyPath(path);
-  return routes.find((route) => route.method === method.toUpperCase() && route.pattern.test(clean));
-}
+export { findIdempotentRoute, normalizeIdempotencyPath };
 
 /** Vrai si l'écriture `method path` figure dans la liste des routes rejouables. */
 export function isIdempotentRoute(routes: readonly IdempotencyRoute[], method: string, path: string): boolean {
