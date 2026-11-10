@@ -4,6 +4,7 @@ import { db } from "../../server/db";
 import { assignments, drivers, incidents, missions, users, vehicles, workOrders } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
+import { AppError } from "../../server/lib/app-error";
 import { createIncident } from "../../server/services/incident-service";
 import { isUniqueViolation, pgConstraintOf } from "../../server/lib/pg-errors";
 import { createTestVehicle } from "../support/factories";
@@ -324,8 +325,7 @@ describe("DRV2-1/2 : POST /api/driver/breakdowns", { timeout: 180000 }, () => {
           ),
         ),
     };
-    await expect(
-      createIncident(
+    const failure: any = await createIncident(
         { id: session.userIdOf("admin"), role: "admin" },
         { vehicleId: ownVehicleId, description: marker, severity: "high" },
         {
@@ -335,8 +335,16 @@ describe("DRV2-1/2 : POST /api/driver/breakdowns", { timeout: 180000 }, () => {
           broadcast: () => undefined,
         },
         { openWorkOrder: true },
-      ),
-    ).rejects.toThrow(/simulé/);
+    ).then(
+      () => null,
+      (err: unknown) => err,
+    );
+    // L'utilisateur lit un message lisible (503) ; l'erreur d'origine reste dans `cause` pour les logs.
+    expect(failure).toBeInstanceOf(AppError);
+    expect(failure.status).toBe(503);
+    expect(failure.code).toBe("INCIDENT_WRITE_FAILED");
+    expect(failure.message).not.toMatch(/simulé/);
+    expect(String(failure.cause?.message)).toMatch(/simulé/);
     expect(await db.select().from(workOrders).where(eq(workOrders.description, marker))).toHaveLength(0);
     expect(await db.select().from(incidents).where(eq(incidents.description, marker))).toHaveLength(0);
   });
