@@ -68,6 +68,7 @@ export const RETIRED_VEHICLE_WRITE_ROUTES: readonly RetiredVehicleWriteRoute[] =
   { route: "POST /api/fuel-records", vehicle: [{ body: "vehicleId" }] },
   { route: "PATCH /api/fuel-records/:id", vehicle: [{ lookup: "fuelRecord", param: "id" }, { body: "vehicleId" }] },
   { route: "DELETE /api/fuel-records/:id", vehicle: [{ lookup: "fuelRecord", param: "id" }] },
+  { route: "POST /api/fuel-records/:id/cancel", vehicle: [{ lookup: "fuelRecord", param: "id" }] },
   { route: "POST /api/fuel-card/consumption", vehicle: [{ body: "vehicleId" }] },
   { route: "POST /api/missions/:id/fuel-records", vehicle: [{ body: "vehicleId" }] },
   { route: "POST /api/missions/:id/fuel-records/regularize", vehicle: [{ body: "vehicleId" }] },

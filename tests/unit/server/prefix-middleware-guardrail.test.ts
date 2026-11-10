@@ -55,7 +55,6 @@ const MIDDLEWARES_JUSTIFIES: Entree[] = [
   { name: "authorize", type: "garde-role", raison: "liste de roles explicite par montage (403)" },
   { name: "sessionGuard", type: "garde-role", raison: "marque une garde de session ; enveloppe un repartiteur de gardes (/suppliers)" },
   { name: "exportsGuard", type: "garde-role", raison: "tableau [drapeau, isAnyUser, matrice de roles par export] : refus par defaut" },
-  { name: "gardeApprovisionnement", type: "garde-role", raison: "authorize(PROCUREMENT_ROLES) pose en constante locale" },
   { name: "(anonyme)@/check", file: "server/api/vehicle-subresources.routes.ts", type: "sans-base", occurrences: 1, raison: "next('router') seul : rend /vehicles/check/* au controle d'immatriculation de routes.ts, sans rien lire" },
   { name: "(anonyme)@/health/details", file: INDEX, type: "garde-role", occurrences: 1, raison: "gestionnaire final de la route : isAdmin le precede dans la meme chaine, il ne s'execute qu'apres la garde" },
   { name: `(anonyme)@/part-sales`, file: INDEX, type: "garde-role", occurrences: 1, raison: "repartiteur : GET/HEAD passent, toute ecriture est confiee a authorize(PART_SALE_ROLES)" },
@@ -87,6 +86,7 @@ const MIDDLEWARES_JUSTIFIES: Entree[] = [
   { name: "auditWrites", file: INDEX, type: "ecrit-apres-reponse", source: "server/middleware/audit-writes.ts", raison: "n'ecrit qu'apres la reponse (`finish`, statut < 400), ne lit aucune donnee metier ; enregistrement non bloquant" },
   { name: "idempotencyGuard", file: INDEX, type: "indexe-par-session", raison: "ne s'active que pour les routes de IDEMPOTENCY_ROUTES, drapeau offline-writes (coupe par defaut), en-tete present et session ouverte ; reserve une cle indexee par userId et ne lit aucune donnee metier" },
   { name: "retiredVehicleWriteGuard", file: INDEX, type: "indexe-par-session", raison: "ecritures de RETIRED_VEHICLE_WRITE_ROUTES seulement, session ouverte et role personnel verifies par la garde (client et anonyme passent a la garde de role de la route) ; ne lit que vehicle_id de l'objet vise et deleted_at du vehicule, que le personnel lit deja (AGENTS.md section 11) ; 409 sans detail" },
+  { name: "viewerReadOnlyGuard", file: INDEX, type: "indexe-par-session", raison: "methodes d'ecriture seulement, session ouverte requise (anonyme passe a la garde de la route) ; ne relit que le compte de la session (role) et repond 403 au lecteur sans lire aucune donnee metier ; allowlist VIEWER_WRITE_ALLOWED" },
   { name: "requireFeature", file: INDEX, type: "sans-base", source: "server/lib/feature-flags.ts", raison: "lit le drapeau de fonctionnalite en memoire/environnement (404 si coupe) ; aucun acces base" },
   // Surveillance : routes de vite.ts, jamais atteintes par /api (montees apres apiNotFound, developpement et statique).
   { name: "vite.middlewares", file: VITE, type: "hors-api", raison: "serveur de developpement Vite, monte apres apiNotFound : une requete /api n'y arrive jamais" },

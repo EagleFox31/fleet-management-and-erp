@@ -6,9 +6,9 @@ import { ALL_APP_ROLES, canReadClientBilling, canReadDocumentation } from "@shar
 const read = (path: string) => readFileSync(resolve(__dirname, "../../..", path), "utf8");
 
 describe("widgets : requêtes limitées aux rôles admis par la route serveur", () => {
-  it("statistiques de facturation : admin, secrétaire, logistique et direction", () => {
+  it("statistiques de facturation : admin, secrétaire, comptable, logistique et direction", () => {
     const admitted = ALL_APP_ROLES.filter((r) => canReadClientBilling(r));
-    expect([...admitted].sort()).toEqual(["admin", "logistics", "management", "secretary"]);
+    expect([...admitted].sort()).toEqual(["accountant", "admin", "logistics", "management", "secretary"]);
     expect(canReadClientBilling("client")).toBe(false);
     expect(canReadClientBilling("technician")).toBe(false);
     expect(canReadClientBilling(undefined)).toBe(false);

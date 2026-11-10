@@ -289,6 +289,30 @@ export const Sidebar: React.FC<SidebarProps> = ({ className, mobileOpen, onMobil
           },
         ];
 
+      case 'accountant':
+        return [
+          { label: "Tableau de bord", href: "/dashboard", icon: BarChart3 },
+          { label: "Facturation client", href: "/operations", icon: Receipt },
+          {
+            label: "Fournisseurs",
+            icon: PackageSearch,
+            menuKey: "procurement",
+            submenu: [
+              { label: "Factures fournisseur", href: "/procurement/invoices", icon: FileText },
+              { label: "Fournisseurs", href: "/procurement/suppliers", icon: Store },
+            ]
+          },
+          { label: "Carburant", href: "/fuel", icon: Fuel },
+          {
+            label: "Analyse",
+            icon: BarChart,
+            menuKey: "analysis",
+            submenu: [
+              { label: "Rapports", href: "/reports", icon: TrendingUp },
+            ]
+          },
+        ];
+
       case 'warehouse':
         return [
           { label: "Tableau de bord", href: "/dashboard", icon: BarChart3 },
@@ -386,6 +410,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ className, mobileOpen, onMobil
               { label: "Distribution & Envois", href: "/management/reports/scheduled", icon: Mail },
             ]
           },
+        ];
+
+      case 'viewer':
+        return [
+          { label: "Tableau de bord", href: "/dashboard", icon: BarChart3 },
+          { label: "Véhicules", href: "/vehicles", icon: Truck },
+          { label: "Rapports", href: "/reports", icon: FileText },
         ];
 
       case 'client':

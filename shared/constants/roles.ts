@@ -45,6 +45,83 @@ export function canReadDriverPersonalData(role: string | null | undefined): bool
 }
 
 /**
+ * Rôles en lecture seule : aucune écriture métier, les écrans masquent leurs boutons d'action
+ * (`isReadOnlyRole`, côté client comme serveur).
+ */
+export const READ_ONLY_ROLES = ["viewer"] as const satisfies readonly AppRole[];
+
+/** Le rôle est normalisé comme sur le serveur : « Viewer », « lecteur » sont lus comme `viewer`. */
+export function isReadOnlyRole(role: string | null | undefined): boolean {
+  return (READ_ONLY_ROLES as readonly string[]).includes(normalizeRole(role));
+}
+
+/**
+ * Lecteur (`viewer`) : lecture seule sur tout le personnel. La garde `viewerReadOnlyGuard`
+ * (server/middleware) refuse toute écriture ; seules ces routes lui restent ouvertes, parce
+ * qu'elles n'écrivent rien de métier : session (ouvrir, fermer), libre-service sur sa propre
+ * ligne (mot de passe, parcours d'accueil, préférences de notification, lecture d'une alerte).
+ * Chemins tels qu'Express les voit sous `/api` ; un segment `:x` accepte toute valeur.
+ */
+export const VIEWER_WRITE_ALLOWED = [
+  { method: "POST", path: "/auth/login" },
+  { method: "POST", path: "/auth/pin-login" },
+  { method: "POST", path: "/auth/logout" },
+  { method: "POST", path: "/users/change-password" },
+  { method: "PATCH", path: "/onboarding/step" },
+  { method: "PATCH", path: "/onboarding/complete" },
+  { method: "PATCH", path: "/onboarding/mascot" },
+  { method: "PATCH", path: "/notifications/settings" },
+  { method: "PATCH", path: "/alerts/:id/read" },
+] as const;
+
+/** `/alerts/:id/read` accepte `/alerts/12/read` : comparaison segment par segment. */
+export function matchesAllowedWrite(method: string, path: string): boolean {
+  const target = path.replace(/\/+$/, "").split("/");
+  return VIEWER_WRITE_ALLOWED.some((a) => {
+    if (a.method !== method.toUpperCase()) return false;
+    const pattern = a.path.split("/");
+    return pattern.length === target.length && pattern.every((seg, i) => (seg.startsWith(":") ? target[i].length > 0 : seg === target[i]));
+  });
+}
+
+/** Alias de saisie ou de stockage d'un rôle (majuscules, français) ramenés au rôle canonique. */
+const ROLE_ALIASES: Record<string, AppRole> = {
+  admin: "admin",
+  administrateur: "admin",
+  workshop_manager: "workshop_manager",
+  gestionnaire_atelier: "workshop_manager",
+  "gestionnaire d'atelier": "workshop_manager",
+  technician: "technician",
+  technicien: "technician",
+  secretary: "secretary",
+  secretaire: "secretary",
+  "secrétaire": "secretary",
+  accountant: "accountant",
+  comptable: "accountant",
+  viewer: "viewer",
+  lecteur: "viewer",
+  logistics: "logistics",
+  logisticien: "logistics",
+  warehouse: "warehouse",
+  magasinier: "warehouse",
+  management: "management",
+  direction: "management",
+  directeur: "management",
+  dg: "management",
+  client: "client",
+  user: "user",
+};
+
+/** Rôle canonique d'une valeur stockée ou saisie ; inconnu → `user`. Partagé serveur / client. */
+export const normalizeRole = (role: string | null | undefined): AppRole => {
+  const normalized = (role || "").trim().toLowerCase();
+  const aliasRole = ROLE_ALIASES[normalized];
+  if (aliasRole) return aliasRole;
+  if ((ALL_APP_ROLES as readonly string[]).includes(normalized)) return normalized as AppRole;
+  return "user";
+};
+
+/**
  * Rôle applicatif — dérivé du schéma, jamais recopié.
  *
  * Il existait trois déclarations locales et divergentes de ce type
@@ -70,9 +147,11 @@ export const ROLE_LABELS: Record<AppRole, string> = {
   workshop_manager: "Chef d'atelier",
   technician: "Technicien",
   secretary: "Secrétaire",
+  accountant: "Comptable",
   logistics: "Logisticien",
   warehouse: "Magasinier",
   management: "Direction",
+  viewer: "Lecteur",
   client: "Client",
   driver: "Chauffeur",
   user: "Utilisateur",
@@ -110,7 +189,26 @@ export function canManagePartsPurchaseOrders(role: string | null | undefined): b
  * d'atelier qui lit les fiches sans rien écrire (création, modification,
  * évaluation et désactivation restent à PROCUREMENT_ROLES).
  */
-export const SUPPLIER_READ_ROLES = [...PROCUREMENT_ROLES, "workshop_manager"] as const;
+// Le comptable consulte les fournisseurs et les bons de commande (rapprochement facture / BC), sans écrire.
+export const SUPPLIER_READ_ROLES = [...PROCUREMENT_ROLES, "workshop_manager", "accountant"] as const;
+export const PURCHASE_ORDER_READ_ROLES = [...PROCUREMENT_ROLES, "accountant"] as const;
+
+/**
+ * Factures fournisseur (`/api/supplier-invoices`, écrans `/procurement/invoices*`) : les profils
+ * d'approvisionnement, plus le comptable (rôle ajouté le 10 novembre 2026) qui lit, approuve et
+ * règle les factures sans passer de commande (il reste hors PROCUREMENT_ROLES).
+ */
+export const SUPPLIER_INVOICE_READ_ROLES = [...PROCUREMENT_ROLES, "accountant"] as const satisfies readonly AppRole[];
+/** Approbation et règlement d'une facture fournisseur : qui tient la caisse. Additif : la secrétaire garde ses droits. */
+export const SUPPLIER_INVOICE_PAYMENT_ROLES = ["admin", "secretary", "accountant"] as const satisfies readonly AppRole[];
+// Création / import d'une facture fournisseur : mêmes rôles que le règlement (pas de séparation des tâches, voir backlog).
+export const SUPPLIER_INVOICE_CREATE_ROLES = SUPPLIER_INVOICE_PAYMENT_ROLES;
+/** Validation selon le périmètre de la facture : pièces (magasin), hors pièces (logistique), mixte. */
+export const SUPPLIER_INVOICE_VALIDATION_ROLES_BY_SCOPE = {
+  parts: ["admin", "warehouse"],
+  non_parts: ["admin", "secretary", "accountant", "logistics"],
+  mixed: ["admin", "secretary", "accountant"],
+} as const satisfies Record<string, readonly AppRole[]>;
 
 export function canAccessProcurement(role: string | null | undefined): boolean {
   return PROCUREMENT_ROLES.includes(String(role ?? "") as ProcurementRole);
@@ -149,7 +247,7 @@ export function canWriteTimeTracking(role: string | null | undefined): boolean {
  * leurs écrans masquent Valider / Traiter au lieu d'afficher un bouton qui renvoie 403.
  */
 export const FUEL_WRITE_ROLES = ["admin", "logistics", "secretary"] as const satisfies readonly AppRole[];
-export const FUEL_READ_ROLES = [...FUEL_WRITE_ROLES, "workshop_manager", "management"] as const satisfies readonly AppRole[];
+export const FUEL_READ_ROLES = [...FUEL_WRITE_ROLES, "workshop_manager", "management", "accountant"] as const satisfies readonly AppRole[];
 
 export function canWriteFuel(role: string | null | undefined): boolean {
   return (FUEL_WRITE_ROLES as readonly string[]).includes(String(role ?? ""));
@@ -171,8 +269,8 @@ export function canWriteFuelPrice(role: string | null | undefined): boolean {
 export const TIRE_MOVEMENT_ROLES = ["admin", "management", "workshop_manager", "warehouse", "technician"] as const satisfies readonly AppRole[];
 
 /** Journal de trésorerie (T1) : saisie par l'administrateur et le secrétariat ; la direction lit. */
-export const TREASURY_WRITE_ROLES = ["admin", "secretary"] as const satisfies readonly AppRole[];
-export const TREASURY_READ_ROLES = ["admin", "secretary", "management"] as const satisfies readonly AppRole[];
+export const TREASURY_WRITE_ROLES = ["admin", "secretary", "accountant"] as const satisfies readonly AppRole[];
+export const TREASURY_READ_ROLES = ["admin", "secretary", "accountant", "management"] as const satisfies readonly AppRole[];
 /** Lecture limitée aux comptes carte carburant (lot T2) : la logistique suit la carte, pas la banque. */
 export const TREASURY_FUEL_CARD_READ_ROLES = [...TREASURY_READ_ROLES, "logistics"] as const satisfies readonly AppRole[];
 /**
@@ -183,37 +281,39 @@ export const TREASURY_FUEL_CARD_READ_ROLES = [...TREASURY_READ_ROLES, "logistics
  * Aujourd'hui égale à `FUEL_CARD_MANAGER_ROLES`, mais tenue à part exprès : la recharge est gardée par
  * `isFuelCardManager`, cette liste ne peut qu'en être un sous-ensemble, et ajouter un gestionnaire de
  * carte ne doit pas lui donner le droit de débiter une banque. Figé par fuel-recharge-source-roles.test.ts.
+ * Le comptable (10 novembre 2026) n'y figure pas : la recharge reste une opération carburant
+ * (logistique, secrétariat) ; il lit l'écriture de trésorerie qu'elle produit.
  */
 export const FUEL_RECHARGE_SOURCE_ROLES = ["admin", "secretary", "logistics"] as const satisfies readonly AppRole[];
 
 /** Factures client en attente (`/api/pending-invoices`). La direction y lit les indicateurs. */
-export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];
+export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "accountant", "logistics"] as const satisfies readonly AppRole[];
 
 /** Budget de mission (L1, `/api/mission-budgets`) : la logistique saisit, la direction approuve. */
 export const MISSION_BUDGET_WRITE_ROLES = ["admin", "logistics"] as const satisfies readonly AppRole[];
 export const MISSION_BUDGET_APPROVE_ROLES = ["admin", "management"] as const satisfies readonly AppRole[];
 /**
- * Décaissement et choix du compte source (L1c) : alignés sur FUEL_RECHARGE_SOURCE_ROLES, mais déclarés
- * à part pour qu'un changement côté carburant ne les déplace pas. Qui approuve ne décaisse pas.
+ * Décaissement et choix du compte source (L1c) : le comptable décaisse sans recharger la carte carburant
+ * (FUEL_RECHARGE_SOURCE_ROLES ne l'inclut pas) ; les deux groupes sont déclarés à part. Qui approuve ne décaisse pas.
  */
-export const MISSION_BUDGET_DISBURSE_ROLES = ["admin", "secretary", "logistics"] as const satisfies readonly AppRole[];
+export const MISSION_BUDGET_DISBURSE_ROLES = ["admin", "secretary", "accountant", "logistics"] as const satisfies readonly AppRole[];
 /** Lecture (liste, détail, besoin du jour, destinations) : qui saisit, approuve ou décaisse lit le budget. */
-export const MISSION_BUDGET_READ_ROLES = ["admin", "logistics", "management", "secretary"] as const satisfies readonly AppRole[];
+export const MISSION_BUDGET_READ_ROLES = ["admin", "logistics", "management", "secretary", "accountant"] as const satisfies readonly AppRole[];
 /**
  * Solde d'une mission terminée (Q18) : le reliquat revient au compte source, une écriture de trésorerie.
  * Aligné sur TREASURY_WRITE_ROLES (qui tient la caisse rend le reliquat), déclaré à part pour rester explicite.
  */
-export const MISSION_BUDGET_SETTLE_ROLES = ["admin", "secretary"] as const satisfies readonly AppRole[];
+export const MISSION_BUDGET_SETTLE_ROLES = ["admin", "secretary", "accountant"] as const satisfies readonly AppRole[];
 
 /**
  * Factures en attente de paiement et retenues à la source (lot F1, `/api/finance/...`) : lecture.
  * La logistique lit les retenues, le net et les taux : son suivi « opération et facturation » les porte déjà
  * (décision du 2026-11-05). Elle n'écrit rien (FINANCE_RECEIVABLE_WRITE_ROLES).
  */
-export const FINANCE_RECEIVABLE_READ_ROLES = ["admin", "management", "secretary", "logistics"] as const satisfies readonly AppRole[];
+export const FINANCE_RECEIVABLE_READ_ROLES = ["admin", "management", "secretary", "accountant", "logistics"] as const satisfies readonly AppRole[];
 
 /** Dépôt d'une facture chez le client, taux de retenue d'un client : saisie (la direction lit). */
-export const FINANCE_RECEIVABLE_WRITE_ROLES = ["admin", "secretary"] as const satisfies readonly AppRole[];
+export const FINANCE_RECEIVABLE_WRITE_ROLES = ["admin", "secretary", "accountant"] as const satisfies readonly AppRole[];
 
 export function canReadFinanceReceivable(role: string | null | undefined): boolean {
   return (FINANCE_RECEIVABLE_READ_ROLES as readonly string[]).includes(String(role ?? ""));
@@ -267,6 +367,8 @@ export const VEHICLE_RESTRICTED_PATCH_FIELDS: Readonly<Record<string, readonly s
  * mouvementé la carte : le service de suppression relit cette liste sous verrou.
  */
 export const FUEL_CARD_MANAGER_ROLES = ["admin", "logistics", "secretary"] as const satisfies readonly AppRole[];
+// Solde et historique de la carte en consultation : les gestionnaires plus le comptable, qui ne recharge pas.
+export const FUEL_CARD_VIEWER_ROLES = [...FUEL_CARD_MANAGER_ROLES, "accountant"] as const satisfies readonly AppRole[];
 
 /** Saisie de la capacité des réservoirs : tous les rôles du PATCH véhicule. */
 export function canEditTankCapacity(role: string | null | undefined): boolean {
@@ -307,14 +409,14 @@ export function canWriteVehiclePurchasePrice(role: string | null | undefined): b
 export const MAINTENANCE_COST_READ_ROLES = ["admin", "workshop_manager"] as const satisfies readonly AppRole[];
 
 /** Coût d'un véhicule (`GET /api/vehicles/:id/cost-summary`). */
-export const VEHICLE_COST_ROLES = ["admin", "management", "workshop_manager", "logistics"] as const satisfies readonly AppRole[];
+export const VEHICLE_COST_ROLES = ["admin", "management", "workshop_manager", "logistics", "accountant"] as const satisfies readonly AppRole[];
 
 /**
  * Rapports d'exploitation : inventaire des pièces (`GET /api/reports/inventory`) et
  * performance des techniciens (`GET /api/reports/technician-performance`).
  * Lus par `isInventoryReportReader` / `isTechnicianReportReader` et par l'écran `/reports`.
  */
-export const INVENTORY_REPORT_ROLES = ["admin", "management", "workshop_manager", "warehouse", "secretary"] as const satisfies readonly AppRole[];
+export const INVENTORY_REPORT_ROLES = ["admin", "management", "workshop_manager", "warehouse", "secretary", "accountant"] as const satisfies readonly AppRole[];
 export const TECHNICIAN_REPORT_ROLES = ["admin", "management", "workshop_manager"] as const satisfies readonly AppRole[];
 
 export function canReadInventoryReport(role: string | null | undefined): boolean {
@@ -330,6 +432,15 @@ export function canReadTechnicianReport(role: string | null | undefined): boolea
  * Lu par `isStaff` (server/middleware/auth.ts) et par les écrans qui en dépendent.
  */
 export const STAFF_ROLES: readonly AppRole[] = ALL_APP_ROLES.filter((role) => role !== "client");
+/**
+ * Saisie d'exploitation sur un véhicule (kilométrage, position de maintenance, incident) : le
+ * personnel moins le comptable, qui consulte sans saisir. `isStaff` ne suffit pas : il s'ouvre
+ * à tout nouveau rôle du personnel sans que le diff le montre. Le lecteur est exclu ici aussi, en plus
+ * de la garde globale de lecture seule.
+ */
+export const VEHICLE_OPERATION_WRITE_ROLES: readonly AppRole[] = STAFF_ROLES.filter(
+  (role) => role !== "accountant" && role !== "viewer",
+);
 
 /**
  * Coût d'un OT (taux horaire servi par `GET /api/work-orders/:id/labor-rate`) : le personnel
@@ -378,7 +489,7 @@ export const OPERATIONS_COST_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter
  * qui lisent la facturation (`authorize` de `server/api/billing.routes.ts`). La facture est celle
  * d'un client de flotte (table `clients`), pas d'un compte : aucun compte `client` n'en reçoit.
  */
-export const CLIENT_BILLING_EVENT_ROLES: readonly AppRole[] = ["admin", "secretary", "logistics"];
+export const CLIENT_BILLING_EVENT_ROLES: readonly AppRole[] = ["admin", "secretary", "accountant", "logistics"];
 
 /**
  * Statistiques de facturation client (`GET /api/billing/statistics`, graphique CA par client) : les

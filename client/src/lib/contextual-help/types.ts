@@ -3,6 +3,8 @@ export const APP_ROLES = [
   "workshop_manager",
   "technician",
   "secretary",
+  "accountant",
+  "viewer",
   "logistics",
   "warehouse",
   "management",

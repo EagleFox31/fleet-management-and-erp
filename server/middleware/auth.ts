@@ -1,46 +1,12 @@
 import { Request, Response, NextFunction } from 'express';
 import { moduleLogger } from "../lib/logger";
 import { findActiveSessionUser } from "../services/session-user";
-import { ALL_APP_ROLES, STOCK_ISSUER_ROLES, STOCK_VALUATION_READ_ROLES, STAFF_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES, INVENTORY_REPORT_ROLES, INVENTORY_MANAGER_ROLES, VEHICLE_PATCH_ROLES, DRIVER_MANAGER_ROLES, FUEL_CARD_MANAGER_ROLES, TECHNICIAN_REPORT_ROLES, type AppRole } from "@shared/constants/roles";
+import { VEHICLE_OPERATION_WRITE_ROLES, ALL_APP_ROLES, STOCK_ISSUER_ROLES, STOCK_VALUATION_READ_ROLES, STAFF_ROLES, DOCUMENT_RENEWAL_WRITER_ROLES, INVENTORY_REPORT_ROLES, INVENTORY_MANAGER_ROLES, VEHICLE_PATCH_ROLES, DRIVER_MANAGER_ROLES, FUEL_CARD_MANAGER_ROLES, TECHNICIAN_REPORT_ROLES, type AppRole } from "@shared/constants/roles";
 
 const ALL_ROLES = ALL_APP_ROLES;
 
-const ROLE_ALIASES: Record<string, AppRole> = {
-  admin: "admin",
-  administrateur: "admin",
-  workshop_manager: "workshop_manager",
-  gestionnaire_atelier: "workshop_manager",
-  "gestionnaire d'atelier": "workshop_manager",
-  technician: "technician",
-  technicien: "technician",
-  secretary: "secretary",
-  secretaire: "secretary",
-  "secrétaire": "secretary",
-  logistics: "logistics",
-  logisticien: "logistics",
-  warehouse: "warehouse",
-  magasinier: "warehouse",
-  management: "management",
-  direction: "management",
-  directeur: "management",
-  dg: "management",
-  client: "client",
-  user: "user",
-};
-
-export const normalizeRole = (role: string | null | undefined): AppRole => {
-  const normalized = (role || "").trim().toLowerCase();
-  const aliasRole = ROLE_ALIASES[normalized];
-  if (aliasRole) {
-    return aliasRole;
-  }
-
-  if ((ALL_ROLES as readonly string[]).includes(normalized)) {
-    return normalized as AppRole;
-  }
-
-  return "user";
-};
+import { normalizeRole } from "@shared/constants/roles";
+export { normalizeRole };
 
 /**
  * Marque un middleware qui refuse toute requête sans session (401).
@@ -218,6 +184,8 @@ export const isAnyUser = authorize([...ALL_ROLES]);
 // Tout le personnel (tout rôle sauf `client`) : écritures faites par l'exploitation
 // sur un véhicule, qu'un client consulte sans les saisir (kilométrage, position).
 export const isStaff = authorize([...STAFF_ROLES]);
+// Saisie d'exploitation véhicule : personnel sans le comptable (VEHICLE_OPERATION_WRITE_ROLES).
+export const isVehicleOperationWriter = authorize([...VEHICLE_OPERATION_WRITE_ROLES]);
 // Valuation du stock (pièces et pneus : valeur d'inventaire, valeur par fournisseur, historique,
 // coût de réapprovisionnement) : personnel hors chauffeur (STOCK_VALUATION_READ_ROLES).
 export const isStockValuationReader = authorize([...STOCK_VALUATION_READ_ROLES]);

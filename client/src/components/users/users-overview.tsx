@@ -9,6 +9,8 @@ export type UsersOverviewRole =
   | "workshop_manager"
   | "technician"
   | "secretary"
+  | "accountant"
+  | "viewer"
   | "logistics"
   | "warehouse"
   | "client"

@@ -43,7 +43,7 @@ const NOT_GUARDED: Record<string, string> = {
 
 // Égal à la taille de la table : en ajouter une entrée oblige à relever ce nombre, sinon le cliquet
 // se périmerait et laisserait retirer une entrée sans revue.
-const TABLE_FLOOR = 46;
+const TABLE_FLOOR = 47;
 const VEHICLE_MARKER = /\b(vehicleId|vehicle_id|vehicleTireId|fuelRecordId|workOrderId|work_order_id|partRequirementId|part_requirement_id)\b/;
 // Objet d'OT désigné par le chemin : le véhicule s'atteint par l'OT, même si la poignée ne nomme ni l'un ni l'autre.
 const WORK_ORDER_PATH = /\/(work-orders|work-order-items|parts-used|part-requirements)\/:p(\/|$)/;

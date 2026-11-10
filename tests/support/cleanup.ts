@@ -175,8 +175,8 @@ export async function deleteTreasuryEntriesOfMissions(missionIds: number[]): Pro
  */
 export const ORPHAN_MIN_AGE = "2 hours";
 
-const orphan = (prefixColumn: AnyColumn, createdAt: AnyColumn) =>
-  and(like(prefixColumn, `${TEST_PREFIX}%`), sql`${createdAt} < now() - ${ORPHAN_MIN_AGE}::interval`);
+const orphan = (prefixColumn: AnyColumn, createdAt: AnyColumn): SQL =>
+  and(like(prefixColumn, `${TEST_PREFIX}%`), sql`${createdAt} < now() - ${ORPHAN_MIN_AGE}::interval`)!;
 
 /** Factures des fournisseurs de test sélectionnés, quel que soit leur numéro (règlements en cascade). */
 async function deleteSupplierInvoicesOf(supplierIdsQuery: SQLWrapper): Promise<void> {

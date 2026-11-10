@@ -16,7 +16,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { ALL_VEHICLES_UNREADABLE, useAllVehicles } from "@/hooks/use-all-vehicles";
 import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { canDeleteFuelRecord } from "@shared/constants/fuel-record-delete";
-import { FUEL_RECHARGE_SOURCE_ROLES } from "@shared/constants/roles";
+import { canCancelFuelRecord, isFuelRecordValidated } from "@shared/constants/fuel-record-cancel";
+import { FuelRecordCancelDialog } from "@/components/fuel/fuel-record-cancel-dialog";
+import { fuelValidationLabel } from "@/lib/fuel-record-status";
+import { FUEL_CARD_MANAGER_ROLES, FUEL_CARD_VIEWER_ROLES, FUEL_RECHARGE_SOURCE_ROLES } from "@shared/constants/roles";
 import type { FuelRechargeSourceAccount } from "@shared/contracts/treasury";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { useToast } from "@/hooks/use-toast";
@@ -34,7 +37,7 @@ import {
 import { Tabs, TabsContent } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { TabIcon } from "@/lib/premium-tab-icons";
-import { Plus, Search, Fuel, Wallet, CarFront, CalendarDays, Edit, Trash2, Gauge, Info } from "lucide-react";
+import { Plus, Search, Fuel, Wallet, CarFront, CalendarDays, Edit, Trash2, Ban, Gauge, Info } from "lucide-react";
 import type { Vehicle, FuelRecord } from "@shared/schema";
 import { useFeature } from "@/hooks/use-feature";
 import { isFuelPriceImposed } from "@/lib/fuel-price-policy";
@@ -93,6 +96,7 @@ export default function FuelPage() {
   const [vehicleFilter, setVehicleFilter] = useState<string | undefined>(undefined);
   const [editingRecord, setEditingRecord] = useState<FuelRecord | null>(null);
   const [deletingRecord, setDeletingRecord] = useState<FuelRecord | null>(null);
+  const [cancellingRecord, setCancellingRecord] = useState<FuelRecord | null>(null);
   const tableSectionRef = React.useRef<HTMLDivElement>(null);
   const [rechargeForm, setRechargeForm] = useState({
     amount: "",
@@ -104,7 +108,9 @@ export default function FuelPage() {
     notes: "",
     sourceAccountId: NO_SOURCE_ACCOUNT,
   });
-  const canManageFuelCard = ["admin", "logistics", "secretary"].includes(String(user?.role || ""));
+  const canManageFuelCard = (FUEL_CARD_MANAGER_ROLES as readonly string[]).includes(String(user?.role || ""));
+  // Solde et historique : les gestionnaires plus le comptable ; la recharge reste à canManageFuelCard.
+  const canViewFuelCard = (FUEL_CARD_VIEWER_ROLES as readonly string[]).includes(String(user?.role || ""));
   // Prix manuel : retiré seulement si le drapeau fuel-prices impose le prix du jour (hors admin et logistique).
   const fuelPricesEnabled = useFeature("fuel-prices");
   const canEditFuelPrice = !isFuelPriceImposed(user?.role, fuelPricesEnabled);
@@ -137,14 +143,14 @@ export default function FuelPage() {
 
   const { data: fuelCardBalance, error: fuelCardBalanceError } = useQuery<any>({
     queryKey: ["/api/fuel-card/balance"],
-    enabled: canManageFuelCard,
+    enabled: canViewFuelCard,
     retry: false,
   });
   const fuelCardFailed = fuelCardBalance === undefined && !!fuelCardBalanceError;
 
   const { data: fuelCardRechargeHistoryData, isLoading: isLoadingRechargeHistory } = useQuery<FuelCardHistoryRecord[]>({
     queryKey: ["/api/fuel-card/history", { type: "credit" }],
-    enabled: canManageFuelCard,
+    enabled: canViewFuelCard,
     retry: false,
   });
   const fuelCardRechargeHistory = fuelCardRechargeHistoryData || [];
@@ -519,10 +525,13 @@ export default function FuelPage() {
       align: "right",
       widthClassName: "w-[92px] whitespace-nowrap",
       cell: (row) => {
-        const showEdit = canEditFuelRecord(row);
+        // Plein validé : immuable, ni Modifier ni Supprimer, seulement l'annulation avec motif.
+        const validated = isFuelRecordValidated(row);
+        const showEdit = !validated && canEditFuelRecord(row);
         // Même règle que le serveur : débit de carte = gestionnaires de la carte, plein physique = atelier.
-        const showDelete = canDeleteFuelRecord(user?.role, row);
-        if (!showEdit && !showDelete) {
+        const showDelete = !validated && canDeleteFuelRecord(user?.role, row);
+        const showCancel = validated && canCancelFuelRecord(user?.role, row);
+        if (!showEdit && !showDelete && !showCancel) {
           return <span className="text-xs text-gray-300">—</span>;
         }
         return (
@@ -539,6 +548,20 @@ export default function FuelPage() {
                 title="Modifier le plein"
               >
                 <Edit className="h-3.5 w-3.5" />
+              </Button>
+            )}
+            {showCancel && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 w-7 p-0 text-destructive-text hover:text-destructive-text hover:bg-destructive/10"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCancellingRecord(row);
+                }}
+                title={`Annuler ce plein (${fuelValidationLabel(row)})`}
+              >
+                <Ban className="h-3.5 w-3.5" />
               </Button>
             )}
             {showDelete && (
@@ -649,7 +672,7 @@ export default function FuelPage() {
         testId: "tab-fuel-consumption",
       },
     ];
-    if (canManageFuelCard) {
+    if (canViewFuelCard) {
       tabs.push({
         value: "recharges",
         label: "Historique carte",
@@ -658,7 +681,7 @@ export default function FuelPage() {
       });
     }
     return tabs;
-  }, [canManageFuelCard]);
+  }, [canViewFuelCard]);
 
   const fuelSearchPlaceholder =
     activeTab === "recharges"
@@ -702,7 +725,7 @@ export default function FuelPage() {
           }
         >
           <KpiGrid columns={4}>
-            {canManageFuelCard && (
+            {canViewFuelCard && (
               <KpiTile
                 label="Solde carte carburant"
                 value={fuelCardFailed ? UNAVAILABLE : formatCurrency(Number(fuelCardBalance?.balance || 0))}
@@ -746,7 +769,7 @@ export default function FuelPage() {
               icon={<Wallet className="h-4 w-4" />}
               iconWrapperClassName="bg-amber-50 text-amber-600"
             />
-            {!canManageFuelCard && (
+            {!canViewFuelCard && (
               <KpiTile
                 label="Véhicules suivis"
                 value={fuelRecordsFailed ? UNAVAILABLE : vehiclesCovered}
@@ -855,7 +878,7 @@ export default function FuelPage() {
                 />
               </TabsContent>
 
-              {canManageFuelCard && (
+              {canViewFuelCard && (
                 <TabsContent value="recharges" className="mt-0">
                   <PremiumDataTable
                     columns={rechargeColumns}
@@ -1133,6 +1156,8 @@ export default function FuelPage() {
         </DialogContent>
       </Dialog>
       
+      <FuelRecordCancelDialog record={cancellingRecord} onClose={() => setCancellingRecord(null)} />
+
       {/* Mascot Helper */}
       <MascotHelper currentPage="fuel" />
     </PageLayout>

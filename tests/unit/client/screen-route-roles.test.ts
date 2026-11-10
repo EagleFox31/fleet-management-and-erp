@@ -17,6 +17,8 @@ const SIDEBAR = readFileSync(resolve(ROOT, "client/src/components/layout/sidebar
 const EXPECTED: Record<string, readonly string[]> = {
   "/operations": roles.PENDING_INVOICE_ROLES,
   "/fuel": roles.FUEL_READ_ROLES,
+  "/procurement/suppliers": roles.SUPPLIER_READ_ROLES,
+  "/procurement/invoices": roles.SUPPLIER_INVOICE_READ_ROLES,
   "/maintenance/preventive": ["admin", "workshop_manager"],
   "/technicians": ["admin", "workshop_manager"],
   "/missions": roles.MISSION_MANAGER_ROLES,

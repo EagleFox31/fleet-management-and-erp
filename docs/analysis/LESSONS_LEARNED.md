@@ -3556,3 +3556,13 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - même fichier : capture de l'id de création (absent, texte, décimal, nul, corps null) ;
   - `tests/unit/server/route-id-parse-hygiene.test.ts` : aucun `idSchema` sur `req.params`, ni dans un `*ParamsSchema`, cliquet `parseInt`/`Number` de `server/routes.ts` ramené à 0 (liste gelée : `shared/contracts/fuel-vouchers.ts`, verrouillé par un autre chantier) ; le test détecte les sept fichiers d'avant correctif.
 - **Leçon généralisée** : un contrôle qui reconnaît une requête par son chemin se prouve contre le vrai routeur, pas contre une liste de chaînes : barres absorbées par les montages, forme absolue, casse, encodage, et règle de lecture de l'id par la route. Si le contrôle et la route lisent l'id différemment, l'écart est un contournement. À défaut de déclarer le contrôle comme une route Express (cas de `retired-vehicle-write-guard`), on aligne la lecture de l'id sur une règle unique et stricte.
+## 2026-11-10 — Interblocage annulation de plein / solde du budget : verrous pris dans l'ordre inverse (V1)
+
+- **Contexte** : V1, pleins validés immuables. Le test de course « solde du budget et annulation d'un plein en parallèle » a échoué avec `deadlock detected`. Trouvé avant la fusion, aucune donnée touchée.
+- **Cause racine** : deux services prenaient les mêmes verrous dans l'ordre inverse. Le solde tient la mission `FOR SHARE` puis veut le budget `FOR UPDATE`. L'annulation tenait le budget `FOR SHARE` (requête filtrée sur `settled_at IS NOT NULL`, donc verrou pris seulement si une ligne remontait), puis le trigger de `fuel_records` voulait mettre la mission à jour. Chacun attendait l'autre.
+- **Classification** : concurrence, ordre de verrous incohérent entre deux services d'un même agrégat (mission, budget).
+- **Résolution** : l'annulation verrouille la mission (`FOR UPDATE`), puis le budget (`FOR SHARE`) sans condition, et teste `settled_at` en code (`isMissionBudgetSettled`).
+- **Prévention vérifiée** :
+  - `tests/integration/fuel-record-cancel-mission.test.ts`, cas de course solde / annulation : échoue (`deadlock detected`) si le verrou de la mission est retiré ;
+  - revue des autres chemins : tous ceux de `mission-budgets-service.ts` (mise à jour, transitions, solde, dépenses) verrouillent la mission (`lockMission`) avant le budget ; aucun chemin inverse trouvé.
+- **Leçon généralisée** : tout service qui touche mission et budget prend les verrous dans le même ordre, mission puis budget, y compris les verrous implicites des triggers. Un verrou conditionnel (requête filtrée) ne verrouille rien quand le filtre est faux : verrouiller d'abord, tester ensuite.

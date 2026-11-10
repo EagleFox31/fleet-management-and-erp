@@ -5,9 +5,9 @@ import { ALL_APP_ROLES } from "@shared/constants/roles";
 const none = { create: false, edit: false, approve: false, disburse: false, expenses: false, settle: false };
 
 describe("budget de mission (L1f) : actions visibles selon le rôle et les statuts", () => {
-  it("lecture : logistique, direction, secrétariat, administrateur ; aucun autre rôle", () => {
+  it("lecture : logistique, direction, secrétariat, comptable, administrateur ; aucun autre rôle", () => {
     const readers = ALL_APP_ROLES.filter((role) => canReadMissionBudget(role));
-    expect([...readers].sort()).toEqual(["admin", "logistics", "management", "secretary"]);
+    expect([...readers].sort()).toEqual(["accountant", "admin", "logistics", "management", "secretary"]);
     expect(canReadMissionBudget(undefined)).toBe(false);
   });
 

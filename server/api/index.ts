@@ -96,6 +96,7 @@ import { auditWrites } from "../middleware/audit-writes";
 import { AUDIT_CONFIG, CDC_AUDIT_CONFIG } from "../lib/audit-config";
 import { idempotencyGuard } from "../middleware/idempotency-guard";
 import { retiredVehicleWriteGuard } from "../middleware/retired-vehicle-write-guard";
+import { viewerReadOnlyGuard } from "../middleware/viewer-read-only-guard";
 import { requireFeature } from "../lib/feature-flags";
 import { DbLockoutStore, PASSWORD_KEY_PREFIX, PIN_KEY_PREFIX } from "../services/login-lockout-db-store";
 
@@ -116,6 +117,10 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // Apply session middleware FIRST, before any routes are mounted
   // This ensures req.session.userId is available in all sub-routes
   apiRouter.use(sessionMiddleware);
+
+  // Lecteur (viewer) : toute écriture refusée en 403, avant tout routeur et avant registerRoutes
+  // (couvre routes.ts). Allowlist : VIEWER_WRITE_ALLOWED (shared/constants/roles.ts).
+  apiRouter.use(viewerReadOnlyGuard);
 
   // Coûts d'OT : retirés des lectures GET /api/work-orders/* pour les rôles hors
   // WORK_ORDER_COST_READ_ROLES. Monté avant tout routeur (vehicle-history, routes.ts compris).
@@ -225,8 +230,17 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
     ),
     suppliersRoutes,
   );
-  apiRouter.use("/purchase-orders", gardeApprovisionnement, purchaseOrdersRoutes);
-  apiRouter.use("/supplier-invoices", gardeApprovisionnement, supplierInvoicesRoutes);
+  // Bons de commande : le comptable consulte (GET), il n'en crée ni n'en modifie.
+  const gardeLectureBonsCommande = authorize([...PURCHASE_ORDER_READ_ROLES]);
+  apiRouter.use(
+    "/purchase-orders",
+    sessionGuard((req: Request, res: Response, next: NextFunction) =>
+      (req.method === "GET" || req.method === "HEAD" ? gardeLectureBonsCommande : gardeApprovisionnement)(req, res, next),
+    ),
+    purchaseOrdersRoutes,
+  );
+  // Factures fournisseur : les profils d'approvisionnement plus le comptable (règlements).
+  apiRouter.use("/supplier-invoices", authorize([...SUPPLIER_INVOICE_READ_ROLES]), supplierInvoicesRoutes);
   // Double affectation (T-23b) : avant tout routeur /work-orders, y compris les historiques.
   apiRouter.use("/work-orders", workOrderBookingGuard);
   apiRouter.use("/work-orders", workOrderPartsRoutes);
@@ -363,7 +377,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
 import { sessionMiddleware } from "../middleware/session";
 import { authenticate, authorize, isAdmin, sessionGuard, isStaff, isTechnician, isWorkshopManager } from "../middleware/auth";
 import { exportsGuard } from "../middleware/exports-guard";
-import {
+import { PURCHASE_ORDER_READ_ROLES,
   GPS_VIEW_ROLES,
   IMPORT_INTERVENTION_ROLES,
   MAINTENANCE_REPORT_ROLES,
@@ -372,6 +386,7 @@ import {
   PART_SALE_ROLES,
   PART_SCAN_ROLES,
   PROCUREMENT_ROLES,
+  SUPPLIER_INVOICE_READ_ROLES,
   SUPPLIER_READ_ROLES,
 } from "@shared/constants/roles";
 export default createApiRouter(sessionMiddleware);
