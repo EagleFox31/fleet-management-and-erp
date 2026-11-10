@@ -22,6 +22,8 @@ export type ApiErrorCode =
   /** 404 d'une déclaration de panne sur un véhicule inexistant : refus prononcé avant toute écriture. */
   | "INCIDENT_VEHICLE_NOT_FOUND"
   | "RATE_LIMITED"
+  /** 400 : cible de requête que l'app et un routeur monté liraient différemment (`\` dans le chemin, forme absolue). */
+  | "NON_CANONICAL_TARGET"
   | "INTERNAL";
 
 export type ApiFieldError = { field: string; message: string };
@@ -44,6 +46,7 @@ export const STATUS_MESSAGES: Record<ApiErrorCode, string> = {
   INCIDENT_WRITE_FAILED: "La déclaration n'a pas pu être enregistrée. Réessayez dans un instant.",
   INCIDENT_VEHICLE_NOT_FOUND: "Véhicule introuvable.",
   RATE_LIMITED: "Trop de tentatives. Patientez un instant avant de réessayer.",
+  NON_CANONICAL_TARGET: "Adresse de requête invalide.",
   INTERNAL: "Une erreur technique est survenue. Réessayez dans un instant.",
 };
 
