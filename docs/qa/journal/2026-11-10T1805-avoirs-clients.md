@@ -6,6 +6,6 @@
 
 **Pourquoi.** Une facture émise est une pièce comptable ; l'avoir remplace la retouche.
 
-**Comment c'est vérifié.** Intégration (immutabilité, cumul, course de deux avoirs, rejeu, cohérence statut / solde), contrat (rôles, 409, 400, PDF, facture déposée au net à payer inchangé, paiement partiel puis avoir puis solde), unitaires (parité migration et init, calculs, contrat).
+**Comment c'est vérifié.** Intégration (immutabilité, cumul, course de deux avoirs, rejeu, cohérence statut / solde), contrat (rôles, 409, 400, PDF, avoir refusé sur facture déposée, retenues sur base nette, paiement partiel puis avoir puis solde), unitaires (parité migration et init, calculs, contrat).
 
 **Question pour le client.** Les remboursements ne sont pas gérés en v1 : un avoir est plafonné au solde de la facture. Faut-il rembourser un client qui a déjà payé (avoir supérieur au solde) ? Si oui, quel circuit (trésorerie, décaissement, accord du comptable) ?

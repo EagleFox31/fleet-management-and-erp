@@ -5,6 +5,7 @@ import { statusAfterBalanceChange } from "@shared/constants/client-invoices";
 import type { CreateClientCreditNoteInput, CreateClientCreditNoteResult } from "@shared/contracts/client-credit-notes";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
+import { pgConstraintOf } from "../lib/pg-errors";
 import { CREDIT_NOTE_NUMBER_SPEC, nextDailyNumber } from "../lib/daily-document-number";
 import { creditNoteAmounts, toCents } from "../lib/credit-note-amounts";
 import { publicClientInvoiceColumns } from "../lib/client-public-columns";
@@ -29,10 +30,38 @@ export async function createCreditNote(
   input: CreateClientCreditNoteInput,
   userId: number,
 ): Promise<CreateClientCreditNoteResult> {
-  try {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await createCreditNoteOnce(invoiceId, input, userId);
+    } catch (error) {
+      if (pgCode(error) !== "23505") throw error;
+      const constraint = pgConstraintOf(error) ?? "";
+      if (constraint.includes("credit_note_number")) {
+        // Numéro du jour pris entre la lecture et l'insertion : un seul nouvel essai relit le numéro suivant.
+        if (attempt === 0) {
+          log.warn({ invoiceId, constraint }, "numéro d'avoir en collision, nouvel essai");
+          continue;
+        }
+        throw new AppError(409, "Le numéro d'avoir est déjà pris par un autre avoir. Réessayez dans un instant.", { cause: error });
+      }
+      // Même clé utilisée en parallèle sur deux factures : la contrainte d'unicité de request_key tranche.
+      if (constraint.includes("request_key")) {
+        throw new AppError(409, "Cet avoir est déjà en cours d'enregistrement. Rechargez la facture avant de réessayer.", { cause: error });
+      }
+      throw error;
+    }
+  }
+}
+
+async function createCreditNoteOnce(
+  invoiceId: number,
+  input: CreateClientCreditNoteInput,
+  userId: number,
+): Promise<CreateClientCreditNoteResult> {
+  {
     return await db.transaction(async (tx) => {
       const [invoice] = await tx
-        .select(publicClientInvoiceColumns)
+        .select({ ...publicClientInvoiceColumns, depositedAt: clientInvoices.depositedAt })
         .from(clientInvoices)
         .where(eq(clientInvoices.id, invoiceId))
         .limit(1)
@@ -50,6 +79,11 @@ export async function createCreditNote(
       if (same) {
         if (same.invoiceId !== invoiceId) {
           throw new AppError(409, "Cette clé de requête est déjà utilisée pour un avoir sur une autre facture.");
+        }
+        // Rejeu identique seulement : même montant HT et même motif. Sinon la clé est déjà prise par un autre avoir.
+        const sameAmount = toCents(same.amountHT) === toCents(input.amountHt);
+        if (!sameAmount || same.reason !== input.reason) {
+          throw new AppError(409, "Cette clé de requête est déjà utilisée pour un avoir de montant ou de motif différent.");
         }
         return {
           creditNote: toDto(same),
@@ -78,6 +112,11 @@ export async function createCreditNote(
           `L'avoir (${fromCents(ttcCents)} FCFA TTC) dépasse le solde restant de la facture (${fromCents(balanceCents)} FCFA). ` +
             "Le remboursement d'un trop-perçu n'est pas géré pour l'instant.",
         );
+      }
+
+      if (invoice.depositedAt) {
+        // Net à payer figé au dépôt sur la base d'avant l'avoir : recalcul = backlog, on refuse (fail-closed).
+        throw new AppError(409, "Facture déposée : l'avoir n'est pas encore possible, net à payer figé.");
       }
 
       const newBalanceCents = balanceCents - ttcCents;
@@ -126,12 +165,6 @@ export async function createCreditNote(
         replayed: false,
       };
     });
-  } catch (error) {
-    // Même clé utilisée en parallèle sur deux factures : la contrainte d'unicité tranche.
-    if (pgCode(error) === "23505") {
-      throw new AppError(409, "Cet avoir est déjà en cours d'enregistrement. Rechargez la facture avant de réessayer.", { cause: error });
-    }
-    throw error;
   }
 }
 

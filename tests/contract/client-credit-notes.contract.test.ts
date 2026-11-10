@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { CLIENT_CREDIT_NOTES_SQL, CLIENT_INVOICES_ISSUED_LOCK_SQL } from "../../server/init-database";
-import { clientCreditNotes, clientInvoices } from "../../shared/schema";
+import { clientCreditNotes, clientInvoices, clients } from "../../shared/schema";
 import { leakText } from "../support/api-error";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
@@ -204,18 +204,49 @@ describe("Avoirs clients : contrat", { timeout: 120_000 }, () => {
     expect(missing.status).toBe(404);
   });
 
-  it("facture déposée : avoir accepté, net à payer figé", async () => {
+  it("dépôt puis avoir : 409 lisible, aucune ligne écrite, facture inchangée", async () => {
     const invoice = await newInvoice();
     const deposit = await session.call("PATCH", `/api/finance/invoices-awaiting-payment/${invoice.id}/deposit`, { actor: "admin", body: { depositedAt: "2026-11-05" } });
     expect(deposit.status).toBe(200);
     const deposited = await invoiceOf(invoice.id);
     expect(deposited.depositedAt).toBeTruthy();
     const res = await credit(invoice.id, valid(10000));
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(409);
+    expect(res.body.message).toMatch(/Facture déposée/);
+    expectErrorContract(res, res.body.code);
+    expect(await notesOf(invoice.id)).toHaveLength(0);
     const after = await invoiceOf(invoice.id);
-    expect(after.netPayable).toBe(deposited.netPayable);
-    expect(after.depositedAt).toBe(deposited.depositedAt);
-    expect(Number(after.balance)).toBe(TOTAL - 11925);
+    expect(after).toMatchObject({ netPayable: deposited.netPayable, balance: deposited.balance, creditedAmountTtc: deposited.creditedAmountTtc });
+  });
+
+  it("avoir puis dépôt : retenues sur base nette, net à payer au plus égal au solde", async () => {
+    const invoice = await newInvoice();
+    const [inv] = await db.select({ clientId: clientInvoices.clientId }).from(clientInvoices).where(eq(clientInvoices.id, invoice.id));
+    await db.update(clients).set({ withholdingVatRate: "5", withholdingIsRate: "2.2", withholdingIsBase: "ttc" }).where(eq(clients.id, inv.clientId!));
+    expect((await credit(invoice.id, valid(30000))).status).toBe(201); // HT 30 000, TTC 35 775
+    const deposit = await session.call("PATCH", `/api/finance/invoices-awaiting-payment/${invoice.id}/deposit`, { actor: "admin", body: { depositedAt: "2026-11-05" } });
+    expect(deposit.status).toBe(200);
+    const after = await invoiceOf(invoice.id);
+    const netTtc = TOTAL - 35775;
+    const vat = Math.round((70000 * 5) / 100);
+    const is = Math.round((netTtc * 2.2) / 100);
+    expect(Number(after.withholdingVatAmount)).toBe(vat);
+    expect(Number(after.withholdingIsAmount)).toBe(is);
+    expect(Number(after.netPayable)).toBe(netTtc - vat - is);
+    expect(Number(after.netPayable)).toBeLessThanOrEqual(Number(after.balance));
+  });
+
+  it("rejeu de la même clé avec un autre montant ou un autre motif : 409 lisible, rien d'écrit", async () => {
+    const invoice = await newInvoice();
+    const body = valid(20000);
+    expect((await credit(invoice.id, body)).status).toBe(201);
+    for (const changed of [{ ...body, amountHt: 25000 }, { ...body, reason: "TEST autre motif" }]) {
+      const res = await credit(invoice.id, changed);
+      expect(res.status).toBe(409);
+      expectErrorContract(res, res.body.code);
+    }
+    expect(await notesOf(invoice.id)).toHaveLength(1);
+    expect(Number((await invoiceOf(invoice.id)).balance)).toBe(TOTAL - 23850);
   });
 
   it("paiement partiel, avoir, paiement solde : la facture finit payée, pas de dépassement", async () => {

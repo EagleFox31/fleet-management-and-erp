@@ -32,6 +32,8 @@ const ALLOWED_EXACT = new Set([
   "tests/integration/client-invoices-lock-trigger.test.ts",
   // Preuve en base de l'immutabilité des avoirs et du cumul crédité : la levée explicite les autorise.
   "tests/integration/client-credit-notes.test.ts",
+  // Nettoyage des avoirs de test (immuables) sous levée explicite.
+  "tests/integration/client-credit-notes-replay.test.ts",
   // Parité migration / init-database des factures : vérifie que le trigger lit bien ce réglage.
   "tests/unit/server/client-invoices-lock-schema.test.ts",
   "server/lib/money-override.ts",
@@ -93,7 +95,8 @@ describe("levée des verrous d'argent : hygiène", () => {
           f !== "tests/integration/client-invoices-lock-trigger.test.ts" &&
           f !== "tests/contract/client-invoices-lock.contract.test.ts" &&
           // Preuve du trigger des avoirs : suppression directe refusée, nettoyage sous levée.
-          f !== "tests/integration/client-credit-notes.test.ts",
+          f !== "tests/integration/client-credit-notes.test.ts" &&
+          f !== "tests/integration/client-credit-notes-replay.test.ts",
       )
       .filter((f) => direct.test(read(f)));
     expect(offenders).toEqual([]);

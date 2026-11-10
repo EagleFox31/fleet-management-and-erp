@@ -149,7 +149,7 @@ export async function getRevenueByClient(period: RevenuePeriod): Promise<ClientR
              COALESCE(p.invoiced_ht, 0) - COALESCE(cr.credit_ht, 0) AS revenue_ht,
              COALESCE(p.has_invoice_without_mission, false) AS has_invoice_without_mission
       FROM per_invoice_client p
-      -- FULL JOIN exige une égalité hachable : IS NOT DISTINCT FROM est refusé, le « sans client » passe par -1.
+      -- FULL JOIN exige une Ã©galitÃ© hachable : IS NOT DISTINCT FROM est refusÃ©, le NULL sans client passe par -1.
       FULL JOIN credits cr ON COALESCE(cr.client_id, -1) = COALESCE(p.client_id, -1)
     ),
     -- Une mission portÃ©e par plusieurs factures (acompte + solde) ne compte son carburant qu'une fois.

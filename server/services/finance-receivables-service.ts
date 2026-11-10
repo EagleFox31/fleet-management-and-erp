@@ -39,6 +39,9 @@ interface InvoiceRow {
   withholding_vat_rate: string | null;
   withholding_is_rate: string | null;
   withholding_is_base: WithholdingBase;
+  /** Avoirs émis sur la facture (HT et TTC, somme de client_credit_notes) : base nette des retenues. */
+  credited_ht: string;
+  credited_ttc: string;
   /** Totaux de la liste, sommés en numeric par Postgres (fenêtre sur toute la sélection). */
   total_ht?: string;
   total_ttc?: string;
@@ -49,10 +52,13 @@ function rowsOf<T>(result: unknown): T[] {
 }
 
 const num = (v: string | null): number => (v === null ? 0 : Number(v));
+/** Montant moins avoirs, arrondi au centime (évite le bruit des flottants). */
+const net = (amount: string, credited: string): number => Math.round((Number(amount) - Number(credited)) * 100) / 100;
 
 function computedFor(row: InvoiceRow) {
   return computeWithholdings(
-    { amountHt: num(row.amount_ht), amountTtc: num(row.amount_ttc) },
+    // Base nette : retenue TVA et retenue IS (selon sa base) se calculent sur HT et TTC diminués des avoirs.
+    { amountHt: net(row.amount_ht, row.credited_ht), amountTtc: net(row.amount_ttc, row.credited_ttc) },
     {
       vatWithholdingRate: num(row.withholding_vat_rate),
       isWithholdingRate: num(row.withholding_is_rate),
@@ -92,7 +98,9 @@ const SELECT_INVOICES = sql`
          c.id AS client_id, c.name AS client_name,
          i.amount_ht, i.amount_ttc, i.balance, i.deposited_at::text AS deposited_at,
          i.withholding_vat_amount, i.withholding_is_amount, i.net_payable,
-         c.withholding_vat_rate, c.withholding_is_rate, COALESCE(c.withholding_is_base, 'ht') AS withholding_is_base
+         c.withholding_vat_rate, c.withholding_is_rate, COALESCE(c.withholding_is_base, 'ht') AS withholding_is_base,
+         COALESCE((SELECT sum(n.amount_ht) FROM client_credit_notes n WHERE n.invoice_id = i.id), 0)::text AS credited_ht,
+         COALESCE((SELECT sum(n.amount_ttc) FROM client_credit_notes n WHERE n.invoice_id = i.id), 0)::text AS credited_ttc
   FROM client_invoices i
   LEFT JOIN clients c ON c.id = i.client_id`;
 

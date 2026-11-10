@@ -82,8 +82,9 @@ Plan établi le 2026-11-10 sur main e7b0f5ba. Les numéros de ligne ci-dessous v
 
 ## Décisions de 0a (2026-11-10)
 - **a. D4 accepté.** La garde va dans `FuelService.updateFuelRecord`. Un contrat prouve le 409 en passant par la route réelle de `routes.ts`. Backlog : déplacer le PATCH des pleins dans `server/api`, dans un lot séparé.
-- **b. Avoir sur une facture déposée : autorisé.**
-  - `net_payable` reste figé et l'avoir réduit le solde.
+- **b. Avoir sur une facture déposée : refusé (révisé le 2026-11-10, option a « base nette »).** Remplace « autorisé ».
+  - Avoir émis avant le dépôt : les retenues et le net à payer se calculent sur HT et TTC diminués des avoirs (retenue TVA sur le HT net, retenue IS sur sa base nette), donc net à payer ≤ solde.
+  - Avoir émis après un dépôt non soldé : 409 « Facture déposée : l'avoir n'est pas encore possible, net à payer figé. » (fail-closed). Facture déposée et soldée : refusée par le plafond au solde.
   - Le PDF de l'avoir cite la facture d'origine et son numéro de dépôt.
 - **c. Annulation d'un plein sur un budget de mission soldé : 409.** Message : « Le budget de la mission est soldé : l'annulation n'est plus possible, contactez la comptabilité. »
 - **d. Remboursement : hors v1.**
@@ -122,3 +123,5 @@ Plan établi le 2026-11-10 sur main e7b0f5ba. Les numéros de ligne ci-dessous v
 ## Backlog (PR5)
 - **Remboursements hors v1** : un avoir est plafonné au solde de la facture ; rembourser un client qui a déjà payé n'est pas géré. À soumettre au client (journal QA).
 - Le PDF cite la date de dépôt de la facture : aucun numéro de dépôt n'existe en base.
+- **Recalcul du net à payer figé par un avoir postérieur au dépôt** : aujourd'hui refusé (409). À reprendre si le client veut émettre des avoirs sur des factures déposées.
+- Le trigger des factures n'a pas été modifié par cette révision.

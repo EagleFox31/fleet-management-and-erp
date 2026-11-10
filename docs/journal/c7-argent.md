@@ -202,3 +202,9 @@ Cette entrée remplace l'approche de l'entrée précédente, refusée en relectu
 - **Pourquoi** : une facture émise est gelée, la seule correction est un avoir ; sans ces lecteurs, un avoir apparaîtrait comme un encaissement.
 - **Piège** : le test d'idempotence de PR4 comparait la définition de la fonction à celle du fichier SQL lu tel quel ; sous Windows le fichier est en CRLF, donc la fonction rejouée différait. Les lectures de migration du test normalisent désormais les fins de ligne.
 - **Preuve** : voir le rapport de PR (tsc, unitaires, contrat, intégration).
+
+## 2026-11-10 - V1 PR5 : rejeu strict, collision de numéro, avoir et dépôt
+- **Quoi** : rejeu d'une `request_key` avec un autre montant ou motif refusé en 409 (identique : 200) ; une erreur 23505 n'est « en cours d'enregistrement » que pour `request_key`, une collision sur `credit_note_number` relit le numéro (un nouvel essai) puis 409 distinct ; retenues du dépôt calculées sur HT et TTC nets des avoirs ; avoir refusé (409) sur une facture déposée non soldée (décision 0a, option a).
+- **Comment** : `createCreditNote` boucle sur `createCreditNoteOnce` ; `finance-receivables-service` lit la somme des avoirs par sous-requête et la retranche avant `computeWithholdings`.
+- **Pourquoi** : le net à payer figé au dépôt sur le TTC brut dépassait le solde après un avoir ; le rejeu muet rendait un ancien avoir pour une demande différente.
+- **Preuve** : contrats et intégration dans `client-credit-notes*.test.ts`.
