@@ -5,7 +5,9 @@ import {
   gpsCheckAppError,
   haversineKm,
   missionGeoColumnsFromBody,
+  normalizeHeading,
   parseOsmandReport,
+  parseOsmandTimestamp,
   resolveMissionGeoPoint,
   suspectPointIds,
   toGpsPoint,
@@ -80,30 +82,50 @@ describe("contraintes de base", () => {
 
 describe("format OsmAnd / Traccar Client", () => {
   const ctx = { now: NOW, userId: 7, missionId: 3 };
-  it("requête : vitesse en nœuds, horodatage en secondes", () => {
-    const p = parseOsmandReport({ id: "t", lat: "4.06", lon: "9.71", timestamp: "1762776000", speed: "10", bearing: "180", accuracy: "12" }, undefined, ctx)!;
+  it("corps à plat : vitesse en nœuds, horodatage en secondes", () => {
+    const p = parseOsmandReport({ id: "t", lat: "4.06", lon: "9.71", timestamp: "1762776000", speed: "10", bearing: "180", accuracy: "12" }, ctx)!;
     expect(p.speedKmh).toBeCloseTo(18.52, 2);
     expect(p.recordedAt.toISOString()).toBe("2025-11-10T12:00:00.000Z");
     expect(p.heading).toBe(180);
     expect(p.accuracyM).toBe(12);
   });
   it("JSON : vitesse en m/s, cap 360 ramené à 0, -1 = inconnu", () => {
-    const p = parseOsmandReport({}, { location: { timestamp: "2026-11-10T11:59:00Z", coords: { latitude: 4, longitude: 9, speed: 10, heading: 360 } } }, ctx)!;
+    const p = parseOsmandReport({ location: { timestamp: "2026-11-10T11:59:00Z", coords: { latitude: 4, longitude: 9, speed: 10, heading: 360 } } }, ctx)!;
     expect(p.speedKmh).toBeCloseTo(36, 5);
     expect(p.heading).toBe(0);
-    const q = parseOsmandReport({}, { location: { timestamp: "2026-11-10T11:59:00Z", coords: { latitude: 4, longitude: 9, speed: -1, heading: -1 } } }, ctx)!;
+    const q = parseOsmandReport({ location: { timestamp: "2026-11-10T11:59:00Z", coords: { latitude: 4, longitude: 9, speed: -1, heading: -1 } } }, ctx)!;
     expect(q.speedKmh).toBeNull();
     expect(q.heading).toBeNull();
   });
   it("identifiant dérivé stable (rejeu = même point) et propre à l'utilisateur", () => {
     const q = { lat: "4", lon: "9", timestamp: "1762776000" };
-    const a = parseOsmandReport(q, undefined, ctx)!;
-    expect(parseOsmandReport(q, undefined, ctx)!.clientPointId).toBe(a.clientPointId);
-    expect(parseOsmandReport(q, undefined, { ...ctx, userId: 8 })!.clientPointId).not.toBe(a.clientPointId);
+    const a = parseOsmandReport(q, ctx)!;
+    expect(parseOsmandReport(q, ctx)!.clientPointId).toBe(a.clientPointId);
+    expect(parseOsmandReport(q, { ...ctx, userId: 8 })!.clientPointId).not.toBe(a.clientPointId);
     expect(a.clientPointId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   });
   it("sans latitude ou longitude : null", () => {
-    expect(parseOsmandReport({ lat: "4" }, undefined, ctx)).toBeNull();
+    expect(parseOsmandReport({ lat: "4" }, ctx)).toBeNull();
+  });
+  it("ne lit plus la requête : un relevé n'existe que dans le corps JSON", () => {
+    expect(parseOsmandReport(undefined, ctx)).toBeNull();
+    expect(parseOsmandReport("lat=4&lon=9", ctx)).toBeNull();
+  });
+  it("horodatage hors bornes : null, jamais d'exception", () => {
+    expect(parseOsmandTimestamp("9".repeat(30), NOW)).toBeNull();
+    expect(parseOsmandReport({ lat: "4", lon: "9", timestamp: "9".repeat(30) }, ctx)).toBeNull();
+    expect(parseOsmandReport({ lat: "4", lon: "9", timestamp: "+275760-09-13T00:00:00.000Z" }, ctx)).toBeNull();
+  });
+  it("passe par le schéma du paquet : latitude hors limites refusée, précision bornée", () => {
+    expect(parseOsmandReport({ lat: "95", lon: "9", timestamp: "1762776000" }, ctx)).toBeNull();
+    expect(parseOsmandReport({ lat: "4", lon: "9", timestamp: "1762776000", accuracy: "1e12", speed: "1e9" }, ctx)).toMatchObject({ accuracyM: 100_000, speedKmh: 1_000 });
+  });
+  it("cap 359.999999 : arrondi puis ramené à 0, jamais 360 (float4)", () => {
+    expect(normalizeHeading(359.999999)).toBe(0);
+    expect(normalizeHeading(359.94)).toBe(359.9);
+    expect(normalizeHeading(-1)).toBe(359);
+    expect(parseOsmandReport({ lat: "4", lon: "9", timestamp: "1762776000", bearing: "359.999999" }, ctx)?.heading).toBe(0);
+    expect(toGpsPoint({ clientPointId: "00000000-0000-4000-8000-000000000000", recordedAt: "2026-11-10T11:59:00Z", lat: 4, lng: 9, heading: 359.999999 }).heading).toBe(0);
   });
 });
 
@@ -147,12 +169,10 @@ describe("diffusion temps réel anti-tempête", () => {
 });
 
 describe("purge quotidienne", () => {
-  it("drapeau coupé : aucune requête ; allumé : appelle la fonction avec la rétention configurée", async () => {
+  it("tourne sans consulter le drapeau : appelle la fonction avec la rétention configurée", async () => {
     const query = vi.fn(async () => ({ rows: [{ deleted: 4 }] }));
-    const deps = { isEnabled: () => false, retentionDays: () => 30, client: async () => ({ query }) };
-    expect(await runGpsPositionsPurge(deps)).toBe("disabled");
-    expect(query).not.toHaveBeenCalled();
-    expect(await runGpsPositionsPurge({ ...deps, isEnabled: () => true, retentionDays: () => 45 })).toEqual({ purged: 4, retentionDays: 45 });
+    const deps = { retentionDays: () => 45, client: async () => ({ query }) };
+    expect(await runGpsPositionsPurge(deps)).toEqual({ purged: 4, retentionDays: 45 });
     expect(query).toHaveBeenCalledWith("SELECT purge_vehicle_positions($1) AS deleted", [45]);
   });
 });

@@ -24,6 +24,7 @@ import {
 import { isDriverLicenseExpiredOn, isExpiredOn, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { AppError } from "../lib/app-error";
 import { missionGeoColumnsFromBody } from "../lib/gps-points";
+import { isFeatureEnabled } from "../lib/feature-flags";
 import { MISSION_ID_INVALID_MESSAGE, parseRouteId } from "../lib/route-id";
 import { assertValidDbId } from "../lib/work-order-scope";
 import { assertPlanningStateUnchanged, findPlanningClash, launchRefusalMessage, lockPlanningPairs, lockPlanningResources, planningClashMessage, planningStateKey } from "../services/mission-planning";
@@ -2067,7 +2068,7 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
     }
     const { assignment: assignmentInput, ...parsedData } = parsed.data;
     // Points A/B (GPS V1) : hub validé contre le référentiel CEMAC, coordonnées du hub prioritaires ; 400 sinon.
-    const validatedData = { ...parsedData, ...missionGeoColumnsFromBody(missionData) };
+    const validatedData = isFeatureEnabled("gps") ? { ...parsedData, ...missionGeoColumnsFromBody(missionData) } : parsedData;
 
     if (validatedData.tariffGridId != null) {
       const [tariff] = await db

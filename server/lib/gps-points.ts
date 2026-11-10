@@ -44,6 +44,16 @@ export type GpsPoint = {
   heading: number | null;
 };
 
+/**
+ * Cap ramené dans [0, 360[ à un dixième de degré. La colonne est un `real` (float4) : 359.999999
+ * y devient 360 et la contrainte `< 360` refuserait le paquet entier. L'arrondi se fait donc avant
+ * l'envoi, et 360 (ou son arrondi) retombe sur 0.
+ */
+export function normalizeHeading(value: number): number {
+  const rounded = Math.round((((value % 360) + 360) % 360) * 10) / 10;
+  return rounded >= 360 ? 0 : rounded;
+}
+
 export function toGpsPoint(input: GpsPointInput): GpsPoint {
   return {
     clientPointId: input.clientPointId,
@@ -52,7 +62,7 @@ export function toGpsPoint(input: GpsPointInput): GpsPoint {
     lng: input.lng,
     accuracyM: input.accuracyM ?? null,
     speedKmh: input.speedKmh ?? null,
-    heading: input.heading ?? null,
+    heading: input.heading != null ? normalizeHeading(input.heading) : null,
   };
 }
 
@@ -168,7 +178,8 @@ export function parseOsmandTimestamp(value: unknown, now: Date): Date | null {
   const text = String(value).trim();
   if (/^\d+$/.test(text)) {
     const n = Number(text);
-    return new Date(n < 2_147_483_647 ? n * 1000 : n);
+    const fromNumber = new Date(n < 2_147_483_647 ? n * 1000 : n);
+    return Number.isNaN(fromNumber.getTime()) ? null : fromNumber;
   }
   const d = new Date(text);
   return Number.isNaN(d.getTime()) ? null : d;
@@ -177,14 +188,13 @@ export function parseOsmandTimestamp(value: unknown, now: Date): Date | null {
 const flat = (v: unknown): unknown => (Array.isArray(v) ? v[0] : v);
 
 /**
- * Un relevé OsmAnd (requête `?id=&lat=&lon=&timestamp=&speed=&bearing=&accuracy=`, corps formulaire)
- * ou JSON de Traccar Client (`{ location: { timestamp, coords: { latitude, longitude, speed, heading,
- * accuracy } } }`). Vitesse : nœuds en requête, m/s en JSON (Traccar, OsmAndProtocolDecoder), `-1` =
+ * Un relevé OsmAnd en JSON (`{ id, lat, lon, timestamp, speed, bearing, accuracy }`, vitesse en
+ * nœuds) ou JSON de Traccar Client (`{ location: { timestamp, coords: { latitude, longitude, speed, heading,
+ * accuracy } } }`). Vitesse : nœuds à plat, m/s sous `location.coords` (Traccar, OsmAndProtocolDecoder), `-1` =
  * inconnue. L'identifiant `id` n'identifie personne : l'identité vient de la session. Renvoie null si
  * latitude, longitude ou horodatage manquent ou sont illisibles.
  */
 export function parseOsmandReport(
-  query: Record<string, unknown>,
   body: unknown,
   ctx: { now: Date; userId: number; missionId: number },
 ): GpsPoint | null {
@@ -208,7 +218,7 @@ export function parseOsmandReport(
     accuracy = num(coords.accuracy);
     recordedAt = parseOsmandTimestamp(location.timestamp, ctx.now);
   } else {
-    const merged: Record<string, unknown> = { ...(json ?? {}), ...query };
+    const merged: Record<string, unknown> = json ?? {};
     lat = num(flat(merged.lat));
     lng = num(flat(merged.lon));
     const pair = typeof flat(merged.location) === "string" ? String(flat(merged.location)).split(",") : null;
@@ -223,17 +233,28 @@ export function parseOsmandReport(
     accuracy = num(flat(merged.accuracy));
     recordedAt = parseOsmandTimestamp(flat(merged.timestamp), ctx.now);
   }
-  if (lat === undefined || lng === undefined || !recordedAt) return null;
-  return {
-    clientPointId: derivedPointId(`osmand|${ctx.userId}|${ctx.missionId}|${recordedAt.getTime()}|${lat}|${lng}`),
-    recordedAt,
+  if (lat === undefined || lng === undefined || !recordedAt || Number.isNaN(recordedAt.getTime())) return null;
+  // Le point décodé passe par le schéma du paquet JSON : mêmes bornes, jamais de valeur qui ferait
+  // échouer l'INSERT (22003/22008) ou lever sur la date. Précision et vitesse hors bornes sont
+  // ramenées à la borne (un relevé bruité reste un relevé) ; latitude, longitude ou date hors limites
+  // rendent le relevé illisible.
+  const clientPointId = derivedPointId(`osmand|${ctx.userId}|${ctx.missionId}|${recordedAt.getTime()}|${lat}|${lng}`);
+  let recordedIso: string;
+  try {
+    recordedIso = recordedAt.toISOString();
+  } catch {
+    return null;
+  }
+  const parsed = gpsPointSchema.safeParse({
+    clientPointId,
+    recordedAt: recordedIso,
     lat,
     lng,
-    accuracyM: accuracy !== undefined && accuracy >= 0 ? accuracy : null,
+    accuracyM: accuracy !== undefined && accuracy >= 0 ? Math.min(accuracy, 100_000) : null,
     speedKmh: speedKmh !== undefined ? Math.min(speedKmh, 1_000) : null,
-    // Cap hors [0, 360[ (360 exact fréquent) ramené dans l'intervalle : la contrainte de base le refuse sinon.
-    heading: heading !== undefined ? heading % 360 : null,
-  };
+    heading: heading !== undefined ? normalizeHeading(heading) : null,
+  });
+  return parsed.success ? toGpsPoint(parsed.data) : null;
 }
 
 // ---------- Points A / B des missions ----------

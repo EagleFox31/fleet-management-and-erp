@@ -37,7 +37,7 @@ router.get("/:id/track", requireFeature("gps"), authorize([...GPS_TRACK_ROLES, "
   }
 });
 
-const geoPointSchema = z.object({ lat: z.number().nullable().optional(), lng: z.number().nullable().optional(), hubCode: z.string().nullable().optional() });
+const geoPointSchema = z.object({ lat: z.number().finite().nullable().optional(), lng: z.number().finite().nullable().optional(), hubCode: z.string().nullable().optional() });
 const geoBodySchema = z.object({ pickup: geoPointSchema.nullable().optional(), delivery: geoPointSchema.nullable().optional() }).strict();
 
 router.patch("/:id/geo", requireFeature("gps"), authorize([...MISSION_GEO_WRITE_ROLES]), async (req, res, next) => {

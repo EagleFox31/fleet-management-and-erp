@@ -13,13 +13,27 @@ import { activeMissionIdOf, ingestDriverPositions } from "../services/vehicle-po
  *
  * - POST /api/driver/missions/:id/positions : paquet JSON `{ points: [...] }` (<= 50 points), rejeu
  *   hors ligne sans doublon (clientPointId).
- * - GET|POST /api/driver/positions : relevé unique au format OsmAnd / Traccar Client
- *   (`?id=&lat=&lon=&timestamp=&speed=&bearing=&accuracy=`, formulaire, ou JSON `location.coords`),
- *   repli quand l'appli du chauffeur n'est pas disponible. La mission est celle du chauffeur en route.
+ * - POST /api/driver/positions : relevé unique au format OsmAnd / Traccar Client, en JSON
+ *   (`location.coords` ou `{ lat, lon, timestamp, speed, bearing, accuracy }`). La mission est celle du
+ *   chauffeur en route.
+ *
+ * Écriture : POST et `application/json` seulement (415 sinon). Le cookie de session est en
+ * SameSite=None sans jeton CSRF : une écriture par GET, par formulaire ou en `text/plain` serait
+ * déclenchable depuis un autre site. Un type JSON impose une requête préalable (CORS) que le navigateur
+ * n'envoie pas pour un site tiers. La lecture par la requête (`?lat=&lon=`) et le formulaire reviendront
+ * avec le jeton d'appareil (lot balises).
  *
  * Les positions sont exclues du journal d'audit (server/lib/audit-config.ts).
  */
 const router = Router();
+
+const jsonOnly: RequestHandler = (req, _res, next) => {
+  if (!req.is("application/json")) {
+    next(new AppError(415, "Format non pris en charge : la position s'envoie en JSON."));
+    return;
+  }
+  next();
+};
 
 const postBatch: RequestHandler = async (req, res, next) => {
   try {
@@ -35,20 +49,18 @@ const postBatch: RequestHandler = async (req, res, next) => {
 const postOsmand: RequestHandler = async (req, res, next) => {
   try {
     const user = req.user!;
-    const point = parseOsmandReport(req.query as Record<string, unknown>, req.body, { now: new Date(), userId: user.id, missionId: 0 });
-    if (!point) throw new AppError(400, "Position illisible : latitude, longitude et horodatage sont requis.");
     const missionId = await activeMissionIdOf(user);
-    // L'identifiant du point dépend de la mission : recalculé une fois celle-ci connue.
-    const withMission = parseOsmandReport(req.query as Record<string, unknown>, req.body, { now: new Date(), userId: user.id, missionId });
-    const result = await ingestDriverPositions(user, missionId, [withMission ?? point], { requestId: req.requestId });
+    // L'identifiant du point dépend de la mission : le relevé se décode une fois celle-ci connue.
+    const point = parseOsmandReport(req.body, { now: new Date(), userId: user.id, missionId });
+    if (!point) throw new AppError(400, "Position illisible : latitude, longitude et horodatage valides sont requis.");
+    const result = await ingestDriverPositions(user, missionId, [point], { requestId: req.requestId });
     res.status(200).json(result);
   } catch (error) {
     next(error);
   }
 };
 
-router.post("/driver/missions/:id/positions", requireFeature("gps"), authorize(["driver"]), postBatch);
-router.get("/driver/positions", requireFeature("gps"), authorize(["driver"]), postOsmand);
-router.post("/driver/positions", requireFeature("gps"), authorize(["driver"]), postOsmand);
+router.post("/driver/missions/:id/positions", requireFeature("gps"), authorize(["driver"]), jsonOnly, postBatch);
+router.post("/driver/positions", requireFeature("gps"), authorize(["driver"]), jsonOnly, postOsmand);
 
 export default router;
