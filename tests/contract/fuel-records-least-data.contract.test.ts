@@ -188,3 +188,37 @@ describe("GET /api/fuel-records/statistics : pilotage et client seulement", { ti
     expect(seen).not.toContain(foreign.id);
   });
 });
+
+describe("GET des pleins : champs de mission hors MISSION_READ_ROLES", () => {
+  const MISSION_KEYS = ["orderNumber", "clientName", "destination"] as const;
+
+  async function recordWithMission() {
+    const v = await vehicle();
+    const row = await createTestFuelRecord({ vehicleId: v.id, debitAmount: "0", creditAmount: "0", cost: "500.00", quantity: 2 });
+    ids.fuelRecordIds.push(row.id);
+    await db.update(fuelRecords).set({ orderNumber: "BC-TEST-1", clientName: "TEST CLIENT", destination: "TEST DOUALA" }).where(eq(fuelRecords.id, row.id));
+    return { vehicleId: v.id, id: row.id };
+  }
+
+  it("technicien : ni numéro de commande, ni client, ni destination ; les autres champs restent", async () => {
+    const { vehicleId, id } = await recordWithMission();
+    for (const path of [`/api/fuel-records?vehicleId=${vehicleId}`, `/api/fuel-records/vehicle/${vehicleId}`]) {
+      const res = await session.call("GET", path, { actor: "technician" });
+      expect(res.status, path).toBe(200);
+      const row = (res.body as Array<Record<string, unknown>>).find((r) => r.id === id)!;
+      expect(row, path).toBeTruthy();
+      for (const key of MISSION_KEYS) expect(row, `${path} ${key}`).not.toHaveProperty(key);
+      expect(row.quantity, path).toBe(2);
+    }
+  });
+
+  it("logistique et chef d'atelier (MISSION_READ_ROLES) : les champs de mission restent lisibles", async () => {
+    const { vehicleId, id } = await recordWithMission();
+    for (const actor of ["logistics", "workshop_manager"] as Actor[]) {
+      const res = await session.call("GET", `/api/fuel-records/vehicle/${vehicleId}`, { actor });
+      expect(res.status, actor).toBe(200);
+      const row = (res.body as Array<Record<string, unknown>>).find((r) => r.id === id)!;
+      expect(row, actor).toMatchObject({ orderNumber: "BC-TEST-1", clientName: "TEST CLIENT", destination: "TEST DOUALA" });
+    }
+  });
+});

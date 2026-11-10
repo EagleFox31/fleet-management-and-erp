@@ -9,9 +9,9 @@ import { uniqueTestToken } from "../support/ids";
 
 /**
  * Prix convenu d'une mission : réservé à ceux qui lisent la grille tarifaire. Les routes qui renvoient
- * la ligne entière de `missions` (operations, PUT status) ne le montrent ni au technicien ni au chauffeur.
+ * la ligne entière de `missions` (operations, PUT status) ne le montrent ni au magasinier ni au chauffeur.
  */
-const ACTORS = { admin: "admin", technician: "technician", driver: "driver" } as const;
+const ACTORS = { admin: "admin", warehouse: "warehouse", driver: "driver" } as const;
 type Actor = keyof typeof ACTORS;
 
 const ids = createIdBag();
@@ -71,10 +71,10 @@ afterAll(async () => {
 }, 120000);
 
 describe("prix convenu : lignes de mission entières", { timeout: 180000 }, () => {
-  it("GET /api/operations/missions : l'admin les voit, technicien et chauffeur reçoivent null", async () => {
+  it("GET /api/operations/missions : l'admin les voit, magasinier et chauffeur reçoivent null", async () => {
     const admin = await call("GET", "/api/operations/missions", { actor: "admin" });
     expect(rowOf(admin.body, mission.id)?.agreedPrice).toBe("125000");
-    for (const actor of ["technician", "driver"] as const) {
+    for (const actor of ["warehouse", "driver"] as const) {
       const res = await call("GET", "/api/operations/missions", { actor });
       expect(res.status, actor).toBe(200);
       const row = rowOf(res.body, mission.id);
@@ -86,11 +86,11 @@ describe("prix convenu : lignes de mission entières", { timeout: 180000 }, () =
     }
   });
 
-  it("/operations/missions/upcoming et /active : technicien et chauffeur reçoivent null, l'admin les voit", async () => {
+  it("/operations/missions/upcoming et /active : magasinier et chauffeur reçoivent null, l'admin les voit", async () => {
     for (const [path, target] of [["upcoming", upcoming], ["active", mission]] as const) {
       const admin = await call("GET", `/api/operations/missions/${path}`, { actor: "admin" });
       expect(rowOf(admin.body, target.id), `admin ${path}`).toBeDefined();
-      for (const actor of ["technician", "driver"] as const) {
+      for (const actor of ["warehouse", "driver"] as const) {
         const res = await call("GET", `/api/operations/missions/${path}`, { actor });
         expect(res.status, `${actor} ${path}`).toBe(200);
         const row = rowOf(res.body, target.id);
