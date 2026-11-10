@@ -130,7 +130,7 @@ export const SATELLITE_GROUPS = {
   /** Budget de mission (L1f) : liste, budget d'une mission et ses dépenses, besoin du jour. */
   missionBudgets: { keys: ["/api/mission-budgets", "/api/mission-budgets/daily-need"], byId: ["/api/missions/:missionId/launch-readiness"] },
   /** Preuve de livraison déposée : fichiers de la mission, et liste « livrées non facturées ». */
-  missionPod: { keys: ["/api/billing/pending-invoices"] },
+  missionPod: { keys: ["/api/billing/pending-invoices"], byId: ["/api/missions/:missionId/pod-files"] },
   /** Échéances documentaires : compteurs de flotte. */
   documents: { keys: ["/api/statistics/fleet"] },
   /** Cloche et listes d'alertes, y compris le filtre par type. */
