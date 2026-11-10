@@ -1,6 +1,7 @@
 import { db } from "../db";
-import { fuelRecords, vehicles, type FuelRecord, type InsertFuelRecord } from "@shared/schema";
+import { fuelRecords, missionBudgets, missions, vehicles, type FuelRecord, type InsertFuelRecord } from "@shared/schema";
 import { eq, desc, count, sum, avg, and, isNull } from "drizzle-orm";
+import { isMissionBudgetSettled } from "@shared/contracts/mission-budgets";
 import { lockFuelCard } from "../lib/fuel-card-lock";
 import { reverseFuelLink } from "./treasury-links";
 import { AppError } from "../lib/app-error";
@@ -8,6 +9,18 @@ import { moduleLogger } from "../lib/logger";
 import { hasMovedFuelCard } from "../lib/fuel-record-ledger-lock";
 import { FUEL_CARD_MANAGER_ROLES } from "@shared/constants/roles";
 import { FUEL_PHYSICAL_RECORD_DELETE_ROLES } from "@shared/constants/fuel-record-delete";
+import {
+  FUEL_RECORD_ALREADY_REMOVED_MESSAGE,
+  FUEL_RECORD_BUDGET_SETTLED_MESSAGE,
+  FUEL_RECORD_CANCEL_FORBIDDEN_MESSAGE,
+  FUEL_RECORD_CANCEL_NOT_VALIDATED_MESSAGE,
+  FUEL_RECORD_VALIDATED_DELETE_MESSAGE,
+  FUEL_RECORD_VALIDATED_EDIT_MESSAGE,
+  FUEL_RECORD_CANCEL_REASON_MAX_LENGTH,
+  FUEL_RECORD_CANCEL_REASON_MIN_LENGTH,
+  canCancelFuelRecord,
+  isFuelRecordValidated,
+} from "@shared/constants/fuel-record-cancel";
 
 const log = moduleLogger("fuel-service");
 
@@ -73,6 +86,15 @@ export class FuelService {
   async updateFuelRecord(id: number, fuelRecord: Partial<InsertFuelRecord>, updatedById?: number): Promise<FuelRecord | undefined> {
     return db.transaction(async (tx) => {
       await lockFuelCard(tx);
+      // Ligne verrouillée avant la décision : un plein validé ne se modifie plus (409), même si une
+      // validation concurrente vient de passer. Absent ou supprimé : rien à modifier (undefined, 404 côté route).
+      const [current] = await tx
+        .select({ validationStatus: fuelRecords.validationStatus })
+        .from(fuelRecords)
+        .where(and(eq(fuelRecords.id, id), isNull(fuelRecords.deletedAt)))
+        .for("update");
+      if (!current) return undefined;
+      if (isFuelRecordValidated(current)) throw new AppError(409, FUEL_RECORD_VALIDATED_EDIT_MESSAGE);
       const [updatedFuelRecord] = await tx
         .update(fuelRecords)
         .set({
@@ -83,6 +105,67 @@ export class FuelService {
         .where(and(eq(fuelRecords.id, id), isNull(fuelRecords.deletedAt)))
         .returning();
       return updatedFuelRecord;
+    });
+  }
+
+  /**
+   * Annule un plein validé, avec motif : suppression douce tracée (deleted_at, deleted_by,
+   * cancellation_reason), contre-passation en trésorerie, recalcul du budget de mission par le
+   * trigger AFTER de fuel_records. Rejeu avec le même motif : rien n'est réécrit (`replayed`).
+   * Mêmes rôles que la suppression. 409 si le budget de la mission est soldé.
+   * Retourne undefined si le plein n'existe pas.
+   */
+  async cancelFuelRecord(
+    id: number,
+    actor: { id: number; role: string },
+    reason: string,
+  ): Promise<{ record: FuelRecord; replayed: boolean } | undefined> {
+    if (!actor || typeof actor.role !== "string" || !Number.isInteger(actor.id)) {
+      log.error({ fuelRecordId: id }, "cancelFuelRecord appelé sans acteur identifié");
+      throw new AppError(401, "Authentification requise pour annuler un plein.");
+    }
+    const trimmed = typeof reason === "string" ? reason.trim() : "";
+    if (trimmed.length > FUEL_RECORD_CANCEL_REASON_MAX_LENGTH) {
+      throw new AppError(400, "Le motif d'annulation est limité à 500 caractères.");
+    }
+    if (trimmed.length < FUEL_RECORD_CANCEL_REASON_MIN_LENGTH) {
+      throw new AppError(400, "Le motif d'annulation est obligatoire (3 caractères au minimum).");
+    }
+    return db.transaction(async (tx) => {
+      await lockFuelCard(tx);
+      const [record] = await tx.select().from(fuelRecords).where(eq(fuelRecords.id, id)).for("update");
+      if (!record) return undefined;
+      if (!canCancelFuelRecord(actor.role, record)) throw new AppError(403, FUEL_RECORD_CANCEL_FORBIDDEN_MESSAGE);
+
+      if (record.deletedAt) {
+        if (record.cancellationReason === trimmed) return { record, replayed: true };
+        throw new AppError(409, FUEL_RECORD_ALREADY_REMOVED_MESSAGE);
+      }
+      if (!isFuelRecordValidated(record)) throw new AppError(409, FUEL_RECORD_CANCEL_NOT_VALIDATED_MESSAGE);
+
+      if (record.missionId !== null) {
+        // Même ordre que le solde (mission, puis budget) : le trigger du plein met à jour la mission, un
+        // verrou pris dans l'autre sens fait un interblocage. Le solde en cours se termine avant nous.
+        await tx.select({ id: missions.id }).from(missions).where(eq(missions.id, record.missionId)).for("update");
+        // Verrou pris sans condition : le solde (FOR UPDATE) attend cette lecture, ou l'inverse.
+        // Filtrer sur settled_at avant le verrou ne verrouillerait rien tant que le budget n'est pas soldé.
+        const [budget] = await tx
+          .select({ id: missionBudgets.id, settledAt: missionBudgets.settledAt })
+          .from(missionBudgets)
+          .where(eq(missionBudgets.missionId, record.missionId))
+          .for("share");
+        if (budget && isMissionBudgetSettled(budget)) throw new AppError(409, FUEL_RECORD_BUDGET_SETTLED_MESSAGE);
+      }
+
+      const now = new Date();
+      const [cancelled] = await tx
+        .update(fuelRecords)
+        .set({ deletedAt: now, deletedBy: actor.id, cancellationReason: trimmed, updatedBy: actor.id, updatedAt: now })
+        .where(eq(fuelRecords.id, id))
+        .returning();
+      await reverseFuelLink(tx, id, actor.id);
+      log.info({ fuelRecordId: id, vehicleId: record.vehicleId, userId: actor.id }, "Plein validé annulé");
+      return { record: cancelled, replayed: false };
     });
   }
 
@@ -102,7 +185,8 @@ export class FuelService {
       const [record] = await tx
         .select()
         .from(fuelRecords)
-        .where(and(eq(fuelRecords.id, id), isNull(fuelRecords.deletedAt)));
+        .where(and(eq(fuelRecords.id, id), isNull(fuelRecords.deletedAt)))
+        .for("update");
       if (!record) return false;
 
       if (hasMovedFuelCard(record)) {
@@ -110,6 +194,7 @@ export class FuelService {
         if (!(FUEL_CARD_MANAGER_ROLES as readonly string[]).includes(actor.role)) {
           throw new AppError(403, "Seuls l'administrateur, la logistique et le secrétariat peuvent supprimer un plein qui a mouvementé la carte carburant.");
         }
+        if (isFuelRecordValidated(record)) throw new AppError(409, FUEL_RECORD_VALIDATED_DELETE_MESSAGE);
         await tx
           .update(fuelRecords)
           .set({ deletedAt: new Date(), deletedBy: actor.id })
@@ -122,6 +207,7 @@ export class FuelService {
       if (!(FUEL_PHYSICAL_RECORD_DELETE_ROLES as readonly string[]).includes(actor.role)) {
         throw new AppError(403, "Accès non autorisé");
       }
+      if (isFuelRecordValidated(record)) throw new AppError(409, FUEL_RECORD_VALIDATED_DELETE_MESSAGE);
       const result = await tx.delete(fuelRecords).where(eq(fuelRecords.id, id)).returning();
       if (result.length > 0) {
         log.info(

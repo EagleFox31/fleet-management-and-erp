@@ -49,6 +49,21 @@ describe("levée des verrous d'argent : hygiène", () => {
     expect(routes.filter((f) => /allow_money_override|withMoneyOverride|money-override/.test(read(f)))).toEqual([]);
   });
 
+  it("la seule route HTTP qui atteint withMoneyOverride est la restauration de sauvegarde (admin)", () => {
+    // La garde textuelle ne suit pas les appels : on suit les imports vers le service qui lève le verrou.
+    const serverFiles = files.filter((f) => f.startsWith("server/"));
+    const importsBackupService = serverFiles.filter(
+      (f) => f !== "server/services/backup-import-service.ts" && /backup-import-service/.test(read(f)),
+    );
+    expect(importsBackupService).toEqual(["server/api/admin-import-backup.routes.ts"]);
+    const importsOverride = serverFiles.filter(
+      (f) => f !== "server/lib/money-override.ts" && /lib\/money-override|\.\/money-override/.test(read(f)),
+    );
+    expect(importsOverride).toEqual(["server/services/backup-import-service.ts"]);
+    // Et cette route reste réservée à l'administrateur.
+    expect(read("server/api/admin-import-backup.routes.ts")).toMatch(/import-backup",\s*authenticate,\s*isAdmin/);
+  });
+
   it("withMoneyOverride n'est importé que par la liste blanche", () => {
     expect(withText(/withMoneyOverride/).filter((f) => !allowed(f))).toEqual([]);
   });

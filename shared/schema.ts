@@ -545,6 +545,9 @@ export const fuelRecords = pgTable("fuel_records", {
   // pour l'audit mais n'entre plus dans aucun solde ni somme (server/db/migrations/20261103_fuel_records_soft_delete.sql).
   deletedAt: timestamp("deleted_at"),
   deletedBy: integer("deleted_by").references(() => users.id),
+  // Motif d'annulation d'un plein validé (POST /api/fuel-records/:id/cancel) : posé par le serveur seul
+  // (server/db/migrations/20261110_fuel_cancellation_reason.sql).
+  cancellationReason: text("cancellation_reason"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => [uniqueIndex("ux_fuel_records_request_key").on(table.requestKey)]);
@@ -554,6 +557,7 @@ export const insertFuelRecordSchema = createInsertSchema(fuelRecords).omit({
   requestKey: true,
   deletedAt: true,
   deletedBy: true,
+  cancellationReason: true,
   validatedBy: true,
   validatedAt: true,
   createdAt: true,

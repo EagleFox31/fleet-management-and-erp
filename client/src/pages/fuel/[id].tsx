@@ -6,6 +6,9 @@ import { useLocation, useRoute } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { canDeleteFuelRecord } from "@shared/constants/fuel-record-delete";
+import { canCancelFuelRecord, isFuelRecordValidated } from "@shared/constants/fuel-record-cancel";
+import { FuelRecordCancelDialog } from "@/components/fuel/fuel-record-cancel-dialog";
+import { fuelValidationLabel } from "@/lib/fuel-record-status";
 import { Button } from "@/components/ui/button";
 import { formatDate, formatPrice, formatDistance } from "@/lib/utils";
 import {
@@ -17,7 +20,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { ArrowLeft, Fuel, Droplets, Gauge, Edit, Trash2, MapPin, Truck, User, Calendar } from "lucide-react";
+import { ArrowLeft, Fuel, Droplets, Gauge, Edit, Trash2, Ban, MapPin, Truck, User, Calendar } from "lucide-react";
 import { FuelRecordForm } from "@/components/fuel/fuel-record-form";
 
 export default function FuelRecordDetail() {
@@ -27,6 +30,7 @@ export default function FuelRecordDetail() {
   const queryClient = useQueryClient();
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
 
   const id = params ? parseInt(params.id) : null;
 
@@ -121,8 +125,9 @@ export default function FuelRecordDetail() {
             <Button variant="ghost" size="sm" className="-ml-1 text-muted-foreground" onClick={() => setLocation("/fuel")}>
               <ArrowLeft className="h-4 w-4 mr-1" /> Carburant
             </Button>
-            {canEdit && (
+            {(canEdit || (isFuelRecordValidated(fuelRecord) && canCancelFuelRecord(currentUser?.role, fuelRecord))) && (
               <div className="flex gap-2">
+                {canEdit && !isFuelRecordValidated(fuelRecord) && (
                 <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
                   <DialogTrigger asChild>
                     <Button size="sm" variant="outline" className="gap-2 h-8 text-xs">
@@ -148,8 +153,15 @@ export default function FuelRecordDetail() {
                     />
                   </DialogContent>
                 </Dialog>
+                )}
 
-                {canDeleteFuelRecord(currentUser?.role, fuelRecord) && (
+                {isFuelRecordValidated(fuelRecord) && canCancelFuelRecord(currentUser?.role, fuelRecord) && (
+                  <Button size="sm" variant="destructive" className="gap-2 h-8 text-xs" onClick={() => setIsCancelDialogOpen(true)}>
+                    <Ban className="h-3.5 w-3.5" /> Annuler ce plein
+                  </Button>
+                )}
+
+                {canEdit && !isFuelRecordValidated(fuelRecord) && canDeleteFuelRecord(currentUser?.role, fuelRecord) && (
                 <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
                   <DialogTrigger asChild>
                     <Button size="sm" variant="destructive" className="gap-2 h-8 text-xs">
@@ -178,6 +190,9 @@ export default function FuelRecordDetail() {
           <div className="flex gap-2 mb-4">
             <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${fuelRecord.fullTank ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
               {fuelRecord.fullTank ? "Plein complet" : "Plein partiel"}
+            </span>
+            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">
+              {fuelValidationLabel(fuelRecord)}
             </span>
           </div>
 
@@ -322,6 +337,11 @@ export default function FuelRecordDetail() {
           )}
         </div>
       </div>
+      <FuelRecordCancelDialog
+        record={isCancelDialogOpen ? fuelRecord : null}
+        onClose={() => setIsCancelDialogOpen(false)}
+        onCancelled={() => setLocation("/fuel")}
+      />
     </div>
   );
 }

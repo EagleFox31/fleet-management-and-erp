@@ -7,6 +7,7 @@ import {
   MISSION_BUDGET_DATE_WINDOW_DAYS,
   MISSION_BUDGET_STATUSES,
   MISSION_STATUSES_WITHOUT_BUDGET,
+  isMissionBudgetSettled,
   MISSION_STATUSES_WITHOUT_EXPENSES,
   MISSION_BUDGET_EXPENSE_LINES,
   type CreateMissionBudgetExpenseRequest,
@@ -353,7 +354,7 @@ export async function settleMissionBudget(id: number, userId: number): Promise<{
     if (!mission) throw new AppError(404, "Mission introuvable.");
     if (mission.status !== "completed") throw new AppError(409, "La mission doit être terminée avant de solder son budget.");
     const [current] = await tx.select().from(missionBudgets).where(eq(missionBudgets.id, id)).for("update");
-    if (current.settledAt) return { row: current, changed: false, reversed: 0 };
+    if (isMissionBudgetSettled(current)) return { row: current, changed: false, reversed: 0 };
     if (current.status !== "disbursed") throw new AppError(409, "Seul un budget décaissé se solde.");
     const reversed = await reverseMissionBudgetDisbursements(tx as never, [id], userId, "mission soldée");
     const now = new Date();
@@ -407,7 +408,7 @@ async function lockBudgetForExpenses(tx: Executor, budgetId: number): Promise<Mi
   const [row] = await tx.select().from(missionBudgets).where(eq(missionBudgets.id, budgetId)).for("update");
   if (row.status !== "disbursed") throw new AppError(409, "Ce budget n'est pas décaissé : aucune dépense à justifier.");
   // Soldé (Q18) : refusé même quand le reliquat était nul, faute de contre-passation à relire.
-  if (row.settledAt) throw new AppError(409, "Ce budget est soldé : ses dépenses ne changent plus.");
+  if (isMissionBudgetSettled(row)) throw new AppError(409, "Ce budget est soldé : ses dépenses ne changent plus.");
   if (await isMissionBudgetReversed(tx as never, budgetId)) {
     throw new AppError(409, "Le reliquat de ce budget a été rendu au compte source : ses dépenses ne changent plus.");
   }

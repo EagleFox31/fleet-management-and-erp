@@ -118,6 +118,7 @@ const WRITES: Write[] = [
   ["POST", () => "/api/fuel-records", () => ({ vehicleId: R.vehicle, date: today, quantity: 10, cost: "8000" })],
   ["PATCH", () => `/api/fuel-records/${R.fuel}`, () => ({ quantity: 12 })],
   ["DELETE", () => `/api/fuel-records/${R.fuel}`],
+  ["POST", () => `/api/fuel-records/${R.fuel}/cancel`, () => ({ reason: "TEST annulation tardive" })],
   ["POST", () => `/api/fuel-vouchers/${R.fuel}/validate`, () => ({})],
   ["PUT", () => `/api/vehicles/${R.vehicle}/mileage`, () => ({ mileage: 60000 })],
   ["POST", () => `/api/vehicles/${R.vehicle}/mileage/sync`, () => ({})],
