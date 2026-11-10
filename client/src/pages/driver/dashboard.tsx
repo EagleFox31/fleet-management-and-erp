@@ -5,6 +5,7 @@ import { createSubmissionKeyStore, isIndeterminateOutcome, missionFuelKeyScope }
 import { driverReportOpensWorkOrder, type DriverReportType } from "@shared/contracts/incidents";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { useAuth } from "@/hooks/useAuth";
+import { useOfflineReadOnly } from "@/hooks/use-offline-read-only";
 import { useFuelPrice } from "@/hooks/use-fuel-price";
 import { localDateKey } from "@/lib/fuel-price-policy";
 import { useRealTimeSync } from "@/hooks/useRealTimeSync";
@@ -706,6 +707,10 @@ export default function DriverDashboard() {
   const [showFuelSheet, setShowFuelSheet] = useState(false);
   const [activeTab, setActiveTab] = useState<"mission" | "perf">("mission");
   const offlineReadActive = useOfflineReadActive();
+  // Consultation seule (reprise hors ligne sans utilisateur confirmé) : AUCUNE écriture n'est proposée ni lancée.
+  // Tout contrôle d'écriture de cet écran lit `readOnly` ; les contrôles de simple navigation portent
+  // `data-read-only-safe` (le test de consultation seule échoue sur tout autre bouton resté actif).
+  const readOnly = useOfflineReadOnly();
 
   const { data: driverData, isLoading, dataUpdatedAt: driverDataUpdatedAt } = useQuery<DriverMe>({
     queryKey: ["/api/drivers/me"],
@@ -755,7 +760,7 @@ export default function DriverDashboard() {
   });
 
   const handleStatusAction = () => {
-    if (!activeMission) return;
+    if (!activeMission || readOnly) return;
     statusMutation.mutate({
       id: activeMission.id,
       status: activeMission.status === "assigned" ? "in_progress" : "delivered",
@@ -767,7 +772,9 @@ export default function DriverDashboard() {
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: "#f4f6f8" }}>
-      <DriverGpsBufferReplay userId={user?.id} trackingMissionId={activeMission?.status === "in_progress" ? activeMission.id : undefined} />
+      {!readOnly && (
+        <DriverGpsBufferReplay userId={user?.id} trackingMissionId={activeMission?.status === "in_progress" ? activeMission.id : undefined} />
+      )}
       {/* ── Sticky header ───────────────────────────────────────── */}
       <header className="sticky top-0 z-40 flex items-center justify-between px-4 py-3 shadow-md" style={{ background: "#0b2116" }}>
         <div className="flex items-center gap-2">
@@ -779,14 +786,16 @@ export default function DriverDashboard() {
         </div>
         <div className="flex items-center gap-3">
           {guardDialog}
-          <ContextualHelpButton />
+          <span data-read-only-safe="aide">
+            <ContextualHelpButton />
+          </span>
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-full bg-success flex items-center justify-center text-white text-xs font-bold">
               {initials}
             </div>
             <p className="text-white text-sm font-medium hidden sm:block">{driverName}</p>
           </div>
-          <button onClick={() => void requestLogout()} className="text-green-300 hover:text-white transition-colors p-1" aria-label="Se déconnecter">
+          <button data-read-only-safe="deconnexion" onClick={() => void requestLogout()} className="text-green-300 hover:text-white transition-colors p-1" aria-label="Se déconnecter">
             <LogOut className="h-4 w-4" />
           </button>
         </div>
@@ -796,6 +805,7 @@ export default function DriverDashboard() {
       {/* ── Tab bar ─────────────────────────────────────────────── */}
       <div className="sticky top-[56px] z-30 bg-card border-b border-gray-100 flex" style={{ boxShadow: "0 1px 0 #f0f0f0" }}>
         <button
+          data-read-only-safe="onglet"
           onClick={() => setActiveTab("mission")}
           data-help-target="driver-mission-tab"
           className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-colors border-b-2 ${
@@ -809,6 +819,7 @@ export default function DriverDashboard() {
           )}
         </button>
         <button
+          data-read-only-safe="onglet"
           onClick={() => setActiveTab("perf")}
           className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-colors border-b-2 ${
             activeTab === "perf" ? "border-success text-success" : "border-transparent text-gray-400"
@@ -845,6 +856,7 @@ export default function DriverDashboard() {
                   <p className="text-sm text-gray-400 mt-1">Vous n'avez pas de mission active pour le moment.</p>
                 </div>
                 <button
+                  data-read-only-safe="onglet"
                   onClick={() => setActiveTab("perf")}
                   className="text-xs text-success font-semibold underline underline-offset-2"
                 >
@@ -951,9 +963,10 @@ export default function DriverDashboard() {
                   </div>
                 </div>
 
-                <DriverGpsPanel mission={activeMission} userId={user?.id} />
+                {!readOnly && <DriverGpsPanel mission={activeMission} userId={user?.id} />}
 
                 {/* CTA */}
+                {!readOnly && (
                 <Button
                   onClick={handleStatusAction}
                   data-help-target="driver-status-action"
@@ -971,6 +984,7 @@ export default function DriverDashboard() {
                     <span className="flex items-center gap-2"><CheckCircle2 className="h-6 w-6" />CONFIRMER LA LIVRAISON</span>
                   )}
                 </Button>
+                )}
 
                 {/* Secondary actions */}
                 <div className="grid grid-cols-2 gap-3">
@@ -983,6 +997,7 @@ export default function DriverDashboard() {
                     <Navigation className="h-5 w-5 text-blue-500" />
                     Feuille de route
                   </a>
+                  {!readOnly && (
                   <button
                     onClick={() => setShowFuelSheet(true)}
                     className="flex flex-col items-center justify-center gap-2 rounded-2xl bg-card border border-gray-100 shadow-sm p-4 text-center text-sm font-semibold text-gray-700 hover:bg-gray-50 active:scale-95 transition-transform"
@@ -990,6 +1005,8 @@ export default function DriverDashboard() {
                     <Droplets className="h-5 w-5 text-success" />
                     Enregistrer un plein
                   </button>
+                  )}
+                  {!readOnly && (
                   <PodDepositButton
                     missionId={activeMission.id}
                     status={activeMission.status}
@@ -999,6 +1016,8 @@ export default function DriverDashboard() {
                     testId="driver-button-pod-deposit"
                     className="flex flex-col items-center justify-center gap-2 rounded-2xl bg-card border border-gray-100 shadow-sm p-4 text-center text-sm font-semibold text-gray-700 hover:bg-gray-50 active:scale-95 transition-transform disabled:opacity-60"
                   />
+                  )}
+                  {!readOnly && (
                   <button
                     onClick={() => setShowProblemSheet(true)}
                     className="flex flex-col items-center justify-center gap-2 rounded-2xl bg-card border border-gray-100 shadow-sm p-4 text-center text-sm font-semibold text-gray-700 hover:bg-gray-50 active:scale-95 transition-transform"
@@ -1006,6 +1025,7 @@ export default function DriverDashboard() {
                     <AlertTriangle className="h-5 w-5 text-destructive-text" />
                     Signaler un problème
                   </button>
+                  )}
                 </div>
 
                 {upcomingMissions.length > 0 && (
@@ -1052,10 +1072,10 @@ export default function DriverDashboard() {
         )}
       </main>
 
-      {showProblemSheet && activeMission && (
+      {showProblemSheet && activeMission && !readOnly && (
         <ProblemSheet mission={activeMission} onClose={() => setShowProblemSheet(false)} />
       )}
-      {showFuelSheet && activeMission && (
+      {showFuelSheet && activeMission && !readOnly && (
         <FuelSheet mission={activeMission} onClose={() => setShowFuelSheet(false)} />
       )}
     </div>

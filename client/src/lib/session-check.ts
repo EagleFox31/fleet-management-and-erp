@@ -5,12 +5,23 @@ import type { User } from "./auth";
  * une 5xx disent seulement que le serveur n'a pas répondu : renvoyer alors vers
  * la connexion déconnectait l'utilisateur à chaque lenteur.
  */
+/**
+ * Reprise hors ligne accordée par le marqueur `offline-resume` : ni rôle, ni nom, ni email. `profile`
+ * est l'identifiant d'un profil de lecture (`OfflineReadProfile.id`), `expiresAt` la fin de la lecture.
+ */
+export interface OfflineGrantInfo {
+  userId: number;
+  profile: string;
+  expiresAt: number;
+}
+
 export type SessionCheck =
   // `httpStatus` présent : le serveur a répondu (403, 5xx), le réseau n'est pas en cause.
   // Absent : réseau coupé ou délai dépassé, seul cas où la lecture hors ligne peut reprendre.
   | { status: "authenticated"; user: User }
   | { status: "anonymous" }
-  | { status: "unreachable"; httpStatus?: number };
+  // `resumed` : réseau coupé et lecture hors ligne rouverte depuis le marqueur (jamais de User).
+  | { status: "unreachable"; httpStatus?: number; resumed?: OfflineGrantInfo };
 
 export const SESSION_CHECK_TIMEOUT_MS = 10_000;
 

@@ -1,4 +1,4 @@
-import type { SessionCheck } from "./session-check";
+import type { OfflineGrantInfo, SessionCheck } from "./session-check";
 import type { PendingLogoutOutcome } from "./pending-logout";
 import type { User } from "./auth";
 import { clientLogger } from "@/lib/logger";
@@ -34,7 +34,7 @@ export interface SessionResumeDeps {
   /** Écrit le marqueur de reprise hors ligne après un /me réussi (ne lève jamais). */
   recordOnline(user: User): Promise<void>;
   /** Rouvre la lecture hors ligne depuis le marqueur ; vrai si un compte a été restauré. */
-  restoreOffline(): Promise<boolean>;
+  restoreOffline(): Promise<OfflineGrantInfo | null>;
   /** Efface le marqueur de reprise (session refusée par le serveur). */
   clearResume(): Promise<void>;
 }
@@ -45,6 +45,16 @@ async function settle(op: () => Promise<unknown>): Promise<void> {
     await op();
   } catch (err) {
     clientLogger.warn("Reprise hors ligne en échec", { err });
+  }
+}
+
+/** Comme `settle`, mais rend la valeur ; `null` si l'opération échoue. */
+async function settleValue<T>(op: () => Promise<T>): Promise<T | null> {
+  try {
+    return await op();
+  } catch (err) {
+    clientLogger.warn("Reprise hors ligne en échec", { err });
+    return null;
   }
 }
 
@@ -79,7 +89,9 @@ export function createSessionResume(deps: SessionResumeDeps): () => Promise<Sess
       await settle(deps.clearResume);
     } else if (result.httpStatus === undefined && activeAtStart === null) {
       // Réseau injoignable, aucun compte en mémoire : lecture seule depuis le marqueur, si valide.
-      await settle(deps.restoreOffline);
+      // Le grant voyage dans `resumed` : pas de nouveau statut, `unreachable` reste ce qu'il était.
+      const resumed = await settleValue(deps.restoreOffline);
+      if (resumed) return { ...result, resumed };
     }
     return result;
   };

@@ -21,6 +21,7 @@ import {
 import NotFound from "@/pages/not-found";
 import AppLayout from "@/components/layout/app-layout";
 import { renderLotRoutes } from "@/components/lot-routes";
+import { OfflineShellGate } from "@/components/offline/offline-shell";
 
 // Pages
 import Login from "@/pages/auth/login";
@@ -308,6 +309,7 @@ function App() {
           <OnboardingProvider>
             <VehicleProvider>
               <Toaster />
+            <OfflineShellGate>
             <Switch>
             {/* Public routes */}
             <Route path="/login" component={Login} />
@@ -809,6 +811,7 @@ function App() {
             {/* Fallback to 404 */}
             <Route component={NotFound} />
             </Switch>
+            </OfflineShellGate>
             </VehicleProvider>
           </OnboardingProvider>
         </AuthProvider>

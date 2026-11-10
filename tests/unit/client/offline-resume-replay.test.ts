@@ -92,7 +92,7 @@ describe("C1 : aucun rejeu avant la confirmation de la session", () => {
   it("compte rouvert depuis le marqueur, réseau revenu : l'événement online n'envoie rien", async () => {
     await queuedSession(7);
     const stop = setupOfflinePersistence(new QueryClient());
-    expect(await resumeOfflineRead(new QueryClient())).toBe(true);
+    expect(await resumeOfflineRead(new QueryClient())).not.toBeNull();
     expect(getActiveOfflineUserId()).toBe(7);
 
     handlers.get("online")?.();
