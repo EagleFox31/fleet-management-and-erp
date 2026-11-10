@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderNativeOfflinePage, resolveNativeServer } from "../../../shared/native-shell";
 
@@ -55,5 +57,25 @@ describe("capacitor.config.ts : verrous de la coquille", () => {
   it("sans origine : configuration de développement inchangée", async () => {
     const config = await loadConfig(undefined);
     expect(config.server).toEqual({ androidScheme: "https", cleartext: true });
+  });
+});
+
+describe("APK release : garde-fous hors de capacitor.config.ts", () => {
+  const root = path.resolve(__dirname, "../../..");
+  const read = (rel: string) => readFileSync(path.join(root, rel), "utf8");
+
+  it("le manifeste Android n'autorise pas le trafic en clair en dur", () => {
+    // `cap sync` ajoute usesCleartextTraffic seulement pour une origine http ; le manifeste source
+    // ne doit ni l'écrire ni déléguer à une network_security_config qui l'ouvrirait.
+    const manifest = read("android/app/src/main/AndroidManifest.xml");
+    expect(manifest).not.toMatch(/usesCleartextTraffic\s*=\s*"true"/);
+    expect(manifest).not.toMatch(/networkSecurityConfig/);
+  });
+
+  it("le workflow refuse de signer une APK dont l'origine n'est pas https", () => {
+    const workflow = read(".github/workflows/build-android-apk.yml");
+    const step = workflow.slice(workflow.indexOf("id: check_keystore"), workflow.indexOf("has_keystore=true"));
+    expect(step).toContain('if [ -z "$CAP_SERVER_URL" ]');
+    expect(step).toMatch(/case "\$CAP_SERVER_URL" in\s+https:\/\/\*\) ;;\s+\*\)[^\n]*exit 1/);
   });
 });
