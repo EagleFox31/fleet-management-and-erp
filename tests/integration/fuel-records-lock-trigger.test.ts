@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { db } from "../../server/db";
+import { db, pool } from "../../server/db";
 import { FUEL_RECORDS_VALIDATED_LOCK_SQL } from "../../server/init-database";
 import { withMoneyOverride } from "../../server/lib/money-override";
 import { isCheckViolation, moneyLockMessageOf, pgConstraintOf } from "../../server/lib/pg-errors";
@@ -74,8 +74,10 @@ async function triggerState() {
   const res = await db.execute(sql`
     SELECT md5(pg_get_functiondef('fn_fuel_records_validated_lock()'::regprocedure)) AS fn,
            (SELECT count(*) FROM pg_trigger WHERE tgrelid = 'fuel_records'::regclass AND tgname = 'trg_fuel_records_validated_lock')::int AS n,
-           (SELECT pg_get_triggerdef(oid) FROM pg_trigger WHERE tgrelid = 'fuel_records'::regclass AND tgname = 'trg_fuel_records_validated_lock') AS def`);
-  return ((res as unknown as { rows: unknown[] }).rows ?? res)[0] as { fn: string; n: number; def: string };
+           (SELECT pg_get_triggerdef(oid) FROM pg_trigger WHERE tgrelid = 'fuel_records'::regclass AND tgname = 'trg_fuel_records_validated_lock') AS def,
+           (SELECT count(*) FROM pg_trigger WHERE tgrelid = 'fuel_records'::regclass AND tgname = 'trg_fuel_records_truncate_lock')::int AS nt,
+           (SELECT pg_get_triggerdef(oid) FROM pg_trigger WHERE tgrelid = 'fuel_records'::regclass AND tgname = 'trg_fuel_records_truncate_lock') AS deft`);
+  return ((res as unknown as { rows: unknown[] }).rows ?? res)[0] as { fn: string; n: number; def: string; nt: number; deft: string | null };
 }
 
 beforeAll(async () => {
@@ -161,10 +163,13 @@ describe("trigger fuel_records_validated_locked", { timeout: 60_000 }, () => {
     expect((await recordRow(record.id)).deletedAt).not.toBeNull();
   });
 
-  it("mission_id : vers NULL permis (suppression de la mission), vers une autre mission refusé", async () => {
+  it("mission_id : vers NULL seulement par la clé étrangère (suppression de la mission), jamais en direct", async () => {
     const [m1, m2] = [await makeMission(), await makeMission()];
     const record = await makeRecord({ missionId: m1.id });
     await expectLocked(() => db.execute(sql`UPDATE fuel_records SET mission_id = ${m2.id} WHERE id = ${record.id}`));
+    // Détacher en direct sortirait le plein du budget de la mission sans annulation tracée.
+    await expectLocked(() => db.execute(sql`UPDATE fuel_records SET mission_id = NULL WHERE id = ${record.id}`));
+    expect((await recordRow(record.id)).missionId).toBe(m1.id);
     // ON DELETE SET NULL de la clé étrangère : la mission part, le plein reste, validé.
     await db.delete(missions).where(eq(missions.id, m1.id));
     const after = await recordRow(record.id);
@@ -198,6 +203,49 @@ describe("trigger fuel_records_validated_locked", { timeout: 60_000 }, () => {
     expect((await recordRow(record.id)).cost).toBe("12345.00");
   });
 
+  it("TRUNCATE refusé ; permis sous withMoneyOverride (transaction annulée ensuite)", async () => {
+    await makeRecord();
+    // Deux clés étrangères visent fuel_records : un TRUNCATE nu est déjà refusé par Postgres, la voie
+    // ouverte est CASCADE. Chaque essai tourne dans une transaction toujours annulée : la base partagée
+    // n'est jamais vidée, même si le trigger manque.
+    const ROLLBACK = new Error("annulation volontaire du test");
+    const truncateThenRollback = (override: boolean) =>
+      db.transaction(async (tx) => {
+        if (override) await withMoneyOverride(tx, "test du verrou de plein");
+        await tx.execute(sql`TRUNCATE fuel_records CASCADE`);
+        const [{ n }] = (await tx.execute(sql`SELECT count(*)::int AS n FROM fuel_records`)).rows as { n: number }[];
+        expect(n).toBe(0);
+        throw ROLLBACK;
+      });
+    await expectLocked(() => truncateThenRollback(false));
+    await expect(truncateThenRollback(true)).rejects.toBe(ROLLBACK);
+    expect(ids.fuelRecordIds.length).toBeGreaterThan(0);
+    expect(await recordRow(ids.fuelRecordIds[ids.fuelRecordIds.length - 1])).toBeDefined();
+  });
+
+  it("verrou de table indisponible : la migration attend 5 s au plus, puis renonce sans erreur", async () => {
+    const before = await triggerState();
+    const holder = await pool.connect();
+    let outcome = "";
+    let migration: Promise<unknown> = Promise.resolve();
+    try {
+      // ROW EXCLUSIVE (une écriture en cours) bloque CREATE TRIGGER (SHARE ROW EXCLUSIVE).
+      await holder.query("BEGIN");
+      await holder.query("LOCK TABLE fuel_records IN ROW EXCLUSIVE MODE");
+      migration = pool.query(readFileSync(MIGRATION, "utf8"));
+      outcome = await Promise.race([
+        migration.then(() => "terminée", () => "en erreur"),
+        new Promise<string>((resolve) => setTimeout(() => resolve("bloquée"), 15_000)),
+      ]);
+    } finally {
+      await holder.query("ROLLBACK");
+      holder.release();
+      await migration.catch(() => undefined);
+    }
+    expect(outcome).toBe("terminée");
+    expect(await triggerState()).toEqual(before);
+  });
+
   it("non-régression : le trigger AFTER de mission recalcule toujours le réel carburant", async () => {
     const mission = await makeMission();
     const record = await makeRecord({ missionId: mission.id, debitAmount: "3000.00", quantity: 4 });
@@ -219,6 +267,8 @@ describe("trigger fuel_records_validated_locked", { timeout: 60_000 }, () => {
     const first = await triggerState();
     expect(first.n).toBe(1);
     expect(first.def).toMatch(/BEFORE DELETE OR UPDATE ON public\.fuel_records FOR EACH ROW/);
+    expect(first.nt).toBe(1);
+    expect(first.deft).toMatch(/BEFORE TRUNCATE ON public\.fuel_records FOR EACH STATEMENT/);
     for (let i = 0; i < 2; i++) {
       await db.execute(sql.raw(migration));
       await db.execute(sql.raw(FUEL_RECORDS_VALIDATED_LOCK_SQL));

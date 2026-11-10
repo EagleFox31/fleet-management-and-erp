@@ -1265,9 +1265,11 @@ EXECUTE FUNCTION fn_users_keep_active_admin();`;
 /**
  * Verrou d'argent en base sur les pleins validés (lot V1, D2). Doit rester identique à
  * server/db/migrations/20261110_money_lock_fuel.sql (AGENTS.md §5), comparé par
- * tests/unit/server/fuel-records-lock-schema.test.ts. Un seul envoi = une transaction.
+ * tests/unit/server/fuel-records-lock-schema.test.ts. Un seul envoi = une transaction (SET LOCAL
+ * lock_timeout borne l'attente du verrou de table ; un échec est toléré et relu après l'appel).
  */
 export const FUEL_RECORDS_VALIDATED_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
 
 CREATE OR REPLACE FUNCTION fn_fuel_records_validated_lock()
 RETURNS trigger
@@ -1295,8 +1297,10 @@ BEGIN
       USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
   END IF;
 
-  -- La mission ne se change pas ; elle ne se détache que vers NULL (suppression de la mission).
-  IF NEW.mission_id IS DISTINCT FROM OLD.mission_id AND NEW.mission_id IS NOT NULL THEN
+  -- La mission ne se change pas ; elle ne se détache que vers NULL, et seulement par l'action de clé étrangère
+  -- (suppression de la mission : UPDATE lancé par un trigger, profondeur > 1). En direct, le plein sortirait du
+  -- budget de sa mission sans annulation tracée.
+  IF NEW.mission_id IS DISTINCT FROM OLD.mission_id AND (NEW.mission_id IS NOT NULL OR pg_trigger_depth() <= 1) THEN
     RAISE EXCEPTION 'Plein validé : la mission ne se change pas.'
       USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
   END IF;
@@ -1317,10 +1321,33 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE TRIGGER trg_fuel_records_validated_lock
-BEFORE UPDATE OR DELETE ON fuel_records
-FOR EACH ROW
-EXECUTE FUNCTION fn_fuel_records_validated_lock();`;
+CREATE OR REPLACE FUNCTION fn_fuel_records_truncate_lock()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF current_setting('fleetos.allow_money_override', true) = 'on' THEN
+    RETURN NULL;
+  END IF;
+  RAISE EXCEPTION 'Pleins : vidage de la table refusé.'
+    USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
+END;
+$$;
+
+DO $do$
+BEGIN
+  CREATE OR REPLACE TRIGGER trg_fuel_records_validated_lock
+  BEFORE UPDATE OR DELETE ON fuel_records
+  FOR EACH ROW
+  EXECUTE FUNCTION fn_fuel_records_validated_lock();
+
+  CREATE OR REPLACE TRIGGER trg_fuel_records_truncate_lock
+  BEFORE TRUNCATE ON fuel_records
+  FOR EACH STATEMENT
+  EXECUTE FUNCTION fn_fuel_records_truncate_lock();
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'triggers de verrou des pleins non posés : verrou de table indisponible, nouvel essai au démarrage suivant';
+END $do$;`;
 
 /**
  * L1 : budget de mission (drapeau finance), un par mission. Doit rester identique à
@@ -2535,6 +2562,18 @@ export async function initializeDatabase() {
     await pool.query(USERS_KEEP_ACTIVE_ADMIN_SQL);
     // Plein validé verrouillé en base (lot V1) — jumelle de server/db/migrations/20261110_money_lock_fuel.sql.
     await pool.query(FUEL_RECORDS_VALIDATED_LOCK_SQL);
+    // Verrou de table indisponible (lock_timeout) : le RAISE WARNING n'atteint pas les logs applicatifs, relire pg_trigger.
+    const { rows: fuelLockTriggers } = await pool.query(
+      `SELECT tgname FROM pg_trigger WHERE tgrelid = 'fuel_records'::regclass
+          AND tgname IN ('trg_fuel_records_validated_lock', 'trg_fuel_records_truncate_lock')`,
+    );
+    if (fuelLockTriggers.length < 2) {
+      initLog.warn(
+        { present: fuelLockTriggers.map((r: { tgname: string }) => r.tgname) },
+        "Triggers de verrou des pleins validés non posés (verrou de table indisponible) : la garde du service reste " +
+          "active ; nouvel essai au démarrage suivant.",
+      );
+    }
     // Grille tarifaire (O3) — jumelle de server/db/migrations/20261106_tariff_grid.sql.
     await pool.query(TARIFF_GRID_SQL);
     // Prix convenu d'une mission (O3 lot 3) — jumelle de server/db/migrations/20261106_mission_agreed_price.sql.

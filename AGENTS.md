@@ -393,7 +393,9 @@ Notes :
   Le verrou vit **aussi en base** : trigger `trg_fuel_records_validated_lock` (migration
   `20261110_money_lock_fuel.sql`, jumelle `FUEL_RECORDS_VALIDATED_LOCK_SQL`), refus `check_violation` sur la
   contrainte `fuel_records_validated_locked`, traduit en 409 par `moneyLockMessageOf`. Seuls passent
-  `updated_at`, `updated_by`, `mission_id` vers NULL et l'annulation tracée une fois. Le lever : migration ou
+  `updated_at`, `updated_by`, `mission_id` vers NULL par la seule clé étrangère (suppression de la mission,
+  `pg_trigger_depth() > 1`) et l'annulation tracée une fois. `TRUNCATE` de la table est refusé
+  (`trg_fuel_records_truncate_lock`). Le lever : migration ou
   script, dans une transaction, par `withMoneyOverride(tx, motif)` ; jamais depuis une route, sauf la
   restauration de sauvegarde admin (`tests/unit/server/money-override-hygiene.test.ts`).
 - Environ 1 000 `console.*` restent côté serveur : les migrer vers `moduleLogger`

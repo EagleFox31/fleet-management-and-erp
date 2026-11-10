@@ -36,9 +36,14 @@ describe("pleins validés verrouillés : init-database et migration jumelle", ()
 
   it("idempotent, verrou de migration en tête, contrainte nommée, aucune donnée touchée", () => {
     const sql = fromMigration();
-    expect(sql.startsWith("SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));")).toBe(true);
+    expect(sql.startsWith("SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));\nSET LOCAL lock_timeout = '5s';")).toBe(true);
     expect(sql).toContain("CREATE OR REPLACE FUNCTION fn_fuel_records_validated_lock()");
-    expect(sql).toContain("CREATE OR REPLACE TRIGGER trg_fuel_records_validated_lock\nBEFORE UPDATE OR DELETE ON fuel_records");
+    expect(sql).toContain("CREATE OR REPLACE FUNCTION fn_fuel_records_truncate_lock()");
+    expect(sql).toContain("CREATE OR REPLACE TRIGGER trg_fuel_records_validated_lock\n  BEFORE UPDATE OR DELETE ON fuel_records\n  FOR EACH ROW");
+    expect(sql).toContain("CREATE OR REPLACE TRIGGER trg_fuel_records_truncate_lock\n  BEFORE TRUNCATE ON fuel_records\n  FOR EACH STATEMENT");
+    // Verrou de table indisponible : refus toléré (WARNING), relu et journalisé par init-database.
+    expect(sql).toContain("EXCEPTION WHEN lock_not_available THEN\n  RAISE WARNING");
+    expect(readFileSync("server/init-database.ts", "utf8")).toMatch(/tgname IN \('trg_fuel_records_validated_lock', 'trg_fuel_records_truncate_lock'\)/);
     expect(sql).not.toMatch(/\bDROP\b/);
     expect(sql).toContain("ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked'");
     expect(sql).not.toMatch(/\bUPDATE fuel_records|\bDELETE FROM|\bINSERT |\bALTER TABLE/);
@@ -51,5 +56,7 @@ describe("pleins validés verrouillés : init-database et migration jumelle", ()
     );
     expect(sql).toContain("current_setting('fleetos.allow_money_override', true) = 'on'");
     expect(sql).toContain("char_length(NEW.cancellation_reason) > 500");
+    // mission_id vers NULL : seulement par l'action de clé étrangère (UPDATE lancé depuis un trigger).
+    expect(sql).toContain("(NEW.mission_id IS NOT NULL OR pg_trigger_depth() <= 1)");
   });
 });
