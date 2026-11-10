@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { clientLogger } from "@/lib/logger";
 import {
   CACHE_MAX_AGE_MS,
   LEGACY_RECORD_KEYS,
@@ -194,6 +195,59 @@ describe("cloison entre deux comptes sur le même appareil", () => {
     // Le compte 22 ne peut pas lire la file de 11 (contrôle du userId).
     expect(await scope.readQueue(22)).toEqual([]);
     expect((await scope.loadCache(22)).length).toBe(1);
+  });
+
+  it("changement de compte (règle S1) : la file de l'ancien compte est détruite, la trace donne le nombre et les types, aucun contenu", async () => {
+    const warn = vi.spyOn(clientLogger, "warn").mockImplementation(() => {});
+    try {
+      const { kv } = memoryKv();
+      const scope = createOfflineScope(kv);
+      await scope.writeQueue(
+        11,
+        [
+          { id: "a", type: "fuel_entry", payload: { secret: "contenu-sensible", email: "x@y.z" } },
+          { id: "b", type: "fuel_entry", payload: { n: 2 } },
+          { id: "c", type: "work_order_note", payload: { note: "texte" } },
+        ],
+        scope.epochOf(11),
+      );
+      await scope.saveCache(22, [myWorkOrders({ id: 70, vehicleId: 15 })]);
+
+      await scope.purgeOthers(22, { dropQueues: true });
+
+      expect(await scope.readQueue(11)).toEqual([]);
+      expect((await scope.loadCache(22)).length).toBe(1);
+      const call = warn.mock.calls.find(([message]) => String(message).includes("changement de compte"));
+      expect(call).toBeDefined();
+      expect(call![1]).toEqual({ lost: 3, types: { fuel_entry: 2, work_order_note: 1 } });
+      const traced = JSON.stringify(warn.mock.calls);
+      expect(traced).not.toContain("contenu-sensible");
+      expect(traced).not.toContain("x@y.z");
+      expect(traced).not.toContain("11");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("déconnexion avec dropOtherQueues : la file de tous les comptes est détruite (S1)", async () => {
+    const { kv } = memoryKv();
+    const scope = createOfflineScope(kv);
+    await scope.writeQueue(11, [{ id: "a" }], scope.epochOf(11));
+    await scope.writeQueue(22, [{ id: "c" }], scope.epochOf(22));
+
+    await scope.purgeAll(11, { dropOtherQueues: true });
+
+    expect(await scope.readQueue(11)).toEqual([]);
+    expect(await scope.readQueue(22)).toEqual([]);
+  });
+
+  it("queuedCount compte les envois du compte sans toucher aux autres", async () => {
+    const { kv } = memoryKv();
+    const scope = createOfflineScope(kv);
+    await scope.writeQueue(11, [{ id: "a" }, { id: "b" }], scope.epochOf(11));
+    await scope.writeQueue(22, [{ id: "c" }], scope.epochOf(22));
+    expect(await scope.queuedCount(11)).toBe(2);
+    expect(await scope.queuedCount(22)).toBe(1);
   });
 
   it("déconnexion : file du compte sortant détruite et comptée, file des autres comptes gardée", async () => {
