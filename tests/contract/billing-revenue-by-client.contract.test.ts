@@ -7,6 +7,7 @@ import { CLIENT_BILLING_STATS_ROLES } from "../../shared/constants/roles";
 import { leakText } from "../support/api-error";
 import { startContractSession } from "../support/contract-session";
 import { createTestClient, createTestClientInvoice, type TestUserRole } from "../support/factories";
+import { deleteClientInvoicesWhere } from "../support/money-override";
 
 /**
  * `GET /api/billing/revenue/by-client` : chiffre d'affaires HT réel par client.
@@ -38,7 +39,7 @@ beforeAll(async () => {
 }, 180000);
 
 afterAll(async () => {
-  if (invoiceIds.length) await db.delete(clientInvoices).where(inArray(clientInvoices.id, invoiceIds));
+  if (invoiceIds.length) await deleteClientInvoicesWhere(inArray(clientInvoices.id, invoiceIds));
   await session.stop();
 });
 

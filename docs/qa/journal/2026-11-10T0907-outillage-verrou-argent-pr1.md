@@ -1,0 +1,6 @@
+## Verrou d'argent, PR1 : outillage sans changement de comportement
+
+**Quoi** : `MONEY_LOCK_MESSAGES` et `moneyLockMessageOf` (`server/lib/pg-errors.ts`) ; `toHttpError` renvoie 409 et le message lisible pour un refus de verrou (erreur pg brute, ou `AppError` >= 500 dont la `cause` en est un) ; `withMoneyOverride(tx, motif)` (`server/lib/money-override.ts`) ; helpers de suppression `tests/support/money-override.ts` ; tous les DELETE directs de `client_invoices` et `fuel_records` dans `tests/`, `e2e/` et `scripts/` y passent ; garde `tests/unit/server/money-override-hygiene.test.ts` (réglage interdit dans `server/api/**` et `server/routes.ts`).
+**Comment** : test unitaire `money-lock-error.test.ts` écrit d'abord : 6 échecs sur 14 (réponse 500 au lieu de 409), puis correctif de `toHttpError`. Migration des DELETE par transformation mécanique de `db.delete(t).where(x)` en `deleteXWhere(x)`.
+**Pourquoi** : les triggers des PR3 et PR4 refuseront UPDATE et DELETE sur un plein validé ou une facture émise. Sans cette PR, tout nettoyage de test échouerait à leur arrivée. Tant que les triggers n'existent pas, le réglage est sans effet.
+**Preuve** : `node node_modules/vitest/vitest.mjs run --project unit tests/unit/server/money-lock-error.test.ts tests/unit/server/money-override-hygiene.test.ts`.

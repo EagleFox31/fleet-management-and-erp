@@ -8,6 +8,7 @@ import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestClient, createTestUser, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
 import { leakText } from "../support/api-error";
+import { deleteClientInvoicesWhere } from "../support/money-override";
 
 /**
  * Niveau C, facturation d'une mission (`POST /api/billing/invoices/generate`).
@@ -85,7 +86,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (missionIds.length > 0) {
-    await db.delete(clientInvoices).where(inArray(clientInvoices.missionId, missionIds));
+    await deleteClientInvoicesWhere(inArray(clientInvoices.missionId, missionIds));
     await db.delete(missions).where(inArray(missions.id, missionIds));
   }
   await cleanupCreated(ids);

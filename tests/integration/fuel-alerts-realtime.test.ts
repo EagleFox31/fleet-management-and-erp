@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { pool } from "../../server/db";
 import { uniqueTestToken } from "../support/ids";
+import { deleteFuelRecordsByVehiclesRaw } from "../support/money-override";
 
 /**
  * Réserve 5 de #287 : une alerte créée par un trigger carburant produit une notification
@@ -14,7 +15,7 @@ afterAll(async () => {
   if (created.users.length) await pool.query(`DELETE FROM alerts WHERE user_id = ANY($1)`, [created.users]);
   if (created.vehicles.length) {
     await pool.query(`DELETE FROM alerts WHERE link = ANY($1)`, [created.vehicles.map((id) => `/vehicles/${id}`)]);
-    await pool.query(`DELETE FROM fuel_records WHERE vehicle_id = ANY($1)`, [created.vehicles]);
+    await deleteFuelRecordsByVehiclesRaw(pool, created.vehicles);
     await pool.query(`DELETE FROM vehicles WHERE id = ANY($1)`, [created.vehicles]);
   }
   if (created.users.length) await pool.query(`DELETE FROM users WHERE id = ANY($1)`, [created.users]);

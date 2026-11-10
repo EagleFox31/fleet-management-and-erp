@@ -8,6 +8,7 @@ import { getContractApp } from "../support/app";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestUser, createTestVehicle, TEST_USER_PASSWORD, type TestUserRole } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
+import { deleteFuelRecordsWhere } from "../support/money-override";
 
 /**
  * Niveau C, cloison client sur les lectures pneus et lectures internes (lot A4, 3 novembre 2026).
@@ -156,7 +157,7 @@ beforeAll(async () => {
 }, 60000);
 
 afterAll(async () => {
-  if (fuelIds.length > 0) await db.delete(fuelRecords).where(inArray(fuelRecords.id, fuelIds));
+  if (fuelIds.length > 0) await deleteFuelRecordsWhere(inArray(fuelRecords.id, fuelIds));
   if (rotationDetailIds.length > 0) await db.delete(tireRotationDetails).where(inArray(tireRotationDetails.id, rotationDetailIds));
   if (rotationIds.length > 0) await db.delete(tireRotations).where(inArray(tireRotations.id, rotationIds));
   if (inspectionIds.length > 0) await db.delete(tireInspections).where(inArray(tireInspections.id, inspectionIds));

@@ -11,6 +11,7 @@ import { storage } from "../../server/storage";
 import { createTestSupplier, createTestSupplierInvoice, createTestVehicle } from "../support/factories";
 import { startContractSession } from "../support/contract-session";
 import { uniqueTestToken } from "../support/ids";
+import { deleteFuelRecordsWhere } from "../support/money-override";
 
 /**
  * Lots T2 et T3 : écritures de trésorerie posées par la carte carburant (recharge, plein) et par
@@ -116,8 +117,8 @@ afterAll(async () => {
     ownedAccountIds.length ? inArray(treasuryEntries.accountId, ownedAccountIds) : undefined,
   ].filter((c): c is NonNullable<typeof c> => Boolean(c));
   if (conditions.length) await db.delete(treasuryEntries).where(or(...conditions));
-  if (fuelIds.length) await db.delete(fuelRecords).where(inArray(fuelRecords.id, fuelIds));
-  await db.delete(fuelRecords).where(sql`${fuelRecords.date} >= '2037-01-01' AND ${fuelRecords.date} < '2038-01-01'`);
+  if (fuelIds.length) await deleteFuelRecordsWhere(inArray(fuelRecords.id, fuelIds));
+  await deleteFuelRecordsWhere(sql`${fuelRecords.date} >= '2037-01-01' AND ${fuelRecords.date} < '2038-01-01'`);
   for (const name of fs.existsSync(PROOF_DIR) ? fs.readdirSync(PROOF_DIR).filter((n) => n.startsWith(PROOF_NAME)) : []) {
     fs.unlinkSync(path.join(PROOF_DIR, name));
   }

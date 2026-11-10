@@ -53,3 +53,21 @@ export function isLastActiveAdminViolation(error: unknown): boolean {
 export function isAdminGuardDbRefusal(error: unknown): boolean {
   return isLastActiveAdminViolation(error) || isTransactionConflict(error);
 }
+
+/**
+ * Verrous d'argent posés par des triggers (`check_violation`, contrainte nommée) : un plein
+ * validé, une facture émise ou un avoir émis ne se modifient plus. Le message est celui
+ * montré à l'utilisateur.
+ */
+export const MONEY_LOCK_MESSAGES: Readonly<Record<string, string>> = {
+  fuel_records_validated_locked: "Ce plein est validé : il ne se modifie plus. Annulez-le avec un motif, puis saisissez-en un nouveau.",
+  client_invoices_issued_locked: "Cette facture est émise : ses montants ne se modifient plus. Établissez un avoir.",
+  client_credit_notes_immutable: "Un avoir émis ne se modifie pas.",
+};
+
+/** Message lisible si l'erreur (ou sa `cause`, sur 3 niveaux) est un refus de verrou d'argent. */
+export function moneyLockMessageOf(error: unknown): string | undefined {
+  if (!isCheckViolation(error)) return undefined;
+  const constraint = pgConstraintOf(error);
+  return constraint && Object.hasOwn(MONEY_LOCK_MESSAGES, constraint) ? MONEY_LOCK_MESSAGES[constraint] : undefined;
+}
