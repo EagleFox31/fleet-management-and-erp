@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { ZodError } from "zod";
 import { AppError } from "../lib/app-error";
 import { withLogContext } from "../lib/error-log-context";
 import { broadcastFuelRecordChanged } from "../lib/fuel-record-realtime";
@@ -8,6 +9,7 @@ import { ownerScopeOf } from "../lib/client-scope";
 import { parseQueryId, parseRouteId } from "../lib/route-id";
 import { assertVehicleSubresourcesReadable } from "../lib/vehicle-subresource-guard";
 import { FUEL_CARD_MANAGER_ROLES } from "@shared/constants/roles";
+import { fuelRecordCancelSchema } from "@shared/constants/fuel-record-cancel";
 import type { FuelRecord } from "@shared/schema";
 import { authorize, isAnyUser } from "../middleware/auth";
 import { FuelService } from "../services/fuel-service";
@@ -157,6 +159,29 @@ router.delete("/fuel-records/:id", authorize([...FUEL_CARD_MANAGER_ROLES, "works
   } catch (err) {
     if (err instanceof AppError) return next(err);
     return next(withLogContext(new AppError(500, "Erreur serveur", { cause: err }), { event: "Delete fuel record error" }));
+  }
+});
+
+/**
+ * Annulation tracée d'un plein validé (correction : annuler, puis saisir un nouveau plein). Mêmes
+ * rôles que la suppression ; le service tranche sous verrou (403 selon que le plein a mouvementé
+ * la carte, 409 budget soldé, rejeu du même motif = 200 sans écriture).
+ */
+router.post("/fuel-records/:id/cancel", authorize([...FUEL_CARD_MANAGER_ROLES, "workshop_manager"]), async (req, res, next) => {
+  try {
+    const id = idParam(req.params.id, "Identifiant d'enregistrement de carburant");
+    const { reason } = fuelRecordCancelSchema.parse(req.body ?? {});
+    const user = req.user!;
+    const result = await fuelService.cancelFuelRecord(id, { id: user.id, role: user.role }, reason);
+    if (!result) throw new AppError(404, "Enregistrement de carburant non trouvé");
+    if (!result.replayed) {
+      log.info({ requestId: req.requestId, fuelRecordId: id, userId: user.id }, "Plein carburant annulé");
+      broadcastFuelRecordChanged(id, req.requestId);
+    }
+    return res.status(200).json(result.record);
+  } catch (err) {
+    if (err instanceof AppError || err instanceof ZodError) return next(err);
+    return next(withLogContext(new AppError(500, "Erreur serveur", { cause: err }), { event: "Cancel fuel record error" }));
   }
 });
 
