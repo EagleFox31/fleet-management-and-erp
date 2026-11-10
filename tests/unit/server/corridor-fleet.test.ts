@@ -21,6 +21,7 @@ describe("carte corridors : aucune donnée inventée (GPS-FE-4)", () => {
     const withMission = buildCorridorVehicle(vehicle(1), {
       missionId: 9,
       missionStatus: "in_progress",
+      assignmentStatus: "in_progress",
       deliveryAddress: "Garoua",
     });
     for (const row of [buildCorridorVehicle(vehicle(2), undefined), withMission]) {
@@ -28,17 +29,20 @@ describe("carte corridors : aucune donnée inventée (GPS-FE-4)", () => {
       expect(row).not.toHaveProperty("currentLat");
       expect(row).not.toHaveProperty("currentLng");
       expect(row.progressPercent).toBeUndefined();
-      expect(row.speedKmh).toBeUndefined();
+      expect("speedKmh" in row).toBe(false);
     }
   });
 
   it("« en transit » seulement pour une mission in_progress", () => {
-    expect(deriveTransitStatus("operational", "in_progress")).toBe("in_transit");
+    expect(deriveTransitStatus("operational", "in_progress", "in_progress")).toBe("in_transit");
+    expect(deriveTransitStatus("operational", "in_progress", "accepted")).toBe("in_transit");
+    expect(deriveTransitStatus("operational", "in_progress", "pending")).toBe("loading");
+    expect(deriveTransitStatus("operational", "in_progress")).toBe("loading");
     expect(deriveTransitStatus("operational", "assigned")).toBe("loading");
     expect(deriveTransitStatus("operational", "planned")).toBe("loading");
     expect(deriveTransitStatus("operational", "delivered")).toBe("stopped");
     expect(deriveTransitStatus("operational", undefined)).toBe("stopped");
-    expect(deriveTransitStatus("maintenance", "in_progress")).toBe("alert");
+    expect(deriveTransitStatus("maintenance", "in_progress", "in_progress")).toBe("alert");
   });
 
   it("origine, destination et consommation ne sont pas inventées", () => {

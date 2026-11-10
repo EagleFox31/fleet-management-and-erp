@@ -28,6 +28,7 @@ export type CorridorActiveMission = {
   missionId: number;
   orderNumber?: string | null;
   missionStatus: string;
+  assignmentStatus?: string | null;
   pickupAddress?: string | null;
   deliveryAddress?: string | null;
   weight?: string | number | null;
@@ -49,9 +50,13 @@ export type CorridorRealPosition = {
 export function deriveTransitStatus(
   vehicleStatus: string,
   missionStatus: string | undefined,
+  assignmentStatus?: string | null,
 ): TransitStatus {
   if (vehicleStatus === "out_of_service" || vehicleStatus === "maintenance") return "alert";
-  if (missionStatus === "in_progress") return "in_transit";
+  if (missionStatus === "in_progress") {
+    // Le chauffeur doit avoir accepté : une affectation encore en attente n'a pas pris la route.
+    return assignmentStatus === "accepted" || assignmentStatus === "in_progress" ? "in_transit" : "loading";
+  }
   if (missionStatus === "assigned" || missionStatus === "planned") return "loading";
   return "stopped";
 }
@@ -66,7 +71,7 @@ export function buildCorridorVehicle(
   active: CorridorActiveMission | undefined,
   position?: CorridorRealPosition,
 ): LiveCorridorVehicle {
-  const transitStatus = deriveTransitStatus(vehicle.status, active?.missionStatus);
+  const transitStatus = deriveTransitStatus(vehicle.status, active?.missionStatus, active?.assignmentStatus);
   const corridor = active?.deliveryAddress
     ? findCorridorByDestination(active.deliveryAddress)
     : undefined;

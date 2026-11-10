@@ -255,6 +255,23 @@ describe("GPS-FE-4 : la flotte des corridors n'invente ni position ni statut", {
       .insert(assignments)
       .values({ missionId: mission.id, vehicleId: rolling.id, status: "in_progress" } as any)
       .returning({ id: assignments.id });
+    // Même véhicule : mission planifiée, affectation annulée sur une autre en cours, mission livrée.
+    const extra = await db
+      .insert(missions)
+      .values([
+        { orderNumber: uniqueTestToken("GPS4P"), pickupAddress: "TEST A", deliveryAddress: "TEST B", status: "planned" },
+        { orderNumber: uniqueTestToken("GPS4C"), pickupAddress: "TEST A", deliveryAddress: "TEST B", status: "in_progress" },
+        { orderNumber: uniqueTestToken("GPS4D"), pickupAddress: "TEST A", deliveryAddress: "TEST B", status: "delivered" },
+      ] as any)
+      .returning({ id: missions.id });
+    const extraAssignments = await db
+      .insert(assignments)
+      .values([
+        { missionId: extra[0].id, vehicleId: rolling.id, status: "accepted" },
+        { missionId: extra[1].id, vehicleId: rolling.id, status: "cancelled" },
+        { missionId: extra[2].id, vehicleId: rolling.id, status: "in_progress" },
+      ] as any)
+      .returning({ id: assignments.id });
 
     try {
       const fleet = (await dashboard()).corridorFleet as Array<Record<string, unknown>>;
@@ -262,6 +279,7 @@ describe("GPS-FE-4 : la flotte des corridors n'invente ni position ni statut", {
 
       expect(rowOf(idle.id)).toMatchObject({ transitStatus: "stopped", positionSource: "none" });
       expect(rowOf(rolling.id)).toMatchObject({ transitStatus: "in_transit", positionSource: "none", missionId: mission.id });
+      // Planifiée moins avancée, annulée et livrée ignorées : la mission en cours l'emporte.
       // Aucune position réelle n'existe encore : aucun véhicule ne porte de coordonnée.
       for (const row of fleet) {
         expect(row.positionSource).toBe("none");
@@ -269,8 +287,8 @@ describe("GPS-FE-4 : la flotte des corridors n'invente ni position ni statut", {
         expect(row.currentLng).toBeUndefined();
       }
     } finally {
-      await db.delete(assignments).where(eq(assignments.id, assignment.id));
-      await db.delete(missions).where(eq(missions.id, mission.id));
+      await db.delete(assignments).where(inArray(assignments.id, [assignment.id, ...extraAssignments.map((a) => a.id)]));
+      await db.delete(missions).where(inArray(missions.id, [mission.id, ...extra.map((m) => m.id)]));
     }
   });
 });

@@ -39,6 +39,7 @@ import {
   buildManagementVehicleObsolescenceItem,
   type ManagementVehicleObsolescence,
 } from "@shared/constants/management-vehicle-obsolescence";
+import { ACTIVE_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
 import { type LiveCorridorVehicle } from "@shared/constants/cemac-corridors";
 import { buildCorridorVehicle } from "./corridor-fleet";
 import {
@@ -918,13 +919,12 @@ export class ManagementDashboardService {
         missionId: missions.id,
         orderNumber: missions.orderNumber,
         missionStatus: missions.status,
-        currentStep: missions.currentStep,
+        assignmentStatus: assignments.status,
         pickupAddress: missions.pickupAddress,
         deliveryAddress: missions.deliveryAddress,
         cargo: missions.cargo,
         weight: missions.weight,
         actualDistance: missions.actualDistance,
-        estimatedDistance: missions.estimatedDistance,
         actualFuelQuantity: missions.actualFuelQuantity,
         clientName: clients.name,
         driverFirstName: drivers.firstName,
@@ -937,8 +937,8 @@ export class ManagementDashboardService {
       .where(
         and(
           inArray(missions.status, ["in_progress", "assigned", "planned"]),
-          // Une affectation annulée, refusée ou terminée ne place pas le véhicule en mission.
-          notInArray(assignments.status, ["cancelled", "rejected", "completed"]),
+          // Seule une affectation active place le véhicule en mission (annulée, refusée, terminée : non).
+          inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES]),
         ),
       );
 
@@ -948,7 +948,10 @@ export class ManagementDashboardService {
     for (const item of activeAssignments) {
       if (!item.vehicleId) continue;
       const known = assignmentMap.get(item.vehicleId);
-      if (!known || (missionRank[item.missionStatus] ?? 9) < (missionRank[known.missionStatus] ?? 9)) {
+      const rank = missionRank[item.missionStatus] ?? 9;
+      const knownRank = missionRank[known?.missionStatus ?? ""] ?? 9;
+      // À égalité de rang, la mission la plus récente (id le plus grand) : résultat déterministe.
+      if (!known || rank < knownRank || (rank === knownRank && item.missionId > known.missionId)) {
         assignmentMap.set(item.vehicleId, item);
       }
     }

@@ -13,6 +13,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
 import { CardShell } from "@/components/design-system";
+import { escapeHtml } from "@/lib/escape-html";
 import {
   CEMAC_CORRIDORS,
   LOGISTICS_HUBS,
@@ -198,16 +199,16 @@ export function ExecutiveCorridorMap({ fleet, isLoading }: ExecutiveCorridorMapP
       const popupContent = `
         <div style="font-family: sans-serif; min-width: 210px; padding: 4px;">
           <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #e2e8f0; padding-bottom:4px; margin-bottom:6px;">
-            <strong style="color:#059669; font-size:12px;">${vehicle.registrationNumber}</strong>
+            <strong style="color:#059669; font-size:12px;">${escapeHtml(vehicle.registrationNumber)}</strong>
             <span style="background:#f1f5f9; color:#475569; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:600;">
-              ${vehicle.brand} ${vehicle.model}
+              ${escapeHtml(vehicle.brand)} ${escapeHtml(vehicle.model)}
             </span>
           </div>
           <div style="font-size:11px; color:#334155; line-height:1.5;">
-            <div><strong>Chauffeur:</strong> ${vehicle.driverName || "Non assigné"}</div>
-            ${vehicle.clientName ? `<div><strong>Client:</strong> ${vehicle.clientName}</div>` : ""}
-            <div><strong>Trajet:</strong> ${vehicle.origin ?? "—"} → <span style="color:#047857; font-weight:bold;">${vehicle.destination ?? "—"}</span></div>
-            ${vehicle.cargoLabel ? `<div><strong>Fret:</strong> ${vehicle.cargoLabel}</div>` : ""}
+            <div><strong>Chauffeur:</strong> ${escapeHtml(vehicle.driverName || "Non assigné")}</div>
+            ${vehicle.clientName ? `<div><strong>Client:</strong> ${escapeHtml(vehicle.clientName)}</div>` : ""}
+            <div><strong>Trajet:</strong> ${escapeHtml(vehicle.origin ?? "—")} → <span style="color:#047857; font-weight:bold;">${escapeHtml(vehicle.destination ?? "—")}</span></div>
+            ${vehicle.cargoLabel ? `<div><strong>Fret:</strong> ${escapeHtml(vehicle.cargoLabel)}</div>` : ""}
             ${vehicle.fuelConsumptionAvg !== undefined ? `<div style="margin-top:4px; padding-top:4px; border-top:1px solid #f1f5f9; font-weight:bold; color:#0f172a;">Conso: ${vehicle.fuelConsumptionAvg} L/100 km</div>` : ""}
           </div>
         </div>
