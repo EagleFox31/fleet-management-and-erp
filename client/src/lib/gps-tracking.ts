@@ -175,6 +175,24 @@ export function gpsPurgeEpoch(): number {
 }
 
 /**
+ * Changement de compte (S1) : l'époque avance, donc plus aucun envoi ni écriture lancés pour l'ancien
+ * compte ne part sous la session du nouveau, et les tampons de tout autre compte que `userId` sont
+ * détruits sans délai. Ne lève jamais.
+ */
+export function purgeGpsBuffersOfOthers(userId: number, storage?: KeyStorage | null): number {
+  purgeEpoch += 1;
+  try {
+    const target = storage === undefined ? (typeof window === "undefined" ? null : window.localStorage) : storage;
+    if (!target) return 0;
+    const keys = foreignBufferKeys(target, userId);
+    for (const key of keys) target.removeItem(key);
+    return keys.length;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Déconnexion : supprime les tampons de tous les comptes de ce navigateur (cloison #56) et invalide
  * toute écriture en cours. Ne lève jamais.
  */

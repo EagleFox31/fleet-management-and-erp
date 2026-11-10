@@ -1,6 +1,7 @@
 import { useState, useEffect, createContext, useContext, useRef, type ReactNode } from "react";
-import { login as apiLogin, logout as apiLogout, resumeSession, User, LoginCredentials } from "@/lib/auth";
-import { nextSessionRetryDelay } from "@/lib/session-check";
+import { login as apiLogin, logout as apiLogout, resumeSession, expireOfflineGrant, User, LoginCredentials } from "@/lib/auth";
+import type { OfflineGrantInfo } from "@/lib/session-check";
+import { createAuthBootstrap } from "@/lib/auth-bootstrap";
 import { Loader2, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { loginFailureOf } from "@/lib/lockout-message";
@@ -11,6 +12,11 @@ interface AuthContextValue {
   isLoading: boolean;
   isAuthenticating: boolean;
   isAuthenticated: boolean;
+  /**
+   * Lecture hors ligne rouverte depuis le marqueur quand `/api/auth/me` est injoignable. `user` reste alors
+   * `null` : aucun faux utilisateur, aucun rôle. Effacé dès que `/me` répond (200 ou 401) ou à l'échéance.
+   */
+  offlineGrant: OfflineGrantInfo | null;
   /** Message de la dernière connexion refusée par verrouillage (429), sinon null. */
   loginLockMessage: string | null;
   login: (credentials: LoginCredentials) => Promise<boolean>;
@@ -22,6 +28,7 @@ export const AuthContext = createContext<AuthContextValue>({
   isLoading: true,
   isAuthenticating: false,
   isAuthenticated: false,
+  offlineGrant: null,
   loginLockMessage: null,
   login: async () => false,
   logout: async () => {},
@@ -32,6 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true); // bootstrap auth check
   const [isAuthenticating, setIsAuthenticating] = useState(false); // login/logout actions
   const [loginLockMessage, setLoginLockMessage] = useState<string | null>(null);
+  const [offlineGrant, setOfflineGrant] = useState<OfflineGrantInfo | null>(null);
   const { toast } = useToast();
   const authCheckVersionRef = useRef(0);
   const mountedRef = useRef(true);
@@ -47,43 +55,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // de traiter la lenteur comme une déconnexion. Seul un 401 renvoie vers la connexion.
   const [sessionUnreachable, setSessionUnreachable] = useState(false);
   const retryNowRef = useRef<(() => void) | null>(null);
+  const disposeBootstrapRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const checkVersion = ++authCheckVersionRef.current;
     const isStale = () => !mountedRef.current || checkVersion !== authCheckVersionRef.current;
 
-    const checkUser = async () => {
-      setIsLoading(true);
-      for (let attempt = 1; ; attempt++) {
-        // Seul chemin d'amorçage : déconnexion différée, puis /me, puis magasin hors ligne.
-        const result = await resumeSession();
-        if (isStale()) return;
-        if (result.status !== "unreachable") {
-          setUser(result.status === "authenticated" ? result.user : null);
-          setSessionUnreachable(false);
-          setIsLoading(false);
-          return;
+    // Seul chemin d'amorçage : déconnexion différée, puis /me, puis magasin hors ligne (voir auth-bootstrap.ts).
+    const bootstrap = createAuthBootstrap({
+      resumeSession,
+      expireOfflineGrant: async (grant) => {
+        try {
+          await expireOfflineGrant(grant);
+        } catch (err) {
+          clientLogger.warn("Coupure de la lecture hors ligne en échec", { err });
         }
-        clientLogger.warn("Session check unreachable", { attempt });
-        setSessionUnreachable(true);
-        await new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, nextSessionRetryDelay(attempt));
-          retryNowRef.current = () => {
-            clearTimeout(timer);
-            resolve();
-          };
-        });
-        retryNowRef.current = null;
-        if (isStale()) return;
-      }
-    };
-
-    checkUser();
+      },
+      now: () => Date.now(),
+      isStale,
+      onState: (next) => {
+        setUser(next.user);
+        setSessionUnreachable(next.sessionUnreachable);
+        setOfflineGrant(next.offlineGrant);
+        setIsLoading(next.isLoading);
+      },
+      onUnreachable: (attempt) => clientLogger.warn("Session check unreachable", { attempt }),
+      onExpired: () => clientLogger.warn("Lecture hors ligne arrivée à échéance"),
+    });
+    retryNowRef.current = () => bootstrap.retryNow();
+    disposeBootstrapRef.current = () => bootstrap.dispose();
+    setIsLoading(true);
+    void bootstrap.start();
+    return () => bootstrap.dispose();
   }, []);
 
   const login = async (credentials: LoginCredentials): Promise<boolean> => {
     authCheckVersionRef.current += 1; // invalidate stale bootstrap check callbacks
     setSessionUnreachable(false);
+    setOfflineGrant(null);
+    disposeBootstrapRef.current?.();
     retryNowRef.current?.();
     try {
       if (isLoading) {
@@ -125,6 +135,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async (): Promise<void> => {
     authCheckVersionRef.current += 1;
     setSessionUnreachable(false);
+    setOfflineGrant(null);
+    disposeBootstrapRef.current?.();
     retryNowRef.current?.();
     try {
       setIsAuthenticating(true);
@@ -157,6 +169,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoading,
     isAuthenticating,
     isAuthenticated: !!user,
+    offlineGrant,
     loginLockMessage,
     login,
     logout,
