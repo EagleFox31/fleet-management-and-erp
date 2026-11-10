@@ -41,6 +41,7 @@ import ManagementReportsPage from "@/pages/management/reports";
 import ManagementCorridorMapPage from "@/pages/management/corridor-map";
 import ManagementTeamPage from "@/pages/management/team";
 import ClientDashboard from "@/pages/client/dashboard";
+import ViewerDashboard from "@/pages/viewer/dashboard";
 
 import VehiclesIndex from "@/pages/vehicles/index";
 import VehicleDetails from "@/pages/vehicles/[id]";
@@ -234,6 +235,8 @@ function SmartDashboardRoute() {
         return <WarehouseDashboard />;
       case "management":
         return <ManagementDashboard />;
+      case "viewer":
+        return <ViewerDashboard />;
       case "client":
         return <ClientDashboard />;
       default:

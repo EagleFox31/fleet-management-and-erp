@@ -64,6 +64,7 @@ interface User {
     | "technician"
     | "secretary"
     | "accountant"
+    | "viewer"
     | "logistics"
     | "warehouse"
     | "client"
@@ -111,6 +112,7 @@ const roleOrder: UsersOverviewRole[] = [
   "technician",
   "secretary",
   "accountant",
+  "viewer",
   "logistics",
   "warehouse",
   "client",
@@ -124,6 +126,7 @@ const ROLE_COLORS: Record<string, string> = {
   technician: "bg-purple-50 text-purple-700 border border-purple-200",
   secretary: "bg-orange-50 text-orange-700 border border-orange-200",
   accountant: "bg-primary/10 text-primary-text border border-primary/30",
+  viewer: "bg-muted text-muted-foreground border border-border",
   logistics: "bg-success/10 text-success border border-success/30",
   warehouse: "bg-warning/10 text-warning-text border border-warning/30",
   client: "bg-gray-100 text-gray-600 border border-gray-200",

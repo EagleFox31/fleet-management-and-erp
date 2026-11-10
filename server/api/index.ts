@@ -96,6 +96,7 @@ import { auditWrites } from "../middleware/audit-writes";
 import { AUDIT_CONFIG, CDC_AUDIT_CONFIG } from "../lib/audit-config";
 import { idempotencyGuard } from "../middleware/idempotency-guard";
 import { retiredVehicleWriteGuard } from "../middleware/retired-vehicle-write-guard";
+import { viewerReadOnlyGuard } from "../middleware/viewer-read-only-guard";
 import { requireFeature } from "../lib/feature-flags";
 import { DbLockoutStore, PASSWORD_KEY_PREFIX, PIN_KEY_PREFIX } from "../services/login-lockout-db-store";
 
@@ -116,6 +117,10 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
   // Apply session middleware FIRST, before any routes are mounted
   // This ensures req.session.userId is available in all sub-routes
   apiRouter.use(sessionMiddleware);
+
+  // Lecteur (viewer) : toute écriture refusée en 403, avant tout routeur et avant registerRoutes
+  // (couvre routes.ts). Allowlist : VIEWER_WRITE_ALLOWED (shared/constants/roles.ts).
+  apiRouter.use(viewerReadOnlyGuard);
 
   // Coûts d'OT : retirés des lectures GET /api/work-orders/* pour les rôles hors
   // WORK_ORDER_COST_READ_ROLES. Monté avant tout routeur (vehicle-history, routes.ts compris).
