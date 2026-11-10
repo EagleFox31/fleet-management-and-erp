@@ -72,6 +72,8 @@ export const DEMO_MISSION = {
   clientName: "Brasseries du Littoral (démo)",
   orderPrefix: "DEMO-MIS-",
   vehicle: "DEMO-LOG-001",
+  /** Remorque attelable (type « remorque », papiers valides) : choisie avec le camion et le chauffeur. */
+  trailer: "DEMO-REM-001",
   driverEmployee: "DEMO-EMP-001",
   fuelStation: "DEMO-APPROVISIONNEMENT",
 } as const;
@@ -113,13 +115,34 @@ async function ensureUser(account: { username: string; password: string; name: s
   return row.id;
 }
 
-async function ensureVehicle(registration: string, model: string, ownerId: number | null): Promise<number> {
+async function ensureVehicle(
+  registration: string,
+  model: string,
+  ownerId: number | null,
+  options: { vehicleType?: "remorque" | "semi_remorque"; brand?: string } = {},
+): Promise<number> {
   await db
     .insert(vehicles)
-    .values({ registrationNumber: registration, brand: "Renault", model, year: 2021, mileage: 120000, lastMileage: 120000, ownerId })
+    .values({
+      registrationNumber: registration,
+      brand: options.brand ?? "Renault",
+      model,
+      year: 2021,
+      mileage: 120000,
+      lastMileage: 120000,
+      ownerId,
+      ...(options.vehicleType ? { vehicleType: options.vehicleType } : {}),
+    })
     .onConflictDoNothing();
-  const [row] = await db.select({ id: vehicles.id, ownerId: vehicles.ownerId }).from(vehicles).where(eq(vehicles.registrationNumber, registration));
+  const [row] = await db
+    .select({ id: vehicles.id, ownerId: vehicles.ownerId, vehicleType: vehicles.vehicleType })
+    .from(vehicles)
+    .where(eq(vehicles.registrationNumber, registration));
   if (row.ownerId !== ownerId) await db.update(vehicles).set({ ownerId }).where(eq(vehicles.id, row.id));
+  // Type réconcilié à chaque passage : une remorque de démo redevenue « tracteur » ne serait plus attelable.
+  if (options.vehicleType && row.vehicleType !== options.vehicleType) {
+    await db.update(vehicles).set({ vehicleType: options.vehicleType }).where(eq(vehicles.id, row.id));
+  }
   return row.id;
 }
 
@@ -340,6 +363,8 @@ async function seedLogistics(): Promise<void> {
   await db.insert(clients).values({ name: DEMO_MISSION.clientName, paymentTerms: 30 }).onConflictDoNothing();
   const vehicleId = await ensureVehicle(DEMO_MISSION.vehicle, "Premium 450", null);
   await ensureValidPapers(vehicleId, DEMO_MISSION.vehicle);
+  const trailerId = await ensureVehicle(DEMO_MISSION.trailer, "Plateau 3 essieux", null, { vehicleType: "remorque", brand: "Trailor" });
+  await ensureValidPapers(trailerId, DEMO_MISSION.trailer);
   await db
     .insert(drivers)
     .values({ firstName: "Emmanuel", lastName: "Nkoulou", employeeNumber: DEMO_MISSION.driverEmployee, cpcStatus: "FORMÉ", cpcTrainingDate: isoDayFromNow(-30), licenseExpiry: "2099-12-31", isActive: true })

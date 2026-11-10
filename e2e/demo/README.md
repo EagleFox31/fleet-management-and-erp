@@ -21,3 +21,5 @@ Résidu connu : le justificatif téléversé par la démo du secrétariat reste 
 Parcours comptable (spec 11, compte `compta1`, mot de passe de démo du seed) : le serveur doit tourner avec `FEATURE_FLAGS=finance=on,pending-invoices=on`, sinon les tuiles « À encaisser » et « À facturer » du tableau de bord comptable restent indisponibles. Contre un serveur déjà lancé : `E2E_BASE_URL=http://127.0.0.1:<port> E2E_SKIP_ACCOUNT_CHECK=1`. La spec vérifie aussi que la comptable reçoit un 403 sur la création d'un ordre de travail, d'une fiche pièce, d'une mission et d'un plein.
 
 Parcours magasinier : pas de lien « Ordres de travail » dans son menu ; l'OT s'ouvre depuis la carte « en attente de pièces » de Demandes de pièces (repli par URL directe dans la spec 06).
+
+Parcours logisticien (spec 04) : la mission est affectée avec un camion, la remorque `DEMO-REM-001` (seed) et un chauffeur ; la spec vérifie `assignments.trailer_id` en base. `DEMO_MARKS_FILE=<fichier>` fait écrire à `mark()` des repères horodatés pour caler la voix off au montage.
