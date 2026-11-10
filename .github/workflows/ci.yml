@@ -77,6 +77,15 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npm test -- --reporter=dot
+      # Un test ne doit rien laisser dans l'arbre suivi (snapshot réécrit, fichier généré).
+      - name: Arbre propre après les tests
+        run: |
+          dirty="$(git status --porcelain)"
+          if [ -n "$dirty" ]; then
+            echo "::error::npm test a modifié l'arbre :"
+            echo "$dirty"
+            exit 1
+          fi
 
   integration:
     needs: impact

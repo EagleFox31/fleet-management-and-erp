@@ -9,11 +9,17 @@ const charger = async (nom: string) => import(/* @vite-ignore */ pathToFileURL(s
 
 const bash = (command: string) => ({ tool_name: "Bash", tool_input: { command } });
 
+/**
+ * Chaque test lance un processus node : 0,15 s seul, plus de 5 s (délai par défaut) quand la machine est
+ * chargée par d'autres passes de tests (10 novembre 2026). Même délai que les autres tests à processus enfant.
+ */
+const SPAWN = { timeout: 30_000 };
+
 function lancer(nom: string, entree: unknown) {
   return spawnSync("node", [script(nom)], { input: JSON.stringify(entree), encoding: "utf8" });
 }
 
-describe("garde-lecture-seule", () => {
+describe("garde-lecture-seule", SPAWN, () => {
   const refuses = [
     "git commit -m x",
     "git push origin main",
@@ -65,7 +71,7 @@ describe("garde-lecture-seule", () => {
   });
 });
 
-describe("garde-commit-propre", () => {
+describe("garde-commit-propre", SPAWN, () => {
   const refuses = [
     'git commit -m "fix\n\nCo-Authored-By: Someone <noreply@anthropic.com>"',
     'git commit -m "Generated with a tool"',
@@ -98,7 +104,7 @@ describe("garde-commit-propre", () => {
   });
 });
 
-describe("garde-journal", () => {
+describe("garde-journal", SPAWN, () => {
   const commit = (hash: string, fichiers: string[]) => ({ hash, sujet: `commit ${hash}`, fichiers });
 
   it("signale un commit de code sans entrée de journal", async () => {

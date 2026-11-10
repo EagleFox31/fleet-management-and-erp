@@ -87,7 +87,9 @@ describe("FUEL2 : statistiques de consommation d'un véhicule", { timeout: 60000
     const path = `/api/fuel-card/vehicle/${vehicle.id}/stats`;
     expect((await session.call("GET", path, { actor: null })).status).toBe(401);
     expect((await session.call("GET", path, { actor: "client" })).status).toBe(403);
-    expect((await session.call("GET", path, { actor: "driver" })).status).toBe(200);
+    // Montants de la carte : le chauffeur n'a aucun écran sur cette route (moindre donnée).
+    expect((await session.call("GET", path, { actor: "driver" })).status).toBe(403);
+    expect((await session.call("GET", path, { actor: "admin" })).status).toBe(200);
   });
 
   it("répond 400 à un identifiant illisible", async () => {

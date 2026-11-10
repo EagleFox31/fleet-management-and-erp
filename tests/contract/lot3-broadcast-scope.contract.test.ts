@@ -4,6 +4,7 @@ import { startContractActors } from "../support/contract-actors";
 import { createTestClient, createTestClientInvoice, createTestVehicle } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
 import { resolveRecipients, normalizeScope } from "../../server/lib/realtime-scope";
+import { STAFF_EXCEPT_DRIVER_ROLES } from "../../shared/constants/roles";
 
 /**
  * Cloison temps réel (AGENTS.md §11, lot 3) : un événement sur le véhicule, la facture ou la
@@ -89,12 +90,14 @@ describe("portée des événements : ni broadcast, ni client hors périmètre", 
     });
   });
 
-  it("client_created : personnel seul, aucun compte client", async () => {
+  it("client_created : personnel hors chauffeur, aucun compte client", async () => {
     const res = await session.call("POST", "/api/clients", { actor: "admin", body: { name: token, email: `${token}@client.test` } });
     expect(res.status).toBe(201);
     ids.clientIds.push(res.body.id);
     const flat = receivers("client_created").actors.flat();
-    expect(flat).toEqual(expect.arrayContaining(["admin", "staff", "driver"]));
+    const expected = (Object.keys(ACTORS) as Actor[]).filter((actor) => STAFF_EXCEPT_DRIVER_ROLES.includes(ACTORS[actor]));
+    expect([...flat].sort()).toEqual([...expected].sort());
+    expect(flat).not.toContain("driver");
     expect(flat).not.toContain("clientA");
     expect(flat).not.toContain("clientB");
   });

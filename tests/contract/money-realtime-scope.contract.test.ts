@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "../../server/db";
 import { inArray } from "drizzle-orm";
 import { fuelRecords, purchaseOrderLines, purchaseOrders } from "../../shared/schema";
-import { PROCUREMENT_ROLES, STAFF_ROLES } from "../../shared/constants/roles";
+import { PROCUREMENT_ROLES, STAFF_ROLES, TREASURY_FUEL_CARD_READ_ROLES } from "../../shared/constants/roles";
 import { normalizeScope, resolveRecipients } from "../../server/lib/realtime-scope";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { startContractActors } from "../support/contract-actors";
@@ -115,6 +115,7 @@ describe("portée des trames d'argent", { timeout: 120000 }, () => {
     if (typeof id === "number") fuelIds.push(id);
     const got = recipients("fuel_card_");
     expect(got).not.toContain("client");
-    expect(got.sort()).toEqual((STAFF_ROLES as readonly string[]).filter((r) => r in ACTORS).sort());
+    // Montants et soldes : lecteurs de la carte seulement (ni chauffeur, ni technicien, ni magasinier).
+    expect(got.sort()).toEqual((TREASURY_FUEL_CARD_READ_ROLES as readonly string[]).filter((r) => r in ACTORS).sort());
   });
 });

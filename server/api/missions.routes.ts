@@ -52,8 +52,10 @@ import { moduleLogger } from "../lib/logger";
 import { emitMissionEvent } from "../lib/mission-events";
 import {
   DOCUMENT_RENEWAL_VIEWER_ROLES,
+  MISSION_EVENT_ROLES,
   MISSION_MANAGER_ROLES,
   MISSION_STATUS_ROLES,
+  TREASURY_FUEL_CARD_READ_ROLES,
   canRoleSetMissionStatus,
 } from "@shared/constants/roles";
 import { withLogContext } from "../lib/error-log-context";
@@ -71,6 +73,8 @@ import {
 import type { FuelRecord } from "@shared/schema";
 import { idSchema } from "@shared/contracts/common";
 import { omitMissionBudget, redactMissionBudget, redactMissionPrice } from "../lib/mission-response-scope";
+import { redactMissionClientContact } from "../lib/mission-client-contact-scope";
+import { omitFuelCardRunningBalance, withoutFuelCardBalance } from "../lib/fuel-balance-scope";
 
 const log = moduleLogger("missions");
 
@@ -250,6 +254,22 @@ export async function broadcastMissionFuelRecorded(params: {
   actorRole: string | null;
   requestId?: string;
 }): Promise<void> {
+  // Plein : montants (prix, débit, crédit) pour les lecteurs de la carte seulement ; les autres rôles de
+  // mission ne reçoivent que {missionId, fuelRecordId}, le chauffeur affecté {missionId} (emitMissionEvent).
+  const readerRoles = (MISSION_EVENT_ROLES as readonly string[]).filter((role) => (TREASURY_FUEL_CARD_READ_ROLES as readonly string[]).includes(role));
+  const otherRoles = (MISSION_EVENT_ROLES as readonly string[]).filter((role) => !readerRoles.includes(role));
+  const broadcast = (global as any).broadcastUpdate;
+  if (otherRoles.length > 0 && typeof broadcast === "function") {
+    broadcast("mission_fuel_recorded", {
+      version: 1,
+      entity: "mission",
+      entityId: params.missionId,
+      payload: { missionId: params.missionId, fuelRecordId: params.fuelRecord.id ?? null },
+      scope: { type: "roles", roles: otherRoles },
+      actor: { userId: params.actorUserId, role: params.actorRole },
+      emittedAt: new Date().toISOString(),
+    });
+  }
   await emitMissionEvent(
     "mission_fuel_recorded",
     params.missionId,
@@ -259,7 +279,8 @@ export async function broadcastMissionFuelRecorded(params: {
       entityId: params.missionId,
       payload: {
         missionId: params.missionId,
-        record: params.fuelRecord,
+        // Trame diffusée au personnel : sans le solde courant de la carte (aucun écran ne le lit ici).
+        record: omitFuelCardRunningBalance(params.fuelRecord),
         vehicleId: params.fuelRecord.vehicleId ?? null,
       },
       actor: {
@@ -269,6 +290,7 @@ export async function broadcastMissionFuelRecorded(params: {
       emittedAt: new Date().toISOString(),
     },
     params.requestId,
+    readerRoles,
   );
 }
 
@@ -881,7 +903,7 @@ router.get("/", async (req, res) => {
 });
 
 // GET /api/missions/:id - Détails d'une mission
-router.get("/:id", async (req, res) => {
+router.get("/:id", async (req, res, next) => {
   try {
     const missionId = parseMissionId(req.params.id);
 
@@ -994,20 +1016,22 @@ router.get("/:id", async (req, res) => {
       assignmentCompletedAt: assignment?.completedAt,
     });
 
-    return res.json(redactMissionBudget(req.user, {
+    return res.json(redactMissionBudget(req.user, redactMissionClientContact(req.user, {
       ...mission,
       ...executionDates,
       assignment: assignment || null,
       assignments: visibleAssignments,
-    }));
+    })));
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Get mission error");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Get mission error" }));
   }
 });
 
 // GET /api/missions/:id/fuel-records - Historique carburant lié à la mission
-router.get("/:id/fuel-records", async (req, res) => {
+// Lecteurs de la carte (prix, débit et solde) ; le chauffeur affecté garde la lecture (décision du 3 novembre
+// 2026 : les co-chauffeurs se relaient et lisent les pleins de la mission) sans le solde courant. Ni technicien
+// ni magasinier : aucun écran ne l'appelle.
+router.get("/:id/fuel-records", authorize([...TREASURY_FUEL_CARD_READ_ROLES, "driver"]), async (req, res, next) => {
   try {
     const missionId = parseMissionId(req.params.id);
 
@@ -1034,7 +1058,7 @@ router.get("/:id/fuel-records", async (req, res) => {
     return res.status(200).json(redactMissionBudget(req.user, {
       missionId,
       missionStatus: mission.status,
-      records: fuelData.records,
+      records: withoutFuelCardBalance(req.user, fuelData.records),
       totals: {
         totalQuantity: fuelData.totalQuantity,
         totalCost: fuelData.totalCost,
@@ -1051,8 +1075,7 @@ router.get("/:id/fuel-records", async (req, res) => {
       },
     }));
   } catch (error) {
-    log.error({ err: error, requestId: req.requestId }, "Get mission fuel records error");
-    return res.status(500).json({ message: "Erreur serveur" });
+    return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Get mission fuel records error" }));
   }
 });
 
@@ -1191,7 +1214,7 @@ router.post("/:id/fuel-records", authorize([...MISSION_FUEL_MANAGERS, "driver"])
 
     if (result.replayed) {
       // Rejeu : rien n'a été écrit, donc rien à diffuser. Même forme de réponse que le premier envoi.
-      return res.status(200).json({ record: result.consumption, totals, mission: updatedMission || null, replayed: true });
+      return res.status(200).json({ record: withoutFuelCardBalance(req.user, result.consumption), totals, mission: updatedMission || null, replayed: true });
     }
 
     if (updatedMission) {
@@ -1209,7 +1232,7 @@ router.post("/:id/fuel-records", authorize([...MISSION_FUEL_MANAGERS, "driver"])
     });
 
     return res.status(201).json({
-      record: result.consumption,
+      record: withoutFuelCardBalance(req.user, result.consumption),
       totals,
       mission: updatedMission || null,
     });
@@ -1408,7 +1431,7 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
     if (result.replayed) {
       // Rejeu : rien n'a été écrit, donc rien à diffuser. Même forme de réponse que le premier envoi.
       return res.status(200).json({
-        record: result.consumption,
+        record: withoutFuelCardBalance(req.user, result.consumption),
         totals,
         mission: updatedMission || null,
         regularization: regularizationEntry,
@@ -1431,7 +1454,7 @@ router.post("/:id/fuel-records/regularize", async (req, res, next) => {
     });
 
     return res.status(201).json({
-      record: result.consumption,
+      record: withoutFuelCardBalance(req.user, result.consumption),
       totals,
       mission: updatedMission || null,
       regularization: regularizationEntry,
