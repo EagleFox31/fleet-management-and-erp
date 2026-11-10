@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAllVehicles } from "@/hooks/use-all-vehicles";
 import { useLocation } from "wouter";
 import { Plus, AlertTriangle, Package, TrendingUp, Truck, Activity, Timer, DollarSign, RotateCcw, Gauge, Eye, Edit, ShoppingCart, Save, Calendar, MapPin, Car, Clock, FileText, CircleDot, PackageOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -415,6 +416,8 @@ const RotationsCalendar = ({ rotations }: { rotations: any[] }) => {
   );
 }
 
+const RECENT_INSPECTIONS_LIMIT = 10;
+
 export default function TiresInventoryPage() {
   const { user } = useAuth();
   const [, setLocation] = useLocation();
@@ -620,7 +623,8 @@ export default function TiresInventoryPage() {
   const vehicleTiresView = queryView(vehicleTiresQuery);
 
   const inspectionsQuery = useQuery<TireInspection[]>({
-    queryKey: ["/api/tire-inspections/recent"],
+    // Les 10 dernières, dit explicitement (défaut serveur identique).
+    queryKey: ["/api/tire-inspections/recent", { limit: RECENT_INSPECTIONS_LIMIT }],
     ...liveQueryConfig,
   });
   const inspectionsView = queryView(inspectionsQuery);
@@ -675,21 +679,11 @@ export default function TiresInventoryPage() {
   // `lowStockTires` supprimé avec l'onglet Tableau de bord: `TireTable` colore
   // déjà les lignes sous seuil et propose un filtre dédié.
 
-  // Query pour récupérer la liste des véhicules
-  const { data: vehicles = [], isLoading: vehiclesLoading } = useQuery<any>({
-    queryKey: ["/api/vehicles"],
-    enabled: isRotationsTab || showRotationModal,
-    queryFn: async () => {
-      const response = await fetch("/api/vehicles");
-      if (!response.ok) throw new Error("Failed to fetch vehicles");
-      const data = await response.json();
-      // L'API retourne { vehicles: [...] } donc on extrait le tableau
-      return data.vehicles || [];
-    },
-    ...liveQueryConfig,
-  });
+  // Flotte complète (toutes les pages) : le sélecteur de rotation ne se limite pas aux 10 premiers.
+  const { data: vehicles = [], isLoading: vehiclesLoading } = useAllVehicles({ enabled: isRotationsTab || showRotationModal });
 
-  // Query pour récupérer les rotations
+  // Toutes les rotations : la route lit `limit` sans l'appliquer et rend la liste entière
+  // (vérifié par le garde-fou des lectures paginées).
   const rotationsQuery = useQuery<any[]>({
     queryKey: ["/api/tire-rotations"],
     enabled: isRotationsTab,

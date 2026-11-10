@@ -14,11 +14,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { MissionInvoicesTab } from "@/components/missions/mission-invoices-tab";
 import { MissionBudgetPanel } from "@/components/missions/mission-budget-panel";
 import { canReadMissionBudget } from "@/lib/mission-budget-ui";
 import { useFeature } from "@/hooks/use-feature";
+import { canViewPositions } from "@/lib/gps-display";
 import { MissionPriceCard } from "@/components/missions/mission-price-card";
 import { PremiumTabsNav, AlertModal, PremiumDataTable, type PremiumDataTableColumn } from "@/components/design-system";
 import { TabIcon } from "@/lib/premium-tab-icons";
@@ -30,9 +31,12 @@ import { useFuelPrice } from "@/hooks/use-fuel-price";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { localDateKey } from "@/lib/fuel-price-policy";
 import { createSubmissionKeyStore, isIndeterminateOutcome, missionFuelKeyScope } from "@/lib/submission-key";
+import { Skeleton } from "@/components/ui/skeleton";
 import { MissionPodPanel, PodDepositButton } from "@/components/missions/mission-pod-panel";
 import { useMissionPodFiles } from "@/hooks/use-mission-pod";
 import { invoiceGate } from "@/lib/mission-pod";
+
+const MissionGpsPanel = lazy(() => import("@/components/gps/mission-gps-panel").then((m) => ({ default: m.MissionGpsPanel })));
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-gray-100 text-gray-800",
@@ -509,6 +513,8 @@ export default function MissionDetailsPage() {
   // Budget de mission (L1f) : drapeau finance et rôles de lecture ; le serveur garde les deux.
   const financeEnabled = useFeature("finance");
   const showBudgetTab = financeEnabled && canReadMissionBudget(user?.role);
+  // Suivi GPS (V1 téléphone) : drapeau `gps` et rôles de lecture des positions ; la trace reste réservée à GPS_TRACK_ROLES.
+  const showGpsTab = useFeature("gps") && canViewPositions(user?.role);
   const [openInvoiceDialog, setOpenInvoiceDialog] = useState(false);
   const [openEditDialog, setOpenEditDialog] = useState(false);
   const [openMissionBudgetDialog, setOpenMissionBudgetDialog] = useState(false);
@@ -2191,6 +2197,7 @@ export default function MissionDetailsPage() {
           { value: "fuel", label: "Carburant", icon: <TabIcon icon={Fuel} /> },
           { value: "invoices", label: "Factures", icon: <TabIcon icon={Receipt} /> },
           ...(showBudgetTab ? [{ value: "budget", label: "Budget", icon: <TabIcon icon={Wallet} /> }] : []),
+          ...(showGpsTab ? [{ value: "gps", label: "Suivi GPS", icon: <TabIcon icon={MapPin} /> }] : []),
           { value: "print", label: "Imprimer", icon: <TabIcon icon={Printer} /> },
         ]} />
 
@@ -2896,6 +2903,16 @@ export default function MissionDetailsPage() {
           </div>
           <MissionInvoicesTab missionId={mission.id} />
         </TabsContent>
+
+        {showGpsTab && (
+          <TabsContent value="gps" className="mt-4">
+            {activeTab === "gps" && (
+              <Suspense fallback={<Skeleton className="h-80 w-full rounded-xl" />}>
+                <MissionGpsPanel missionId={mission.id} status={mission.status} role={user?.role} />
+              </Suspense>
+            )}
+          </TabsContent>
+        )}
 
         {showBudgetTab && (
           <TabsContent value="budget" className="mt-4">
