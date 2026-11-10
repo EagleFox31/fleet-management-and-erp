@@ -1,15 +1,15 @@
 import { Router, type RequestHandler } from "express";
 import { createIncidentRequestSchema, incidentsQuerySchema } from "@shared/contracts/incidents";
 import { requireFeature } from "../lib/feature-flags";
-import { isVehicleOperationWriter, authenticate, isAnyUser, isStaff } from "../middleware/auth";
+import { authenticate, authorize, isAnyUser } from "../middleware/auth";
 import { createIncident, listIncidents } from "../services/incident-service";
 
 /**
  * Déclaration de panne (P-22). Les règles de périmètre vivent dans le service : client refusé,
  * chauffeur limité à ses véhicules en affectation active, personnel sans restriction.
- * `isAnyUser` charge `req.user` (AGENTS §11). Écriture : `isVehicleOperationWriter` écarte le client,
- * le comptable et le lecteur dès la garde
- * (le service le refuse aussi) ; le périmètre chauffeur reste tranché par le service.
+ * `isAnyUser` charge `req.user` (AGENTS §11). Écriture : réservée au chauffeur (son écran de déclaration)
+ * et à l'admin ; comptable, lecteur, RH, magasin, etc. n'ont pas cet écran et ne déclenchent pas l'alerte atelier.
+ * Le périmètre chauffeur reste tranché par le service.
  */
 const postIncident: RequestHandler = async (req, res, next) => {
   try {
@@ -31,6 +31,6 @@ const getIncidents: RequestHandler = async (req, res, next) => {
 
 const router = Router();
 router.get("/incidents", requireFeature("incidents"), authenticate, isAnyUser, getIncidents);
-router.post("/incidents", requireFeature("incidents"), authenticate, isVehicleOperationWriter, postIncident);
+router.post("/incidents", requireFeature("incidents"), authenticate, authorize(["driver", "admin"]), postIncident);
 
 export default router;

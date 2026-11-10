@@ -68,8 +68,10 @@ describe("déclaration de panne", { timeout: 180000 }, () => {
 
     const driverUser = await createTestUser({ role: "driver" });
     const manager = await createTestUser({ role: "workshop_manager" });
+    const adminUser = await createTestUser({ role: "admin" });
+    const accountantUser = await createTestUser({ role: "accountant" });
     const client = await createTestUser({ role: "client" });
-    ids.userIds.push(driverUser.id, manager.id, client.id);
+    ids.userIds.push(driverUser.id, manager.id, client.id, adminUser.id, accountantUser.id);
     const own = await createTestVehicle();
     const other = await createTestVehicle();
     ids.vehicleIds.push(own.id, other.id);
@@ -86,8 +88,8 @@ describe("déclaration de panne", { timeout: 180000 }, () => {
     missionIds.push(mission.id);
     await db.insert(assignments).values({ missionId: mission.id, vehicleId: own.id, driverId: driver.id, status: "accepted" });
 
-    const [driverCookie, managerCookie, clientCookie] = await Promise.all(
-      [driverUser, manager, client].map((u) => login(u.username)),
+    const [driverCookie, managerCookie, clientCookie, adminCookie, accountantCookie] = await Promise.all(
+      [driverUser, manager, client, adminUser, accountantUser].map((u) => login(u.username)),
     );
     const payload = (vehicleId: number) => ({ vehicleId, description: "Voyant moteur allumé", severity: "high" });
 
@@ -97,7 +99,7 @@ describe("déclaration de panne", { timeout: 180000 }, () => {
     expect((await call("GET", clientCookie)).status).toBe(403);
 
     // Corps invalide: 400.
-    expect((await call("POST", managerCookie, { vehicleId: own.id, description: "x", severity: "high" })).status).toBe(400);
+    expect((await call("POST", driverCookie, { vehicleId: own.id, description: "x", severity: "high" })).status).toBe(400);
 
     // Chauffeur: son véhicule oui, un autre non.
     const created = await call("POST", driverCookie, payload(own.id));
@@ -107,8 +109,10 @@ describe("déclaration de panne", { timeout: 180000 }, () => {
     expect(created.body.vehicleRegistration).toBe(own.registrationNumber);
     expect((await call("POST", driverCookie, payload(other.id))).status).toBe(403);
 
-    // Personnel: n'importe quel véhicule.
-    expect((await call("POST", managerCookie, payload(other.id))).status).toBe(201);
+    // Admin: n'importe quel véhicule. Les autres rôles du personnel ne déclarent pas (403).
+    expect((await call("POST", adminCookie, payload(other.id))).status).toBe(201);
+    expect((await call("POST", managerCookie, payload(other.id))).status).toBe(403);
+    expect((await call("POST", accountantCookie, payload(own.id))).status).toBe(403);
 
     // Listes: le chauffeur ne voit que les siennes, le personnel voit tout, filtre par statut.
     const mine = await call("GET", driverCookie);

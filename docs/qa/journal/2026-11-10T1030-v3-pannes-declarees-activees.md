@@ -7,3 +7,10 @@
 **Pourquoi** : recette V3 faite ; la logistique lit déjà les avis de maintenance de mission et doit être prévenue au même moment que l'atelier ; l'écran ne doit rien promettre qu'il ne fait pas. La colonne « OT » de la liste reste : l'OT est réellement ouvert par la route chauffeur pour une panne ou un accident.
 
 **Preuve** : tests unitaires `incident-screens` (immatriculation, redirection, pas de promesse d'OT, portée) et `incident-service` ; contrat `incidents` (immatriculation en création et en lecture, route fermée avec `incidents=off`) ; gardes de dette `broadcast-hygiene` et `default-paginated-reads-hygiene` mises à jour ; tsc et `npm run check:tests` : 0 erreur.
+
+## Rôles de POST /api/incidents (revue sécurité)
+
+- Quoi : la déclaration est réservée au chauffeur et à l admin (avant : tout le personnel).
+- Pourquoi : comptable, RH ou magasin n ont pas l écran et déclencheraient l alerte atelier.
+- Preuve : contrat incidents (admin 201 ; chef d atelier et comptable 403).
+- Dette connue : GET /api/incidents reste ouvert à tout le personnel (OPEN_GET_READS_FROZEN).
