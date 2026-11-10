@@ -21,7 +21,7 @@ function loadServiceWorker(options: LoadOptions = {}) {
   type Handler = (event: Record<string, unknown>) => void;
   const handlers = new Map<string, Handler>();
   const caches = new Map<string, Map<string, unknown>>();
-  const calls = { cachePut: [] as string[], cachesOpen: [] as string[], fetched: [] as string[], fetchInits: [] as unknown[] };
+  const calls = { cachePut: [] as string[], cachesOpen: [] as string[], fetched: [] as string[], fetchInits: [] as unknown[], updates: 0 };
   const network = { offline: options.offline === true, hanging: options.hanging === true };
 
   const cacheOf = (name: string) => {
@@ -53,6 +53,7 @@ function loadServiceWorker(options: LoadOptions = {}) {
       skipWaiting: async () => undefined,
       clients: { claim: async () => undefined },
       location: { origin: ORIGIN },
+      registration: { update: async () => void (calls.updates += 1) },
     },
     caches: {
       open: async (name: string) => {
@@ -300,6 +301,22 @@ describe("service worker : navigation hors ligne (V5b-3d)", () => {
     const result = await sw.dispatch("fetch", { request: navigate("/missions") });
     expect(result.response).toMatchObject({ body: `réseau:${ORIGIN}/index.html` });
   }, 10_000);
+
+  it("délai écoulé, coquille en cache servie : le worker cherche une nouvelle version (registration.update)", async () => {
+    const sw = loadServiceWorker({ manifest: MANIFEST });
+    await sw.dispatch("install");
+    sw.network.hanging = true;
+    expect(sw.calls.updates).toBe(0);
+    await sw.dispatch("fetch", { request: navigate("/missions") });
+    expect(sw.calls.updates).toBe(1);
+  }, 10_000);
+
+  it("en ligne, réponse du réseau dans le délai : aucun update inutile", async () => {
+    const sw = loadServiceWorker({ manifest: MANIFEST });
+    await sw.dispatch("install");
+    await sw.dispatch("fetch", { request: navigate("/missions") });
+    expect(sw.calls.updates).toBe(0);
+  });
 
   it("en ligne, la navigation prend l'index.html du réseau sans l'écrire dans le cache", async () => {
     const sw = loadServiceWorker({ manifest: MANIFEST });

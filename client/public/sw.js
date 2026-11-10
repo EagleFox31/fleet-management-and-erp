@@ -124,7 +124,19 @@ function handleNavigation(request) {
     .then((response) => {
       if (response) return response;
       // Delai ecoule : la coquille en cache, sinon on attend quand meme le reseau.
-      return fromCache().then((cached) => cached || network);
+      // Reseau lent = coquille peut-etre perimee : on cherche une nouvelle version du worker
+      // (un build neuf change sw.js, donc la coquille precachee), sans attendre ni echouer.
+      return fromCache().then((cached) => {
+        if (cached) {
+          try {
+            Promise.resolve(self.registration.update()).catch(() => {});
+          } catch (err) {
+            // registration indisponible : la navigation n'en depend pas
+          }
+          return cached;
+        }
+        return network;
+      });
     })
     .catch(() => fromCache().then((cached) => cached || Response.error()));
 }
