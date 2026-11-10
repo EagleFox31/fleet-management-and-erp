@@ -16,8 +16,9 @@ vi.mock("wouter", () => ({
   Link: ({ children }: { children?: React.ReactNode }) => React.createElement("a", null, children),
   useRoute: () => [false, {}],
 }));
+const auth = vi.hoisted(() => ({ role: "admin" }));
 vi.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({ user: { id: 1, role: "admin" }, isAuthenticated: true, isLoading: false }),
+  useAuth: () => ({ user: { id: 1, role: auth.role }, isAuthenticated: true, isLoading: false }),
 }));
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: () => {} }) }));
 vi.mock("@/lib/queryClient", async () => {
@@ -272,6 +273,29 @@ describe("rendu: carte carburant et pleins en échec affichent Indisponible, jam
       const html = render(Page, [[K.balance, { data: BALANCE }], [K.records, FAILURE_MSG]]);
       for (const label of ["Pleins enregistrés", "Litres consommés", "Coût total"]) {
         expect(kpiSubValue(html, label)).toBe(MSG);
+      }
+    });
+
+    it("échec pleins, profil sans gestion de carte : « Véhicules suivis » lit Indisponible avec le message, pas 0", async () => {
+      auth.role = "driver";
+      try {
+        const { default: Page } = await import("@/pages/fuel/index");
+        const html = render(Page, [[K.balance, { data: BALANCE }], [K.records, FAILURE_MSG]]);
+        expect(kpiValue(html, "Véhicules suivis")).toBe("Indisponible");
+        expect(kpiSubValue(html, "Véhicules suivis")).toBe(MSG);
+      } finally {
+        auth.role = "admin";
+      }
+    });
+
+    it("témoin : profil sans gestion de carte, données saines, « Véhicules suivis » vaut 1", async () => {
+      auth.role = "driver";
+      try {
+        const { default: Page } = await import("@/pages/fuel/index");
+        const html = render(Page, [[K.balance, { data: BALANCE }], [K.records, { data: RECORDS }]]);
+        expect(kpiValue(html, "Véhicules suivis")).toBe("1");
+      } finally {
+        auth.role = "admin";
       }
     });
 
