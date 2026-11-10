@@ -134,9 +134,9 @@ describe("suivi des opérations clients", { timeout: 120000 }, () => {
   it("récapitulatif : suit la facture liée (facturation, attente, payée)", async () => {
     await db.update(missions).set({ status: "delivered" }).where(eq(missions.id, missionId));
     expect((await rowOf()).row.recapStatus).toBe("invoicing");
-    const inv = await createTestClientInvoice({ clientId, createdBy: users.get("admin") });
+    // Facture émise = mission gelée (trigger client_invoices_issued_locked) : rattachée dès sa création.
+    const inv = await createTestClientInvoice({ clientId, missionId, createdBy: users.get("admin") });
     ids.clientInvoiceIds.push(inv.id);
-    await db.update(clientInvoices).set({ missionId }).where(eq(clientInvoices.id, inv.id));
     const waiting = await rowOf();
     expect(waiting.row).toMatchObject({ recapStatus: "awaiting_payment", invoiceNumber: inv.invoiceNumber });
     expect(waiting.parsed.recap.awaiting_payment).toBe(1);

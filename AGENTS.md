@@ -393,6 +393,12 @@ Notes :
 - Environ 1 000 `console.*` restent côté serveur : les migrer vers `moduleLogger`
   quand on touche un fichier, ne jamais les supprimer (§10).
 - Coût carburant estimé compté comme revenu : `server/services/operations-service.ts` (l. 251, 296, 318) somme `estimatedFuelCost` dans `totalRevenue`, puis la marge en dépend. Aucune garde. Ne pas ajouter de marge ou de revenu nouveau sur ce champ avant correction.
+- Facture client émise : immuable dès sa création (pas de brouillon). Trigger `trg_client_invoices_issued_lock`
+  (migration `20261110_money_lock_invoices.sql`, jumelle `CLIENT_INVOICES_ISSUED_LOCK_SQL`), refus `check_violation`
+  sur `client_invoices_issued_locked`, traduit en 409 par `moneyLockMessageOf`. Seuls passent `status`, `balance`,
+  `updated_at` et le dépôt, posé une seule fois avec sa date et son auteur. `cancelled` est terminal. Suppression et
+  `TRUNCATE` refusés. Une correction passe par un avoir (PR5). Un test qui veut une facture déposée, orpheline ou
+  liée à une mission la crée ainsi (`createTestClientInvoice`) : un `UPDATE` après coup est refusé.
 - Clôture automatique de la commande : `autoCloseDeliveredOrderIfFinanceDone`, `server/services/three-way-matching-service.ts` (l. 122-128). L'`UPDATE` du statut `completed` filtre sur l'identifiant seul, sans condition de statut ni verrou. Entrée gelée (1) de `tests/unit/server/status-update-cas-hygiene.test.ts`. Ne pas en ajouter d'autre.
 - Montants en texte libre dans l'audit d'OT : `/api/work-orders/:id/audit-trail` est exempté de `tests/unit/server/work-order-cost-mask-coverage.test.ts` (l. 27). Le masquage par clé ne couvre pas les libellés. Ne pas étendre cette exemption sans son lot dédié.
 - Tests contrat intermittents `tests/contract/finance-withholdings.contract.test.ts` et `tests/contract/qhse-inspections.contract.test.ts` : non reproduits, instrumentés (corps de réponse). Ne pas relever le timeout ni les marquer `skip` sans diagnostic du corps de réponse.
