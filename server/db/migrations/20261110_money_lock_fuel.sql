@@ -2,7 +2,8 @@
 -- l'appelant (route, script, SQL direct). Refus : check_violation, contrainte fuel_records_validated_locked,
 -- traduite en 409 lisible par server/lib/pg-errors.ts (moneyLockMessageOf).
 -- Liste blanche sur un plein validé : updated_at, updated_by ; mission_id seulement vers NULL et seulement par
--- l'action de clé étrangère (ON DELETE SET NULL d'une mission supprimée, pg_trigger_depth() > 1) ; annulation tracée une seule fois (deleted_at, deleted_by, cancellation_reason de NULL
+-- tout trigger imbriqué (pg_trigger_depth() > 1) : c'est le cas de l'ON DELETE SET NULL d'une mission supprimée,
+-- mais l'exemption ne distingue pas l'origine, tout UPDATE lancé par un autre trigger en bénéficie ; annulation tracée une seule fois (deleted_at, deleted_by, cancellation_reason de NULL
 -- vers une valeur, motif non vide d'au plus 500 caractères). Un plein en attente reste libre, y compris sa
 -- validation (pending -> validated). TRUNCATE de la table refusé (trigger par instruction). Levée pour une seule
 -- transaction : withMoneyOverride (AGENTS.md §5).
@@ -44,9 +45,10 @@ BEGIN
       USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
   END IF;
 
-  -- La mission ne se change pas ; elle ne se détache que vers NULL, et seulement par l'action de clé étrangère
-  -- (suppression de la mission : UPDATE lancé par un trigger, profondeur > 1). En direct, le plein sortirait du
-  -- budget de sa mission sans annulation tracée.
+  -- La mission ne se change pas ; elle ne se détache que vers NULL, et seulement depuis un trigger imbriqué
+  -- (pg_trigger_depth() > 1). C'est le cas de l'ON DELETE SET NULL d'une mission supprimée, mais l'exemption
+  -- couvre tout trigger imbriqué, pas la seule clé étrangère. En direct, le plein sortirait du budget de sa
+  -- mission sans annulation tracée.
   IF NEW.mission_id IS DISTINCT FROM OLD.mission_id AND (NEW.mission_id IS NOT NULL OR pg_trigger_depth() <= 1) THEN
     RAISE EXCEPTION 'Plein validé : la mission ne se change pas.'
       USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';

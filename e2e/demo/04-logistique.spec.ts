@@ -1,21 +1,33 @@
 import { expect, test } from "@playwright/test";
 import { eq } from "drizzle-orm";
 import { db } from "../../server/db";
-import { clientInvoices, missions } from "../../shared/schema";
+import { assignments, clientInvoices, missions, vehicles } from "../../shared/schema";
 import { tinyPdf } from "../../tests/support/pod";
-import { beat, loginThroughForm } from "./helpers";
+import { beat, loginThroughForm, mark } from "./helpers";
 import { assertLocalDatabase, DEMO_ACCOUNTS, DEMO_MISSION, seedDemo } from "./seed-demo";
 
 /**
- * Démo « logistique » : créer une mission pour un donneur d'ordre, l'affecter (véhicule
- * et chauffeur), la lancer avec ses budgets, la livrer, la clôturer, puis générer la
- * facture client. Le règlement de la facture revient au secrétariat (spec suivante).
+ * Démo « logistique » : créer une mission pour un donneur d'ordre, l'affecter (camion,
+ * remorque et chauffeur), la lancer avec ses budgets, la livrer, la clôturer, puis générer
+ * la facture client. Le règlement de la facture revient au secrétariat (spec suivante).
+ *
+ * `mark(...)` pose des repères de montage (voix off) quand DEMO_MARKS_FILE est défini.
  */
 const ORDER = `${DEMO_MISSION.orderPrefix}001`;
 
 async function missionStatus(): Promise<string | undefined> {
   const [row] = await db.select({ status: missions.status }).from(missions).where(eq(missions.orderNumber, ORDER));
   return row?.status;
+}
+
+async function missionTrailer(): Promise<{ trailerId: number | null; registration: string | null } | undefined> {
+  const [row] = await db
+    .select({ trailerId: assignments.trailerId, registration: vehicles.registrationNumber })
+    .from(assignments)
+    .innerJoin(missions, eq(missions.id, assignments.missionId))
+    .leftJoin(vehicles, eq(vehicles.id, assignments.trailerId))
+    .where(eq(missions.orderNumber, ORDER));
+  return row;
 }
 
 test.beforeAll(async () => {
@@ -25,43 +37,76 @@ test.beforeAll(async () => {
 
 test("démo logistique : de la création de la mission à la facture client", async ({ page }) => {
   test.setTimeout(300_000);
+  mark("start");
   await loginThroughForm(page, DEMO_ACCOUNTS.logistics.username, DEMO_ACCOUNTS.logistics.password);
+  mark("login-done");
+  // Tableau de bord laissé lisible : la voix décrit le solde carburant puis les compteurs de missions.
+  await beat(page, 17_000);
+  mark("dashboard-done");
 
   // Création : assistant en quatre étapes.
   await page.getByRole("link", { name: "Missions transport" }).first().click();
   await expect(page.getByTestId("btn-new-mission")).toBeVisible({ timeout: 30_000 });
   await beat(page, 1200);
   await page.getByTestId("btn-new-mission").click();
+  mark("wizard-open");
+  await beat(page, 1500);
+  mark("wizard-form");
 
   await page.getByTestId("select-client").click();
   await page.getByRole("option", { name: DEMO_MISSION.clientName }).click();
   await page.getByTestId("input-order-number").fill(ORDER);
   await beat(page);
+  mark("client-done");
   await page.getByTestId("btn-next").click();
 
   await page.getByTestId("input-pickup-address").fill("Douala, port autonome");
   await page.getByTestId("input-delivery-address").fill("Yaoundé, entrepôt central");
   await page.getByTestId("textarea-cargo").fill("Palettes de boissons, 18 tonnes");
   await beat(page);
+  mark("route-done");
   await page.getByTestId("btn-next").click();
 
+  // Affectation : le camion, la remorque attelée au camion, puis le chauffeur.
   await page.getByTestId("select-vehicle").click();
   await page.getByRole("option", { name: new RegExp(DEMO_MISSION.vehicle) }).click();
-  await beat(page, 600);
+  await beat(page, 1200);
+  mark("truck-done");
+  await page.getByTestId("select-trailer").click();
+  await page.getByRole("option", { name: new RegExp(DEMO_MISSION.trailer) }).click();
+  await expect(page.getByTestId("select-trailer")).toContainText(DEMO_MISSION.trailer);
+  await beat(page, 2500);
+  mark("trailer-done");
   await page.getByTestId("select-driver").click();
   await page.getByRole("option", { name: new RegExp(DEMO_MISSION.driverEmployee) }).click();
-  await beat(page);
+  await beat(page, 1200);
+  mark("driver-done");
   await page.getByTestId("btn-next").click();
-  await beat(page, 1500);
+  await beat(page, 3000);
+  mark("summary-done");
   await page.getByTestId("btn-submit").click();
+  mark("submitted");
 
   await expect.poll(missionStatus, { timeout: 30_000 }).toBeTruthy();
+  // Assertion dure : l'affectation de la mission porte bien la remorque choisie.
+  const [trailerVehicle] = await db.select({ id: vehicles.id }).from(vehicles).where(eq(vehicles.registrationNumber, DEMO_MISSION.trailer));
+  const hitched = await missionTrailer();
+  expect(hitched?.trailerId).toBe(trailerVehicle.id);
+  expect(hitched?.registration).toBe(DEMO_MISSION.trailer);
   await expect(page.getByTestId("table-missions")).toBeVisible({ timeout: 30_000 });
   await page.getByTestId("input-search-missions").fill(ORDER);
   await beat(page, 1000);
   await page.getByText(ORDER, { exact: true }).first().click();
   await expect(page.getByRole("heading", { name: ORDER })).toBeVisible({ timeout: 30_000 });
   await beat(page, 1500);
+  mark("created-shown");
+  // La fiche de la mission montre la remorque attelée, à côté du camion et du chauffeur.
+  const trailerCard = page.getByTestId("mission-trailer");
+  // Centre la carte dans la fenêtre : elle est sous la ligne de flottaison à l'arrivée sur la fiche.
+  await trailerCard.evaluate((el) => el.scrollIntoView({ block: "center" }));
+  await expect(trailerCard).toContainText(DEMO_MISSION.trailer, { timeout: 30_000 });
+  await beat(page, 4000);
+  mark("trailer-shown");
 
   // Lancement : budgets demandés, puis la mission part.
   expect(["planned", "assigned"]).toContain(await missionStatus());

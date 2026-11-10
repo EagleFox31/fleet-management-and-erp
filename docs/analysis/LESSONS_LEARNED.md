@@ -3581,3 +3581,132 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/integration/fuel-record-cancel-mission.test.ts`, cas de course solde / annulation : échoue (`deadlock detected`) si le verrou de la mission est retiré ;
   - revue des autres chemins : tous ceux de `mission-budgets-service.ts` (mise à jour, transitions, solde, dépenses) verrouillent la mission (`lockMission`) avant le budget ; aucun chemin inverse trouvé.
 - **Leçon généralisée** : tout service qui touche mission et budget prend les verrous dans le même ordre, mission puis budget, y compris les verrous implicites des triggers. Un verrou conditionnel (requête filtrée) ne verrouille rien quand le filtre est faux : verrouiller d'abord, tester ensuite.
+
+## 2026-11-10 — Tuile « À encaisser » : type local redéclaré à la place du contrat partagé
+
+- **Contexte** : démo comptable. La tuile des créances du tableau de bord comptable affichait une valeur fausse. Trouvé au tournage, avant toute recette.
+- **Cause racine** : l'écran redéclarait un type local de la réponse de `/api/finance/receivables-aging` au lieu d'importer `FinanceReceivablesAgingResponse`. La forme supposée ne correspondait pas au contrat, et TypeScript ne pouvait pas le voir.
+- **Classification** : contrat dupliqué, dérive silencieuse entre client et serveur.
+- **Résolution** : la page importe le contrat partagé et lit `totals.total.netPayable` / `count`.
+- **Prévention vérifiée** : `e2e/demo/11-comptable.spec.ts` asserte la tuile `accountant-kpi-receivables` (échoue si la valeur n'est plus lue depuis le contrat).
+- **Leçon généralisée** : une réponse d'API se type avec le contrat de `shared/contracts/`, jamais avec un type écrit à la main dans la page. Même règle pour les listes de rôles : une constante partagée (`FUEL_RECORD_WRITER_ROLES`) sert au middleware et à l'écran.
+## 2026-11-10 — Remorque d'affectation : trois oublis du même lot, trouvés en revue et en CI (#635)
+
+- **Contexte** : ajout de `assignments.trailer_id` (lot remorque). Trois défauts trouvés avant la fusion, aucune donnée touchée.
+  1. `POST /api/missions` lisait `assignment.trailerId` sans que l'objet imbriqué `assignment` soit déclaré dans le schéma Zod : `"abc"` ou `1.5` atteignaient la base et finissaient en 500.
+  2. La création de mission prenait le verrou de la remorque avant ceux du camion et du chauffeur, à l'inverse de l'ajout d'affectation : création et ajout simultanés pouvaient s'interbloquer.
+  3. La nouvelle clé étrangère vers `vehicles.id` n'était pas classée dans `VEHICLE_ACTIVITY_SOURCES` : CI unitaire rouge, et un véhicule attelé aurait été supprimé physiquement.
+- **Cause racine** : une colonne ajoutée sur une table existante, sans relire tout ce qui la touche : validation d'entrée de chaque route, ordre de verrous partagé, critère d'action du véhicule.
+- **Classification** : contrat d'entrée incomplet, ordre de verrous incohérent, référence non classée ; near miss.
+- **Résolution** : `assignment` déclaré dans `createMissionSchema` (ids passés par `idSchema`, `true` refusé) ; verrous dans un seul ordre, véhicule (1), chauffeur (2), remorque (3), via `lockPlanningResources` puis `assertTrailerAssignable` ; `assignments.trailer_id` classé.
+- **Prévention vérifiée** :
+  - `tests/contract/mission-trailer-assignment.contract.test.ts`, cas « trailerId "abc", 1.5, 2147483648, true : 400, jamais 500 » et « création et ajout simultanés : un 201, un 409, jamais d'interblocage » ;
+  - `tests/unit/server/vehicle-activity-sources.test.ts` échoue sur toute clé étrangère vers `vehicles.id` non classée.
+- **Leçon généralisée** : un objet imbriqué lu par une route est toujours déclaré dans son schéma Zod, sinon il n'est pas validé du tout. L'ordre des verrous consultatifs est fixé en un seul endroit et chaque route l'emprunte. Toute clé étrangère vers `vehicles.id` est classée dans `vehicle-lifecycle-sources.ts` dans la même PR.
+- **Suite (#649), quatrième oubli du même lot** : `openWork` (suppression douce) ne cherchait les affectations que par `vehicle_id`, alors que `VEHICLE_ACTIVITY_SOURCES` classait aussi `assignments.trailer_id` : une remorque attelée était supprimable. Corrigé, avec le contrôle du changement de `vehicleType` d'un véhicule attelé. Prévention : `tests/unit/server/vehicle-lifecycle-open-work.test.ts` exige que `openWork` mentionne chaque colonne `assignments.*` de `VEHICLE_ACTIVITY_SOURCES`. Règle : un lecteur du critère d'action dérive ses colonnes de la source, il ne les recopie pas.
+
+## 2026-11-10 — Service importé par un test unitaire qui charge server/db : job unit rouge (#642)
+
+- **Contexte** : les suites de #635 ajoutent l'éligibilité de la remorque dans `server/services/trailer-assignment.ts`, qui importe alors `loadOpenRenewalReceipts` (`server/lib/renewal-receipts.ts`, qui importe `server/db`). `tests/unit/server/assignments-trailer-schema.test.ts` importe ce service. Le job unit de la CI n'a pas `DATABASE_URL` : `server/db.ts` lève une exception au chargement et le fichier tombe sans assertion. Trouvé en relecture, avant la fusion.
+- **Cause racine** : un import ajouté dans un module de règles pur l'a relié à la base. Localement, l'erreur « DATABASE_URL must be set » a été prise pour un défaut d'environnement et le fichier relancé avec une base, ce qui a masqué le défaut.
+- **Classification** : dépendance de chargement non voulue ; erreur locale mal classée comme environnementale ; near miss.
+- **Résolution** : le chargeur de récépissés est injecté (`TrailerCheck.loadReceipts`, appelé par les routes avec `loadOpenRenewalReceipts(id, tx)`) ; le service n'importe plus `server/db`, et le cast `tx as unknown as DbExecutor` disparaît.
+- **Prévention vérifiée** :
+  - `tests/unit/server/assignments-trailer-schema.test.ts` lancé sans `DATABASE_URL` : vert ; il échoue au chargement si le service réimporte `server/db` ;
+  - la suite unitaire complète lancée sans `DATABASE_URL`, comme en CI : verte hors `db-pool-options` (version du driver locale).
+- **Leçon généralisée** : un module importé par un test unitaire ne charge pas `server/db` ; il reçoit ses lectures en paramètre. Un test unitaire se lance localement sans `DATABASE_URL`, comme en CI ; une erreur « DATABASE_URL must be set » dans un test unitaire est un défaut du code, jamais de l'environnement.
+## 2026-11-10 — Clé d'idempotence conservée sur un 500 antérieur à l'écriture (V5b-1)
+
+- **Contexte** : la revue sécurité de V5b-1 (#636) a relevé que `POST /api/driver/breakdowns` garde sa clé 7 jours sur toute issue incertaine (`staleSeconds: null` + `keepKeyOnUncertainOutcome`). Aucun incident en production, trouvé à la relecture.
+- **Cause racine** : « issue incertaine » avait été traduit par « tout 5xx ». Or un 5xx levé avant l'écriture (interblocage, coupure, clé étrangère d'un véhicule inexistant sur un retard ou un autre signalement) n'est pas incertain : rien n'est validé. La clé restait réservée et chaque rejeu recevait le 409 « en cours » alors que la panne n'existait pas.
+- **Classification** : idempotence, garde trop prudente, erreur lisible (500 sur une donnée invalide au lieu d'un 404).
+- **Résolution** : `createIncident` distingue les échecs antérieurs à la validation (503 `INCIDENT_WRITE_FAILED`, 404 `INCIDENT_VEHICLE_NOT_FOUND`), tous deux dans `PRE_WRITE_REFUSAL_CODES` : la clé est libérée. Le message du 409 ne promet plus que la panne apparaîtra.
+- **Prévention vérifiée** : `tests/contract/idempotency-driver-breakdown.contract.test.ts`, bloc V5b-1b. Rouges sans correctif : échec de transaction puis réessai avec la même clé, véhicule inexistant (avec et sans OT), message du 409. Verts avant et après, gardés comme caractérisation : même clé pour deux comptes, lecteur refusé en 403.
+- **Seconde erreur, trouvée à la revue de la correction** : `.catch` sur `db.transaction(...)` englobait aussi le COMMIT (le pilote enchaîne begin, corps et commit dans le même `try`). Un COMMIT validé dont l'accusé se perd donnait un 503, une clé libérée, puis au rejeu une seconde panne et un second OT. Transaction ORM rejetée ≠ annulée : le COMMIT peut échouer après validation. `createIncident` pose `bodyDone` en fin de corps : avant, 503 et clé libérée ; après, l'erreur brute remonte (5xx) et la clé reste gardée, sauf conflit de sérialisation (`40001`, annulation certaine). Contrat : « COMMIT validé mais accusé perdu » (clé `in_progress`, 1 incident, 1 OT, rejeu en 409). Rien de résiduel côté serveur ; le dédoublonnage côté appli hors ligne reste l'affaire de V5b.
+- **Leçon généralisée** : sur une route qui garde sa clé, chaque erreur doit être classée « avant l'écriture » (libérer, code dédié dans `PRE_WRITE_REFUSAL_CODES`) ou « après / inconnue » (garder). Un 500 non classé garde la clé : tout chemin d'erreur antérieur à la transaction a donc son code, et son contrat. Ne jamais classer « avant l'écriture » une erreur qui peut provenir du COMMIT : le drapeau de fin de corps fait la différence.
+
+## 2026-11-10 — Barre oblique inverse : gardes de `server/api/` sautées, route de `routes.ts` exécutée (suite de #631)
+
+- **Contexte** : la revue sécurité de #631 envoie, en socket brut, `PATCH /api\users/62#x`, `PATCH http://h/api\users/62`, `/api/users\62#` et `/api/users/62\#`. Toutes répondent 200 sans entrée d'audit. En reproduisant, on trouve pire : pour `/api\users/62#x`, la garde du dernier administrateur (`last-admin-guard.routes.ts`) ne s'exécute pas, et `POST /api\maintenance-schedules#` crée un plan d'entretien sur un véhicule retiré (201), alors que `retiredVehicleWriteGuard` répond 409 sur la même requête canonique.
+- **Cause racine** : chaque couche normalise le chemin à sa façon. `parseurl` (Express) convertit `\` en `/` quand la cible porte un `#` ou une forme absolue, et l'app lit `/api/users/62`. Mais un montage (`app.use("/api", apiRouter)`) retire son préfixe de la cible **brute** : apiRouter reçoit `\users/62#x` et lit `//users/62`, où aucune de ses routes ne correspond. Les gardes déclarées dans `server/api/` sont sautées, et la route déclarée sur l'app dans `server/routes.ts` s'exécute. De son côté, l'audit et l'idempotence lisaient `req.originalUrl` brut, une troisième lecture.
+- **Classification** : sécurité, contournement de contrôle d'accès et de traçabilité (dernier admin, véhicule retiré, audit, idempotence). Exploitable par tout compte qui a déjà le droit d'appeler la route.
+- **Résolution** :
+  - `rejectNonCanonicalTarget` (`server/middleware/reject-non-canonical-target.ts`) est monté en tête de `server/app.ts`, avant tout routeur et avant les fichiers statiques. Il répond 400 `NON_CANONICAL_TARGET` si la partie chemin de la cible brute (avant `?`) contient `\`, ou si la cible est en forme absolue. Restent acceptés : `\` dans la query et `%5C`, que `parseurl` ne convertit pas.
+  - En défense en profondeur, l'audit et l'idempotence lisent `routedPath(req)` (`server/lib/routed-path.ts`, soit `req.baseUrl + req.path`, le chemin du routeur) au lieu de `req.originalUrl`. `auditedPath` et `ABSOLUTE_FORM` sont supprimés.
+  - Le cliquet `route-id-parse-hygiene` signale aussi `z.coerce.number()` sur `req.params`, et plus seulement `idSchema`.
+- **Prévention vérifiable** :
+  - `tests/contract/non-canonical-target.contract.test.ts` : vraie app, socket brut, garde dernier admin, véhicule retiré, anonyme et cibles légitimes. 7 cas rouges sans le middleware, dont le 201 sur véhicule retiré.
+  - `tests/unit/server/reject-non-canonical-target.test.ts` couvre le constat de contournement, le refus, les cas légitimes et l'ordre de montage dans `server/app.ts`.
+  - `audit-writes-router.test.ts` et `idempotency-guard.test.ts` jouent les cibles avec barre inverse en socket brut contre une route déclarée sur l'app.
+  - Helper commun : `tests/support/raw-request.ts`.
+- **Leçon généralisée** : la normalisation de chemin diffère entre couches (app, routeur monté, middleware qui lit `originalUrl`). Il faut normaliser ou rejeter **une seule fois, à l'entrée**, avant tout routage. Un contrôle transversal dérive ensuite son chemin du parseur du routeur (`req.baseUrl + req.path`), jamais d'`originalUrl` brut. Une garde déclarée en routeur ne protège une route déclarée ailleurs que si les deux lisent la même cible.
+
+## 2026-11-10 — Garde de double affectation contournée par `%36%32` : une garde lit sa route par un matcher Express
+
+- **Contexte** : revue sécurité de #640. `workOrderBookingGuard` (`server/middleware/booking-guard.ts`) lisait l'id de l'ordre de travail par regex sur `req.path` (`/^\/(\d+)\/?$/`). `PATCH /api/work-orders/%36%32` est servi par la route `/:id` (Express décode `62`), mais la regex ne reconnaît pas `%36%32` : la garde laisse passer et la double affectation n'est plus refusée en 409. Même constat, à plus faible enjeu, sur `req.path.startsWith("/api")` dans `server/app.ts` et `accessLog` : `/API/...`, servi par le montage `/api`, n'avait ni `no-store` ni journal d'accès. Enfin, un upgrade WebSocket hors `/ws` restait pendant hors développement (personne d'autre n'écoute).
+- **Cause racine** : la garde lisait le chemin elle-même au lieu de laisser Express le lire. Casse, `%xx` et barre finale ont la même lecture pour la route servie et pour un matcher Express, pas pour une regex écrite à la main.
+- **Classification** : sécurité, contournement d'une règle métier (double affectation) par une forme de cible équivalente. Préexistant.
+- **Résolution** :
+  - La garde reconnaît sa route par un matcher Express : `Router().post("/", ...)` et `Router().patch("/:id", ...)`, exactement comme `retiredVehicleWriteGuard`. L'id vient de `req.params.id`.
+  - `isApiPath` / `API_PREFIX` (`server/lib/routed-path.ts`, `/^\/api(?=\/|$)/i`) remplacent `startsWith("/api")` dans `app.ts`, `error-handler.ts` et `idempotency-guard.ts`.
+  - `server/index.ts` détruit la socket d'un upgrade hors `/ws` hors développement ; en développement, Vite HMR la prend.
+- **Prévention vérifiable** :
+  - `tests/contract/work-order-booking-guard.contract.test.ts` : en socket brut, `%3X` par chiffre, `/API/WORK-ORDERS/:id` et barre finale répondent 409, base inchangée. Rouge sans le correctif.
+  - `tests/unit/server/guard-path-matcher-hygiene.test.ts` : cliquet sur `server/middleware/*guard*`, qui refuse regex, comparaison ou méthode de chaîne sur `req.path`, et toute lecture de `req.originalUrl` / `req.url`. Liste tolérée vide.
+  - `tests/unit/server/upgrade-route.test.ts` : `upgradeRoute` (`server/lib/upgrade-route.ts`) refuse hors `/ws` hors développement, et `server/index.ts` détruit la socket refusée.
+  - `tests/unit/server/routed-path.test.ts` (`isApiPath`) et `GET /API/vehicles` avec `no-store` dans `non-canonical-target.contract.test.ts`.
+- **Leçon généralisée** : une garde reconnaît sa route par un matcher Express, jamais par une regex ou une comparaison sur `req.path`. Seule une lecture qui ne peut que refuser davantage (liste d'autorisation, refus par défaut) peut lire le chemin elle-même.
+- **Précisions (relecture de #644)** :
+  - Seule la forme `%xx` contournait la garde de double affectation : la casse (`/API/...`) et la barre finale étaient déjà reconnues, car le montage est insensible à la casse et la regex acceptait `/?`. Ces deux cas sont rejoués par le test de contrat comme régression, pas comme preuve du correctif.
+  - Limite du cliquet lexical : il lit des lignes, pas le flux de données. Un chemin copié dans une variable (`const p = req.path; p.match(...)`) ou lu par un autre module échappe aux motifs interdits. Le second cliquet (`DECLARED_PATH_READS`) borne donc l'ensemble : toute lecture du chemin dans une `*guard*` est déclarée avec son motif, et la liste ne peut que rétrécir.
+  - Course restante, hors périmètre de ce correctif : la garde lit le planning puis la route écrit, sans verrou commun (`booking-guard.ts` puis `routes.ts`, PATCH d'un OT). Deux PATCH simultanés sur le même technicien peuvent passer tous deux. Une contrainte d'exclusion en base (créneau par technicien) est la prévention juste ; un verrou advisory pris dans un middleware ne couvrirait pas l'écriture de la route.
+
+## 2026-11-10 — `$$` devenu `$` en insérant du SQL par `String.replace` (GPS-DB, #657)
+
+- **Contexte** : la constante `VEHICLE_POSITIONS_GPS_SQL` a été insérée dans `server/init-database.ts` par un script `content.replace(ancre, ancre + sql)`. Les blocs `DO $$ … END $$;` sont devenus `DO $ … END $;`. Trouvé avant tout commit, par le test des jumelles.
+- **Cause racine** : dans une chaîne de remplacement, `String.prototype.replace` interprète les motifs spéciaux (`$$` = un `$`, `$&`, `` $` ``, `$'`). Tout texte SQL PL/pgSQL ou Postgres (`$1`, `$$`) y est corrompu sans erreur.
+- **Classification** : outil d'édition scriptée, corruption silencieuse ; near miss.
+- **Résolution** : remplacement par fonction (`content.replace(ancre, () => ancre + sql)`), qui insère le texte tel quel ; constante corrigée.
+- **Prévention vérifiée** : le test des jumelles (`tests/unit/server/vehicle-positions-gps-schema.test.ts`, premier cas, et ses équivalents pour chaque migration) compare la migration et la constante d'`init-database.ts` ; il est rouge sur ce défaut.
+- **Leçon généralisée** : pour insérer du code ou du SQL par script, toujours passer une fonction de remplacement (ou `split`/`join`), jamais une chaîne qui contient `$`. Une migration a toujours sa jumelle testée.
+## 2026-11-10 — Carte Direction : des positions et des statuts fabriqués à partir du rang de la ligne
+
+- **Contexte** : `aggregateCorridorFleet` (`server/services/management-dashboard-service.ts`), qui alimente `corridorFleet` dans `GET /api/management/dashboard`, produisait des coordonnées par `interpolateCorridorPosition` sur un `progressPercent` calculé depuis l'indice de la ligne (`index * 17 % 85`), et marquait « en transit » un véhicule sans mission une fois sur trois (`index % 3`). Vitesse (65 km/h), consommation (34,5 L/100 km), origine (« Douala (Port) ») et destination (« Garoua ») avaient aussi des valeurs de repli inventées. La carte n'est pas montée aujourd'hui ; elle devait l'être avec le suivi GPS.
+- **Cause racine** : maquette de démonstration branchée sur l'API réelle sans que la réponse distingue le mesuré de l'inventé. Le contrat (`currentLat`, `currentLng`, `progressPercent` obligatoires) obligeait à remplir un champ même sans donnée.
+- **Classification** : intégrité des données présentées à la direction, risque de mauvaise décision. Préexistant, sans exposition tant que l'écran n'est pas monté.
+- **Résolution** :
+  - Dérivation extraite dans `server/services/corridor-fleet.ts` (fonction pure) : statut déduit de la mission réelle seule (`in_progress` donne en transit, `assigned`/`planned` en préparation, sinon arrêté, véhicule en panne ou en maintenance en alerte).
+  - Contrat `LiveCorridorVehicle` : `currentLat`, `currentLng`, `progressPercent`, `origin`, `destination` optionnels ; `positionSource: "none" | "phone" | "tracker"` obligatoire ; `speedKmh` retiré ; consommation seulement si litres et distance réels existent.
+  - Affectations annulées, refusées ou terminées et missions livrées n'établissent plus de statut ; la mission la plus avancée est retenue quand un véhicule en a plusieurs.
+  - `executive-corridor-map.tsx` n'affiche un marqueur que pour une position réelle et compte les véhicules « non suivis ».
+- **Prévention vérifiable** :
+  - `tests/unit/server/corridor-fleet.test.ts` : aucun véhicule sans mission en transit sur 30 rangs, aucune coordonnée ni progression sans source, aucune valeur de repli.
+  - `tests/contract/management-dashboard-kpis.contract.test.ts` (GPS-FE-4) : sur `GET /api/management/dashboard`, véhicule sans mission en `stopped`, aucun véhicule avec coordonnée tant qu'aucune source n'existe. Rouge sur l'ancien service (1 échec), vert après.
+- **Leçon généralisée** : un champ de contrat obligatoire pousse à fabriquer une valeur quand la donnée manque. Toute donnée dont la source n'existe pas encore est optionnelle et accompagnée d'un champ qui dit d'où elle vient (ici `positionSource`) ; un repli « plausible » n'est jamais acceptable dans une réponse que lit la direction.
+
+## 2026-11-10 — Écriture déclenchable en GET avec un cookie SameSite=None (GPS V1 API, #660)
+
+- **Contexte** : le lot API des positions téléphone exposait `GET /api/driver/positions?lat=&lon=&timestamp=` (format OsmAnd) qui déposait une position, à côté du POST. L'audit sécurité de #660 l'a relevé avant tout allumage du drapeau `gps`.
+- **Cause racine** : le protocole OsmAnd/Traccar envoie ses relevés en GET ou en formulaire ; le format a été repris tel quel sans se demander qui peut émettre une telle requête. Le cookie de session est en `SameSite=None` et il n'existe pas de jeton CSRF : une image, un lien ou un formulaire d'une page tierce ouverte dans le navigateur d'un chauffeur connecté aurait écrit des positions sous son identité (pollution de la trace, plafond de points consommé).
+- **Classification** : sécurité (CSRF), near miss relevé en revue avant mise en production.
+- **Résolution** : le GET est supprimé ; `POST /api/driver/positions` et le POST par paquets refusent tout corps autre que `application/json` (415) ; `parseOsmandReport` ne lit plus la requête ; GET et formulaire reviendront avec le jeton d'appareil du lot balises.
+- **Prévention vérifiable** :
+  - `tests/unit/server/get-no-write-hygiene.test.ts` : échoue sur un `router.get` de `server/api/` qui écrit (`.insert/.update/.delete`, `ingest*`, `create*`), liste gelée vide.
+  - `tests/contract/gps-phone-api.contract.test.ts` : GET 404, formulaire / `text/plain` / sans type 415, nombre de lignes de `vehicle_positions` inchangé.
+  - Règle ajoutée à `AGENTS.md` §10.
+- **Leçon généralisée** : un protocole tiers impose son transport ; on ne l'adopte pas avant d'avoir nommé qui peut émettre la requête. Sans jeton CSRF, une écriture exige POST et `application/json` (le navigateur envoie alors une requête préalable CORS), et le client qui ne sait pas faire attend un jeton d'appareil plutôt que d'ouvrir le cookie.
+
+## 2026-11-10 — File hors ligne : le propriétaire vérifié avant la boucle ne couvre pas la boucle (V5b-2b)
+
+- **Contexte** : la file d'écritures différées (V5b-2, #645) contrôlait une fois, avant la boucle de rejeu, que la session ouverte appartenait au propriétaire de la file (`/api/auth/me`). Revue sécurité de #645.
+- **Cause racine** : le cookie de session est partagé entre tous les onglets du navigateur. Onglet 1 rejoue la file du compte A ; dans l'onglet 2, B se connecte. Les envois suivants de A partent avec le cookie de B, une clé neuve, et sont exécutés puis attribués à B. Un contrôle d'identité fait avant une boucle ne vaut que pour l'instant où il est fait.
+- **Classification** : sécurité, attribution d'une écriture à un autre compte (intégrité du stock, du kilométrage, des pannes). Détecté en revue, avant que `offline-writes` soit allumé.
+- **Résolution** :
+  - Chaque envoi porte `X-Offline-Owner` (propriétaire de la file). `server/middleware/offline-owner-guard.ts`, générique (toute écriture portant aussi `Idempotency-Key`, aucun `if` par route), compare à la session et répond 409 `OFFLINE_OWNER_MISMATCH` avant toute écriture ni réservation de clé.
+  - Le client classe ce code en « auth » : boucle arrêtée, file gardée, jamais « À revoir ». Le login diffuse `session-changed` aux autres onglets, qui adoptent le compte et arrêtent leur rejeu.
+  - Même revue : le registre rejouait des routes non protégées (`work_order_note` POST, `odometer_reading` en POST alors que la route protégée est PUT). La liste des routes protégées vit désormais dans `shared/idempotency-routes.ts` ; la file refuse de rejouer automatiquement ce qui n'y figure pas.
+- **Prévention vérifiable** :
+  - `tests/contract/offline-owner-guard.contract.test.ts` : propriétaire différent de la session donne 409 et aucune clé réservée ; propriétaire égal passe ; en-tête absent inchangé. Rouge sans le garde (2 échecs).
+  - `tests/unit/client/offline-queue-core.test.ts` : « bascule de compte pendant la boucle : aucun envoi après le changement », 409 propriétaire classé auth, route non protégée jamais envoyée, envoi trop ancien non rejoué, plafond des 409 « en cours ».
+  - `tests/unit/client/offline-registry-routes.test.ts` : chaque type du registre doit correspondre à une route protégée. Rouge sur les anciennes déclarations (3 échecs).
+- **Leçon généralisée** : un contrôle d'identité avant une boucle ne couvre pas la boucle, et le cookie est partagé entre onglets. L'identité se porte par requête et se vérifie côté serveur à chaque écriture, pas une fois côté client. Ne rejouer automatiquement qu'une écriture dont la protection contre le doublon est prouvée par un test, pas par une déclaration.

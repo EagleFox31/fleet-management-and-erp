@@ -19,7 +19,7 @@ import { canDeleteFuelRecord } from "@shared/constants/fuel-record-delete";
 import { canCancelFuelRecord, isFuelRecordValidated } from "@shared/constants/fuel-record-cancel";
 import { FuelRecordCancelDialog } from "@/components/fuel/fuel-record-cancel-dialog";
 import { fuelValidationLabel } from "@/lib/fuel-record-status";
-import { FUEL_CARD_MANAGER_ROLES, FUEL_CARD_VIEWER_ROLES, FUEL_RECHARGE_SOURCE_ROLES } from "@shared/constants/roles";
+import { FUEL_CARD_MANAGER_ROLES, FUEL_CARD_VIEWER_ROLES, FUEL_RECHARGE_SOURCE_ROLES, FUEL_RECORD_WRITER_ROLES } from "@shared/constants/roles";
 import type { FuelRechargeSourceAccount } from "@shared/contracts/treasury";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { useToast } from "@/hooks/use-toast";
@@ -109,6 +109,7 @@ export default function FuelPage() {
     sourceAccountId: NO_SOURCE_ACCOUNT,
   });
   const canManageFuelCard = (FUEL_CARD_MANAGER_ROLES as readonly string[]).includes(String(user?.role || ""));
+  const canWriteFuelRecord = (FUEL_RECORD_WRITER_ROLES as readonly string[]).includes(String(user?.role || ""));
   // Solde et historique : les gestionnaires plus le comptable ; la recharge reste à canManageFuelCard.
   const canViewFuelCard = (FUEL_CARD_VIEWER_ROLES as readonly string[]).includes(String(user?.role || ""));
   // Prix manuel : retiré seulement si le drapeau fuel-prices impose le prix du jour (hors admin et logistique).
@@ -717,10 +718,13 @@ export default function FuelPage() {
                   Recharger la carte
                 </Button>
               )}
-              <Button onClick={() => setIsFormOpen(true)}>
-                <Plus className="h-4 w-4 mr-2" />
-                Enregistrer un plein
-              </Button>
+              {/* Même garde que POST /api/fuel-records (isFuelRecordWriter) : pas de bouton qui finit en 403. */}
+              {canWriteFuelRecord && (
+                <Button onClick={() => setIsFormOpen(true)} data-testid="button-open-fuel-form">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Enregistrer un plein
+                </Button>
+              )}
             </div>
           }
         >

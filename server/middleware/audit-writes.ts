@@ -1,6 +1,7 @@
 import type { RequestHandler } from "express";
 import type { AuditAction } from "@shared/contracts/audit-logs";
 import { prepareAuditBody, recordAudit } from "../lib/audit";
+import { routedPath } from "../lib/routed-path";
 
 export interface AuditRule {
   /** Motif sur le chemin sans prefixe /api, ex. /work-orders/:id */
@@ -20,26 +21,14 @@ export interface AuditConfig {
 
 const ACTION_BY_METHOD: Record<string, AuditAction> = { POST: "create", PUT: "update", PATCH: "update", DELETE: "delete" };
 
-/** `schema://hote` d'une requete en forme absolue (`PATCH http://h/api/... HTTP/1.1`), que Node accepte. */
-const ABSOLUTE_FORM = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i;
-
 /**
- * Chemin de la requete tel qu'il sera journalise : sans `schema://hote`, sans query, barres repetees
- * reduites a une seule. Chaque montage Express (`app.use("/api")`, `router.use("/work-orders")`) absorbe
- * une barre en trop : `/api//work-orders/62/parts` et `/api/work-orders//62/parts` s'executent.
- */
-export function auditedPath(url: string): string {
-  return url.replace(ABSOLUTE_FORM, "").split(/[?#]/)[0].replace(/\/{2,}/g, "/") || "/";
-}
-
-/**
- * Chemin tel qu'Express le route : forme absolue retiree, decode, barres repetees reduites, sans casse,
- * sans prefixe `/api` (lui aussi insensible a la casse : `/API/work-orders` s'execute et doit etre
- * journalise), sans barre finale. Ce qui peut sembler trop large (une barre doublee qu'aucun montage
- * n'absorbe) n'ecrit rien : la route repond 404 et l'audit ignore les statuts >= 400.
+ * Chemin compare aux motifs : sans query ni fragment, decode, barres repetees reduites, sans casse,
+ * sans prefixe `/api` (lui aussi insensible a la casse : `/API/work-orders` s'execute), sans barre finale.
+ * Le middleware lui passe `routedPath(req)` (chemin lu par le routeur), jamais `req.originalUrl` brut.
+ * Ce qui peut sembler trop large n'ecrit rien : une route non servie repond 404, ignore (statut >= 400).
  */
 function normalizeAuditPath(path: string): string {
-  const rawPath = auditedPath(path);
+  const rawPath = path.split(/[?#]/)[0];
   let decoded = rawPath;
   try {
     decoded = decodeURIComponent(rawPath);
@@ -78,10 +67,11 @@ export function wantsResponseId(config: AuditConfig, method: string, path: strin
 /** Journalise, apres la reponse (< 400), les ecritures dont le chemin correspond a une regle. */
 export function auditWrites(config: AuditConfig): RequestHandler {
   return (req, res, next) => {
-    const hit = matchAuditRule(config, req.method, req.originalUrl);
+    const path = routedPath(req);
+    const hit = matchAuditRule(config, req.method, path);
     if (!hit) return next();
     let responseId: string | null = null;
-    if (hit.entityId === null && wantsResponseId(config, req.method, req.originalUrl)) {
+    if (hit.entityId === null && wantsResponseId(config, req.method, path)) {
       const json = res.json.bind(res);
       res.json = (body?: unknown) => {
         const id = (body as { id?: unknown } | null | undefined)?.id;
@@ -97,7 +87,7 @@ export function auditWrites(config: AuditConfig): RequestHandler {
         entityType: hit.entityType,
         entityId: hit.entityId ?? responseId,
         method: req.method,
-        path: auditedPath(req.originalUrl),
+        path,
         requestId: (req as { requestId?: string }).requestId,
         ipAddress: req.ip ?? null,
         userAgent: req.get("user-agent") ?? null,

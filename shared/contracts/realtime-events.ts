@@ -14,6 +14,7 @@ import {
   FINANCE_RECEIVABLE_READ_ROLES,
   FUEL_READ_ROLES,
   GPS_VIEW_ROLES,
+  INCIDENT_AUDIENCE_ROLES,
   MISSION_ADVISORY_ROLES,
   PART_CATALOG_EVENT_ROLES,
   PART_SALE_READ_ROLES,
@@ -36,8 +37,6 @@ type EventDefinition<TPayload> = {
   /** Type porteur, sans valeur à l'exécution. */
   payload?: TPayload;
 };
-
-const WORKSHOP_SUPERVISORS = ["admin", "workshop_manager"] as const satisfies readonly AppRole[];
 
 /**
  * Clés de query réelles, pas des préfixes de chemin : TanStack compare les clés élément par
@@ -74,7 +73,7 @@ const PART_SALE_INVALIDATES = [
 export const REALTIME_EVENTS = {
   incident_reported: {
     // Atelier et logistique : les avis de maintenance de mission sont lus par MISSION_ADVISORY_ROLES.
-    scope: { type: "roles", roles: [...new Set<AppRole>([...WORKSHOP_SUPERVISORS, ...MISSION_ADVISORY_ROLES])] },
+    scope: { type: "roles", roles: [...INCIDENT_AUDIENCE_ROLES] },
     invalidates: ["/api/incidents", "/api/kpi/incidents-per-month", "/api/alerts", "/api/mission-advisories"],
   } as EventDefinition<{ id: number; vehicleId: number; severity: "low" | "medium" | "high" }>,
   fuel_record_validated: {
@@ -163,8 +162,9 @@ export const REALTIME_EVENTS = {
   } as EventDefinition<{ id: number; invoiceId: number }>,
   vehicle_position_updated: {
     scope: { type: "roles", roles: GPS_VIEW_ROLES },
-    invalidates: ["/api/vehicle-positions"],
-  } as EventDefinition<{ vehicleId: number }>,
+    invalidates: ["/api/vehicle-positions", "/api/missions/:id/track"],
+    // `missionId` (optionnel, source téléphone) : l'écran de trace invalide /api/missions/<missionId>/track.
+  } as EventDefinition<{ vehicleId: number; missionId?: number | null }>,
   // Véhicule retiré de la flotte (physiquement ou en douceur) ou remis : listes, fiche, plans de
   // maintenance et renouvellements désactivés ou réactivés. Tout le personnel lit les véhicules.
   vehicle_deleted: {

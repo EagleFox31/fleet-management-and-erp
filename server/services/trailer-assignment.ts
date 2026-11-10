@@ -1,6 +1,7 @@
-import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { assignments, vehicles } from "@shared/schema";
 import { ACTIVE_ASSIGNMENT_STATUSES, isTrailerVehicleType } from "@shared/constants/assignments";
+import { formatEligibilityRefusal, getMissionEligibility, type VehicleEligibilityInput } from "@shared/constants/vehicle-eligibility";
 import { AppError } from "../lib/app-error";
 import { isUniqueViolation, pgConstraintOf } from "../lib/pg-errors";
 import type { db } from "../db";
@@ -11,12 +12,32 @@ export const TRAILER_ACTIVE_INDEX = "uq_assignments_trailer_active";
 export const TRAILER_ALREADY_HITCHED_MESSAGE = "Cette remorque est déjà attelée à un autre camion sur une affectation en cours.";
 export const TRAILER_WRONG_TYPE_MESSAGE = "Le véhicule choisi comme remorque doit être de type remorque ou semi-remorque.";
 export const TRAILER_IS_TRUCK_MESSAGE = "La remorque ne peut pas être le camion de l'affectation.";
+export const TRUCK_IS_TRAILER_MESSAGE = "Ce véhicule est une remorque : choisissez un camion pour l'affectation.";
+
+/** Décision 0a (2026-11-10) : une remorque n'est jamais le camion d'une affectation, sur les trois routes. */
+export function assertTruckIsNotTrailer(vehicleType: string | null | undefined): void {
+  if (isTrailerVehicleType(vehicleType)) throw new AppError(400, TRUCK_IS_TRAILER_MESSAGE);
+}
+
+/**
+ * Relit le type du camion sous le verrou véhicule (espace 1, déjà pris par lockPlanningResources) :
+ * le type lu avant la transaction a pu passer à remorque entre-temps (PATCH du véhicule).
+ */
+export async function assertTruckTypeUnderLock(tx: Executor, vehicleId: number): Promise<void> {
+  const [truck] = await tx.select({ vehicleType: vehicles.vehicleType }).from(vehicles).where(eq(vehicles.id, vehicleId)).limit(1);
+  if (truck) assertTruckIsNotTrailer(truck.vehicleType);
+}
 
 export type TrailerCheck = {
   trailerId: number;
   vehicleId: number;
   /** Affectation en cours de modification : son propre attelage ne compte pas comme conflit. */
   excludeAssignmentId?: number | null;
+  /**
+   * Récépissés ouverts de la remorque, lus dans la transaction (`loadOpenRenewalReceipts(id, tx)`).
+   * Injecté : ce module ne charge pas `server/db`, il reste importable par un test unitaire.
+   */
+  loadReceipts: (vehicleId: number) => Promise<NonNullable<VehicleEligibilityInput["receipts"]>>;
 };
 
 /**
@@ -28,21 +49,64 @@ export type TrailerCheck = {
  * trailerConflictToAppError, jamais un 500).
  */
 export async function assertTrailerAssignable(tx: Executor, check: TrailerCheck): Promise<void> {
-  const { trailerId, vehicleId, excludeAssignmentId } = check;
+  const { trailerId, vehicleId, excludeAssignmentId, loadReceipts } = check;
   if (trailerId === vehicleId) throw new AppError(400, TRAILER_IS_TRUCK_MESSAGE);
+  // Verrou avant la lecture du type : un changement de type (assertVehicleTypeChangeAllowed) prend le
+  // même verrou, il passe donc avant cette lecture ou après l'insertion, jamais entre les deux.
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(3, ${trailerId})`);
   const [trailer] = await tx
-    .select({ id: vehicles.id, vehicleType: vehicles.vehicleType })
+    .select({
+      id: vehicles.id,
+      vehicleType: vehicles.vehicleType,
+      registrationNumber: vehicles.registrationNumber,
+      status: vehicles.status,
+      insuranceExpiry: vehicles.insuranceExpiry,
+      technicalInspectionDate: vehicles.technicalInspectionDate,
+      licensePlateExpiry: vehicles.licensePlateExpiry,
+    })
     .from(vehicles)
     .where(and(eq(vehicles.id, trailerId), isNull(vehicles.deletedAt)))
     .limit(1);
   if (!trailer) throw new AppError(400, "Remorque introuvable.");
   if (!isTrailerVehicleType(trailer.vehicleType)) throw new AppError(400, TRAILER_WRONG_TYPE_MESSAGE);
+  // Même éligibilité que le camion (décision 0a) : atelier, hors service, papiers expirés sans récépissé.
+  const eligibility = getMissionEligibility({ ...trailer, receipts: await loadReceipts(trailer.id) });
+  if (!eligibility.eligible) throw new AppError(400, formatEligibilityRefusal(trailer.registrationNumber, eligibility.blockers));
 
-  await tx.execute(sql`SELECT pg_advisory_xact_lock(3, ${trailerId})`);
-  const conditions = [eq(assignments.trailerId, trailerId), inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES])];
+  // Conflit : attelée ailleurs, ou (affectation ancienne) prise comme camion d'une affectation active.
+  const conditions: (SQL | undefined)[] = [
+    or(eq(assignments.trailerId, trailerId), eq(assignments.vehicleId, trailerId)),
+    inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES]),
+  ];
   if (excludeAssignmentId) conditions.push(ne(assignments.id, excludeAssignmentId));
   const [hitched] = await tx.select({ id: assignments.id }).from(assignments).where(and(...conditions)).limit(1);
   if (hitched) throw new AppError(409, TRAILER_ALREADY_HITCHED_MESSAGE);
+}
+
+export const VEHICLE_HITCHED_TYPE_MESSAGE =
+  "Ce véhicule est sur une affectation en cours : son type ne peut pas passer de camion à remorque (ou l'inverse) tant qu'elle n'est pas terminée ou annulée.";
+
+/**
+ * Changement de `vehicleType` : refusé (409) si le véhicule est sur une affectation active dans le
+ * rôle que le nouveau type lui retirerait (camion → remorque, ou remorque → autre). À appeler dans la
+ * transaction qui écrit le type : la ligne véhicule et les verrous consultatifs de l'affectation
+ * (espaces 1 et 3) sont pris ici ; l'affectation relit le type de la remorque après son verrou 3 et celui du camion après son verrou 1, une affectation simultanée passe donc avant ou après, jamais entre.
+ */
+export async function assertVehicleTypeChangeAllowed(tx: Executor, vehicleId: number, newType: string): Promise<void> {
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(1, ${vehicleId})`);
+  await tx.execute(sql`SELECT pg_advisory_xact_lock(3, ${vehicleId})`);
+  const [current] = await tx.select({ vehicleType: vehicles.vehicleType }).from(vehicles).where(eq(vehicles.id, vehicleId)).for("update").limit(1);
+  if (!current) return;
+  const wasTrailer = isTrailerVehicleType(current.vehicleType);
+  const willBeTrailer = isTrailerVehicleType(newType);
+  if (wasTrailer === willBeTrailer) return;
+  const role = willBeTrailer ? assignments.vehicleId : assignments.trailerId;
+  const [hitched] = await tx
+    .select({ id: assignments.id })
+    .from(assignments)
+    .where(and(eq(role, vehicleId), inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES])))
+    .limit(1);
+  if (hitched) throw new AppError(409, VEHICLE_HITCHED_TYPE_MESSAGE);
 }
 
 /** Violation de l'index unique partiel (course perdue malgré le verrou) → 409 lisible ; sinon l'erreur d'origine. */

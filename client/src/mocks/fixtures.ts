@@ -65,6 +65,7 @@ export const mockIncidents = (): Incident[] => [
   {
     id: 2,
     vehicleId: 13,
+    vehicleRegistration: "TEST-013",
     reportedBy: 21,
     reportedByName: "Ali Sawadogo",
     description: "Fuite d'huile visible sous le moteur au démarrage.",
@@ -77,6 +78,7 @@ export const mockIncidents = (): Incident[] => [
   {
     id: 1,
     vehicleId: 13,
+    vehicleRegistration: "TEST-013",
     reportedBy: 22,
     reportedByName: "Moussa Ouedraogo",
     description: "Voyant de freinage allumé en roulant.",

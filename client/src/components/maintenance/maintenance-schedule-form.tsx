@@ -5,6 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
+import { useAllVehicles } from "@/hooks/use-all-vehicles";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import {
@@ -87,11 +88,9 @@ export function MaintenanceScheduleForm({
   );
 
   // Charger la liste des véhicules pour le sélecteur
-  const { data: vehiclesData, isLoading: isLoadingVehicles } = useQuery<any>({
-    queryKey: ['/api/vehicles'],
-  }) as { data: any, isLoading: boolean };
+  const { data: allVehicles, isLoading: isLoadingVehicles } = useAllVehicles();
   
-  const vehicles = vehiclesData?.vehicles || [];
+  const vehicles = allVehicles ?? [];
 
   // Configurer le formulaire avec le schéma de validation
   const form = useForm<z.infer<typeof maintenanceScheduleFormSchema>>({

@@ -12,30 +12,16 @@ import {
   type IdempotencyRoute,
 } from "../lib/idempotency-config";
 import { hashRequest, idempotencyStore, type IdempotencyStore } from "../lib/idempotency-store";
+import { findIdempotentRoute, normalizeIdempotencyPath } from "@shared/idempotency-routes";
 import { moduleLogger } from "../lib/logger";
+import { API_PREFIX, routedPath } from "../lib/routed-path";
 
 /** Chargé à l'appel : importer la base au chargement casserait les tests unitaires sans base. */
 const findActiveSessionUser = async (id: number) => (await import("../services/session-user")).findActiveSessionUser(id);
 
 const log = moduleLogger("idempotency-guard");
 
-/** Chemin normalisé comme Express et le journal d'audit : sans casse, décodé, sans `/` final. */
-export function normalizeIdempotencyPath(path: string): string {
-  const rawPath = path.split("?")[0];
-  let decoded = rawPath;
-  try {
-    decoded = decodeURIComponent(rawPath);
-  } catch {
-    // Encodage invalide : on garde le chemin brut.
-  }
-  return decoded.toLowerCase().replace(/\/+$/, "") || "/";
-}
-
-/** Règle de la liste qui couvre l'écriture `method path`, ou `undefined`. */
-export function findIdempotentRoute(routes: readonly IdempotencyRoute[], method: string, path: string): IdempotencyRoute | undefined {
-  const clean = normalizeIdempotencyPath(path);
-  return routes.find((route) => route.method === method.toUpperCase() && route.pattern.test(clean));
-}
+export { findIdempotentRoute, normalizeIdempotencyPath };
 
 /** Vrai si l'écriture `method path` figure dans la liste des routes rejouables. */
 export function isIdempotentRoute(routes: readonly IdempotencyRoute[], method: string, path: string): boolean {
@@ -67,7 +53,8 @@ export function idempotencyGuard(
   return async (req, res, next) => {
     if (routes.length === 0) return next();
     const method = req.method.toUpperCase();
-    const path = normalizeIdempotencyPath(req.originalUrl.replace(/^\/api/i, ""));
+    // Chemin lu par le routeur (`\`, `//`, forme absolue), pas `originalUrl` brut (#631).
+    const path = normalizeIdempotencyPath(routedPath(req).replace(API_PREFIX, ""));
     const route = findIdempotentRoute(routes, method, path);
     if (!route) return next();
     if (!route.ignoreFeatureFlag && !isFeatureEnabled(IDEMPOTENCY_FLAG)) return next();

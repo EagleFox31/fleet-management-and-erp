@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAllVehicles } from "@/hooks/use-all-vehicles";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -52,14 +53,12 @@ export default function MaintenanceSimplePage() {
   }) as { data: any[], isLoading: boolean, error: any };
 
   // Chargement des véhicules pour afficher les détails
-  const { data: vehiclesData } = useQuery<any>({
-    queryKey: ['/api/vehicles'],
-  }) as { data: { vehicles: any[] } };
+  const { data: allVehicles } = useAllVehicles();
 
   // Trouver le véhicule correspondant à un ID
   const findVehicle = (vehicleId: number) => {
-    if (!vehiclesData?.vehicles) return null;
-    return vehiclesData.vehicles.find((v: any) => v.id === vehicleId);
+    if (!allVehicles) return null;
+    return allVehicles.find((v: any) => v.id === vehicleId);
   };
 
   // Formater le texte de fréquence

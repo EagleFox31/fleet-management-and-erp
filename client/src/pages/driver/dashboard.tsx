@@ -35,6 +35,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ContextualHelpButton } from "@/components/help";
+import { useGuardedLogout } from "@/components/offline/logout-guard";
+import { OfflineDataBanner, OfflineUnavailable, useOfflineReadActive } from "@/components/offline/offline-data-banner";
 import { useToast } from "@/hooks/use-toast";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -694,15 +696,17 @@ function PerformanceTab({ missions }: { missions: Mission[] }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function DriverDashboard() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
+  const { requestLogout, guardDialog } = useGuardedLogout();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   useRealTimeSync(user?.id);
   const [showProblemSheet, setShowProblemSheet] = useState(false);
   const [showFuelSheet, setShowFuelSheet] = useState(false);
   const [activeTab, setActiveTab] = useState<"mission" | "perf">("mission");
+  const offlineReadActive = useOfflineReadActive();
 
-  const { data: driverData, isLoading } = useQuery<DriverMe>({
+  const { data: driverData, isLoading, dataUpdatedAt: driverDataUpdatedAt } = useQuery<DriverMe>({
     queryKey: ["/api/drivers/me"],
     staleTime: 30_000,
   });
@@ -772,6 +776,7 @@ export default function DriverDashboard() {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {guardDialog}
           <ContextualHelpButton />
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-full bg-success flex items-center justify-center text-white text-xs font-bold">
@@ -779,11 +784,12 @@ export default function DriverDashboard() {
             </div>
             <p className="text-white text-sm font-medium hidden sm:block">{driverName}</p>
           </div>
-          <button onClick={() => logout()} className="text-green-300 hover:text-white transition-colors p-1" aria-label="Se déconnecter">
+          <button onClick={() => void requestLogout()} className="text-green-300 hover:text-white transition-colors p-1" aria-label="Se déconnecter">
             <LogOut className="h-4 w-4" />
           </button>
         </div>
       </header>
+      <OfflineDataBanner updatedAt={driverDataUpdatedAt} />
 
       {/* ── Tab bar ─────────────────────────────────────────────── */}
       <div className="sticky top-[56px] z-30 bg-card border-b border-gray-100 flex" style={{ boxShadow: "0 1px 0 #f0f0f0" }}>
@@ -1034,6 +1040,8 @@ export default function DriverDashboard() {
               <div className="w-10 h-10 rounded-full border-4 border-success/30 border-t-green-600 animate-spin" />
               <p className="text-sm text-gray-500">Chargement…</p>
             </div>
+          ) : offlineReadActive ? (
+            <OfflineUnavailable what="Mes performances" />
           ) : (
             <PerformanceTab missions={allMissions} />
           )

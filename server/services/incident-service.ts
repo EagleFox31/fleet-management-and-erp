@@ -7,7 +7,7 @@
  * - insertion avec les champs d'audit (`created_by`, `updated_by`) ;
  * - après l'insertion : alerte au chef d'atelier et à l'admin (dédupliquée par
  *   `dedupe_key`, donc un retry est sans doublon) puis événement
- *   `incident_reported` (roles workshop_manager et admin).
+ *   `incident_reported` (atelier et logistique, voir REALTIME_EVENTS).
  *
  * Le routeur (`server/api/incidents.routes.ts`) est à l'API : il appelle
  * `createIncident(user, body)` et `listIncidents(user, query)`.
@@ -16,8 +16,12 @@ import { and, desc, eq } from "drizzle-orm";
 import { incidents, users, vehicles, workOrders, type WorkOrder } from "@shared/schema";
 import type { CreateIncidentRequest, Incident, IncidentStatus } from "@shared/contracts/incidents";
 import { ACTIVE_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
+import { STATUS_MESSAGES } from "@shared/errors";
 import { AppError } from "../lib/app-error";
+import { isForeignKeyViolation, isTransactionConflict, pgConstraintOf } from "../lib/pg-errors";
 import { moduleLogger } from "../lib/logger";
+import { REALTIME_EVENTS } from "@shared/contracts/realtime-events";
+import { INCIDENT_AUDIENCE_ROLES } from "@shared/constants/roles";
 import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 
 const log = moduleLogger("incidents");
@@ -29,6 +33,7 @@ export type IncidentActor = { id: number; role: string };
 
 export const INCIDENT_OUT_OF_SCOPE_MESSAGE = "Vous ne pouvez déclarer une panne que sur le véhicule qui vous est affecté.";
 export const INCIDENT_FORBIDDEN_MESSAGE = "Votre profil ne permet pas de déclarer une panne.";
+export const INCIDENT_READ_FORBIDDEN_MESSAGE = "Votre profil ne permet pas de consulter les pannes déclarées.";
 
 /**
  * Règle pure. `assignedVehicleIds` n'est lu que pour un chauffeur.
@@ -105,10 +110,11 @@ export async function defaultDeps(): Promise<IncidentDeps> {
   };
 }
 
-function toIncident(row: typeof incidents.$inferSelect, reportedByName: string | null): Incident {
+function toIncident(row: typeof incidents.$inferSelect, reportedByName: string | null, vehicleRegistration: string | null): Incident {
   return {
     id: row.id,
     vehicleId: row.vehicleId,
+    vehicleRegistration,
     reportedBy: row.reportedBy,
     reportedByName,
     description: row.description,
@@ -130,6 +136,23 @@ export interface CreateIncidentOptions {
 
 const WORK_ORDER_PRIORITY = { low: "low", medium: "medium", high: "high" } as const;
 
+/** Contraintes de clé étrangère vers le véhicule (incident, OT). */
+const VEHICLE_FK_CONSTRAINT = /^(incidents|work_orders)_vehicle_id_/;
+
+/**
+ * Échec d'une étape antérieure à toute écriture validée (lecture du périmètre, corps de la
+ * transaction) : 404 si la clé étrangère du véhicule saute (course avec une suppression), sinon 503
+ * lisible. Les deux codes figurent dans `PRE_WRITE_REFUSAL_CODES` : la clé d'idempotence est
+ * libérée, le réessai avec la même clé peut écrire. Une `AppError` déjà prononcée passe telle quelle.
+ */
+function preWriteFailure(err: unknown): never {
+  if (err instanceof AppError) throw err;
+  if (isForeignKeyViolation(err) && VEHICLE_FK_CONSTRAINT.test(pgConstraintOf(err) ?? "")) {
+    throw new AppError(404, "Véhicule introuvable.", { cause: err, code: "INCIDENT_VEHICLE_NOT_FOUND" });
+  }
+  throw new AppError(503, STATUS_MESSAGES.INCIDENT_WRITE_FAILED, { cause: err, code: "INCIDENT_WRITE_FAILED" });
+}
+
 export async function createIncident(
   actor: IncidentActor | undefined,
   input: CreateIncidentRequest,
@@ -137,27 +160,42 @@ export async function createIncident(
   options: CreateIncidentOptions = {},
 ): Promise<Incident> {
   const d = deps ?? (await defaultDeps());
-  const assigned = actor?.role === "driver" ? await d.assignedVehicleIds(actor) : [];
+  const assigned = actor?.role === "driver" ? await d.assignedVehicleIds(actor).catch(preWriteFailure) : [];
   const denied = incidentScopeError(actor, input.vehicleId, assigned);
   if (denied) throw denied;
   const user = actor as IncidentActor;
 
+  // Avant la transaction : un véhicule inexistant est un 404, pas une violation de clé étrangère (500).
+  const [vehicleRow] = await d.db
+    .select({ registrationNumber: vehicles.registrationNumber })
+    .from(vehicles)
+    .where(eq(vehicles.id, input.vehicleId))
+    .limit(1);
+  if (!vehicleRow) throw new AppError(404, "Véhicule introuvable.", { code: "INCIDENT_VEHICLE_NOT_FOUND" });
+  const registration: string = vehicleRow.registrationNumber;
+
   const now = (d.now ?? (() => new Date()))();
   let workOrder: WorkOrder | null = null;
+  // Une transaction rejetée n'est pas une transaction annulée : le pilote enchaîne begin, corps et
+  // COMMIT dans le même `try`. `bodyDone` distingue l'échec du corps (rien de validé) de celui du
+  // COMMIT (validé ou non, inconnu) : dans ce cas l'erreur brute remonte et la clé reste gardée.
+  let bodyDone = false;
   const row = await d.db.transaction(async (tx: any) => {
+    const [vehicle] = await tx
+      .select({
+        id: vehicles.id,
+        registrationNumber: vehicles.registrationNumber,
+        brand: vehicles.brand,
+        model: vehicles.model,
+        deletedAt: vehicles.deletedAt,
+      })
+      .from(vehicles)
+      .where(eq(vehicles.id, input.vehicleId))
+      .limit(1);
+    // Véhicule inexistant : 404 lisible (et non la violation de clé étrangère de l'incident, un 500).
+    if (!vehicle) throw new AppError(404, "Véhicule introuvable.", { code: "INCIDENT_VEHICLE_NOT_FOUND" });
     if (options.openWorkOrder) {
-      const [vehicle] = await tx
-        .select({
-          id: vehicles.id,
-          registrationNumber: vehicles.registrationNumber,
-          brand: vehicles.brand,
-          model: vehicles.model,
-          deletedAt: vehicles.deletedAt,
-        })
-        .from(vehicles)
-        .where(eq(vehicles.id, input.vehicleId))
-        .limit(1);
-      if (!vehicle || vehicle.deletedAt) throw new AppError(404, "Véhicule introuvable.");
+      if (vehicle.deletedAt) throw new AppError(404, "Véhicule introuvable.", { code: "INCIDENT_VEHICLE_NOT_FOUND" });
       const [order] = await tx
         .insert(workOrders)
         .values({
@@ -192,7 +230,13 @@ export async function createIncident(
         updatedAt: now,
       })
       .returning();
+    bodyDone = true;
     return created as typeof incidents.$inferSelect;
+  }).catch((err: unknown) => {
+    if (err instanceof AppError) throw err;
+    // Corps échoué, ou COMMIT refusé avec certitude (conflit de sérialisation) : rien n'est validé.
+    if (!bodyDone || isTransactionConflict(err)) preWriteFailure(err);
+    throw err;
   });
 
   // Après validation de la transaction : l'alerte ne peut pas annoncer un incident absent.
@@ -200,7 +244,7 @@ export async function createIncident(
     .notifyRoles({
       roles: ["workshop_manager", "admin"],
       title: input.severity === "high" ? "Panne grave déclarée" : "Panne déclarée",
-      message: `Panne ${input.severity === "high" ? "grave " : ""}déclarée sur le véhicule #${input.vehicleId}.`,
+      message: `Panne ${input.severity === "high" ? "grave " : ""}déclarée sur le véhicule ${registration}.`,
       link: "/incidents",
       dedupeKey: `incident_reported:${row.id}`,
       priority: input.severity === "high" ? "high" : "medium",
@@ -211,7 +255,8 @@ export async function createIncident(
     entity: "incident",
     entityId: row.id,
     payload: { id: row.id, vehicleId: row.vehicleId, severity: row.severity },
-    scope: { type: "roles", roles: ["workshop_manager", "admin"] },
+    // Même portée que la définition partagée : atelier et logistique (avis de maintenance de mission).
+    scope: REALTIME_EVENTS.incident_reported.scope,
   });
 
   if (workOrder) {
@@ -229,7 +274,7 @@ export async function createIncident(
     });
   }
 
-  return toIncident(row, null);
+  return toIncident(row, null, registration);
 }
 
 export async function listIncidents(
@@ -238,7 +283,10 @@ export async function listIncidents(
   deps?: Pick<IncidentDeps, "db">,
 ): Promise<Incident[]> {
   if (!actor) throw new AppError(401, "Non authentifié.");
-  if (actor.role === "client") throw new AppError(403, INCIDENT_FORBIDDEN_MESSAGE);
+  // Atelier et logistique lisent tout, le chauffeur les siennes ; comptable, lecteur, RH, client : 403.
+  if (actor.role !== "driver" && !(INCIDENT_AUDIENCE_ROLES as readonly string[]).includes(actor.role)) {
+    throw new AppError(403, INCIDENT_READ_FORBIDDEN_MESSAGE);
+  }
   const db = (deps ?? (await defaultDeps())).db;
   const filters = [
     query.status ? eq(incidents.status, query.status) : undefined,
@@ -246,10 +294,11 @@ export async function listIncidents(
     actor.role === "driver" ? eq(incidents.reportedBy, actor.id) : undefined,
   ].filter((f) => f !== undefined);
   const rows = await db
-    .select({ incident: incidents, name: users.name })
+    .select({ incident: incidents, name: users.name, plate: vehicles.registrationNumber })
     .from(incidents)
     .leftJoin(users, eq(incidents.reportedBy, users.id))
+    .leftJoin(vehicles, eq(incidents.vehicleId, vehicles.id))
     .where(filters.length ? and(...filters) : undefined)
     .orderBy(desc(incidents.createdAt));
-  return rows.map((r: { incident: typeof incidents.$inferSelect; name: string | null }) => toIncident(r.incident, r.name));
+  return rows.map((r: { incident: typeof incidents.$inferSelect; name: string | null; plate: string | null }) => toIncident(r.incident, r.name, r.plate));
 }

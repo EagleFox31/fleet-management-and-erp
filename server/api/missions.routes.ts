@@ -23,11 +23,13 @@ import {
 } from "@shared/constants/management-mission-profitability";
 import { isDriverLicenseExpiredOn, isExpiredOn, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { AppError } from "../lib/app-error";
+import { missionGeoColumnsFromBody } from "../lib/gps-points";
+import { isFeatureEnabled } from "../lib/feature-flags";
 import { MISSION_ID_INVALID_MESSAGE, parseRouteId } from "../lib/route-id";
 import { assertValidDbId } from "../lib/work-order-scope";
 import { assertPlanningStateUnchanged, findPlanningClash, launchRefusalMessage, lockPlanningPairs, lockPlanningResources, planningClashMessage, planningStateKey } from "../services/mission-planning";
 import { ACTIVE_ASSIGNMENT_STATUSES, VOID_ASSIGNMENT_STATUSES, isActiveAssignmentStatus, isVoidAssignmentStatus } from "@shared/constants/assignments";
-import { assertTrailerAssignable, trailerConflictToAppError } from "../services/trailer-assignment";
+import { assertTrailerAssignable, assertTruckIsNotTrailer, assertTruckTypeUnderLock, trailerConflictToAppError } from "../services/trailer-assignment";
 
 // Remorque attelée à l'affectation : second alias de vehicles, le premier étant le camion.
 const trailerVehicles = alias(vehicles, "assignment_trailer");
@@ -2064,7 +2066,9 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
         errors: parsed.error.issues.map((issue) => ({ field: issue.path.join("."), message: issue.message })),
       });
     }
-    const { assignment: assignmentInput, ...validatedData } = parsed.data;
+    const { assignment: assignmentInput, ...parsedData } = parsed.data;
+    // Points A/B (GPS V1) : hub validé contre le référentiel CEMAC, coordonnées du hub prioritaires ; 400 sinon.
+    const validatedData = isFeatureEnabled("gps") ? { ...parsedData, ...missionGeoColumnsFromBody(missionData) } : parsedData;
 
     if (validatedData.tariffGridId != null) {
       const [tariff] = await db
@@ -2113,6 +2117,7 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
       const [selectedVehicle] = await db
         .select({
           id: vehicles.id,
+          vehicleType: vehicles.vehicleType,
           registrationNumber: vehicles.registrationNumber,
           tonnage: vehicles.tonnage,
           status: vehicles.status,
@@ -2128,6 +2133,7 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
       if (!selectedVehicle) {
         return res.status(400).json({ message: "Véhicule introuvable pour l'affectation." });
       }
+      assertTruckIsNotTrailer(selectedVehicle.vehicleType);
 
       // Le filtre de l'écran de création ne portait que sur `status`, et
       // seulement côté client: l'API acceptait n'importe quel véhicule, y
@@ -2205,6 +2211,7 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
       if (withAssignment) {
         // Ordre des verrous identique sur les trois routes : camion (1), chauffeur (2), puis remorque (3).
         await lockPlanningResources(tx, assignmentVehicleId!, assignmentDriverId!);
+        await assertTruckTypeUnderLock(tx, assignmentVehicleId!);
         const clash = await findPlanningClash(tx, {
           missionId: null,
           pickupDate: validatedData.pickupDate,
@@ -2214,7 +2221,7 @@ router.post("/", authorize([...MISSION_MANAGER_ROLES]), async (req, res, next) =
         });
         if (clash) throw new AppError(409, planningClashMessage(clash));
         if (assignmentTrailerId) {
-          await assertTrailerAssignable(tx, { trailerId: assignmentTrailerId, vehicleId: assignmentVehicleId! });
+          await assertTrailerAssignable(tx, { loadReceipts: (id) => loadOpenRenewalReceipts(id, tx), trailerId: assignmentTrailerId, vehicleId: assignmentVehicleId! });
         }
       }
       const [created] = await tx
@@ -2491,6 +2498,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
           status: assignments.status,
           vehicleId: assignments.vehicleId,
           driverId: assignments.driverId,
+          trailerId: assignments.trailerId,
         })
         .from(assignments)
         .where(eq(assignments.missionId, missionId))
@@ -2534,7 +2542,9 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
       } else {
         const assignmentPayload = payload.assignment;
         const { vehicleId, driverId } = assignmentPayload;
-        const trailerId: number | null = assignmentPayload.trailerId ? Number(assignmentPayload.trailerId) : null;
+        // Absent = remorque inchangée (ancien écran en cache qui ne connaît pas le champ) ; null = retirée.
+        const trailerId: number | null =
+          assignmentPayload.trailerId === undefined ? (existingAssignment?.trailerId ?? null) : assignmentPayload.trailerId ? Number(assignmentPayload.trailerId) : null;
         if (trailerId !== null && (!Number.isInteger(trailerId) || trailerId <= 0)) {
           return res.status(400).json({ message: "Affectation invalide (remorque)." });
         }
@@ -2545,6 +2555,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
         const [selectedVehicle] = await db
           .select({
             id: vehicles.id,
+            vehicleType: vehicles.vehicleType,
             registrationNumber: vehicles.registrationNumber,
             tonnage: vehicles.tonnage,
             status: vehicles.status,
@@ -2559,6 +2570,7 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
         if (!selectedVehicle) {
           return res.status(400).json({ message: "Véhicule introuvable pour l'affectation." });
         }
+        assertTruckIsNotTrailer(selectedVehicle.vehicleType);
 
         // Même règle que la création (POST /) : un véhicule à l'atelier ou en défaut
         // d'assurance, de visite technique ou de plaque ne s'affecte pas non plus par PATCH.
@@ -2628,7 +2640,8 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
         if (existingAssignment?.id) {
           const current = existingAssignment;
           writeAssignment = async (tx) => {
-            if (trailerId) await assertTrailerAssignable(tx, { trailerId, vehicleId, excludeAssignmentId: current.id });
+            await assertTruckTypeUnderLock(tx, vehicleId);
+            if (trailerId) await assertTrailerAssignable(tx, { loadReceipts: (id) => loadOpenRenewalReceipts(id, tx), trailerId, vehicleId, excludeAssignmentId: current.id });
             await tx
               .update(assignments)
               .set({
@@ -2642,7 +2655,8 @@ router.patch("/:id", authorize([...MISSION_MANAGER_ROLES]), async (req, res, nex
           };
         } else {
           writeAssignment = async (tx) => {
-            if (trailerId) await assertTrailerAssignable(tx, { trailerId, vehicleId });
+            await assertTruckTypeUnderLock(tx, vehicleId);
+            if (trailerId) await assertTrailerAssignable(tx, { loadReceipts: (id) => loadOpenRenewalReceipts(id, tx), trailerId, vehicleId });
             await tx.insert(assignments).values({ missionId, vehicleId, driverId, trailerId, status: "pending" });
           };
         }
@@ -2741,6 +2755,7 @@ router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), validateB
       const [vehicle] = await tx
         .select({
           id: vehicles.id,
+          vehicleType: vehicles.vehicleType,
           registrationNumber: vehicles.registrationNumber,
           tonnage: vehicles.tonnage,
           status: vehicles.status,
@@ -2752,6 +2767,7 @@ router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), validateB
         .where(and(eq(vehicles.id, vehicleId), isNull(vehicles.deletedAt)))
         .limit(1);
       if (!vehicle) throw new AppError(400, "Véhicule introuvable pour l'affectation.");
+      assertTruckIsNotTrailer(vehicle.vehicleType);
 
       const eligibilite = getMissionEligibility({ ...vehicle, receipts: await loadOpenRenewalReceipts(vehicle.id, tx) });
       if (!eligibilite.eligible) {
@@ -2785,6 +2801,7 @@ router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), validateB
 
       // Conflit de planning (même règle que le lancement) : chaque chauffeur et chaque véhicule ajouté.
       await lockPlanningResources(tx, vehicleId, driverId);
+      await assertTruckTypeUnderLock(tx, vehicleId);
       const clash = await findPlanningClash(tx, {
         missionId,
         pickupDate: mission.pickupDate,
@@ -2793,7 +2810,7 @@ router.post("/:id/assignments", authorize([...MISSION_MANAGER_ROLES]), validateB
         driverId,
       });
       if (clash) throw new AppError(409, planningClashMessage(clash));
-      if (trailerId) await assertTrailerAssignable(tx, { trailerId, vehicleId });
+      if (trailerId) await assertTrailerAssignable(tx, { loadReceipts: (id) => loadOpenRenewalReceipts(id, tx), trailerId, vehicleId });
 
       const [assignment] = await tx.insert(assignments).values({ missionId, vehicleId, driverId, trailerId, status: "pending" }).returning();
       const [updatedMission] =
@@ -2927,6 +2944,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
         id: assignments.id,
         vehicleId: assignments.vehicleId,
         driverId: assignments.driverId,
+        trailerId: assignments.trailerId,
         status: assignments.status,
         acceptedAt: assignments.acceptedAt,
         startedAt: assignments.startedAt,
@@ -3079,6 +3097,33 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
             if (blocker.code === "technical_inspection" && visiteErreur) continue;
             if (blocker.code === "license_plate" && carteGriseErreur) continue;
             rowErrors.push(`${blocker.reason.charAt(0).toUpperCase()}${blocker.reason.slice(1)}.`);
+          }
+
+          // Remorque attelée : même éligibilité qu'à l'affectation, relue au départ (elle a pu passer
+          // en atelier, être supprimée ou voir un papier expirer depuis).
+          if (row.trailerId) {
+            const [trailer] = await db
+              .select({
+                registrationNumber: vehicles.registrationNumber,
+                status: vehicles.status,
+                insuranceExpiry: vehicles.insuranceExpiry,
+                technicalInspectionDate: vehicles.technicalInspectionDate,
+                licensePlateExpiry: vehicles.licensePlateExpiry,
+              })
+              .from(vehicles)
+              .where(and(eq(vehicles.id, row.trailerId), isNull(vehicles.deletedAt)))
+              .limit(1);
+            if (!trailer) {
+              rowErrors.push("Remorque introuvable.");
+            } else {
+              const trailerEligibility = getMissionEligibility({
+                ...trailer,
+                receipts: await loadOpenRenewalReceipts(row.trailerId),
+              });
+              if (!trailerEligibility.eligible) {
+                rowErrors.push(`Remorque ${formatEligibilityRefusal(trailer.registrationNumber, trailerEligibility.blockers)}`);
+              }
+            }
           }
 
           if (mission.pickupDate && mission.deliveryDate) {

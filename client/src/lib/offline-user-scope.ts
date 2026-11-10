@@ -20,15 +20,24 @@
  */
 
 import { clientLogger } from "@/lib/logger";
+import { DRIVER_ME_SHAPE, FUEL_CARD_BALANCE_SHAPE, pickFields } from "@/lib/offline-driver-projection";
 
 export const OFFLINE_DB_PREFIX = "fleetos-offline-u";
 export const OFFLINE_SCHEMA_VERSION = 2;
 export const CACHE_RECORD_KEY = "query-cache";
 export const QUEUE_RECORD_KEY = "queue";
+/**
+ * Préfixe des enregistrements de fichiers en attente d'envoi (Blob), dans la même base
+ * par compte que la file. Réservé : rien n'est écrit avant le lot V5b-5 (photos POD).
+ * Une purge de la base les emporte avec la file.
+ */
+export const FILES_RECORD_PREFIX = "files:";
 /** Clés globales de l'ancien format (store par défaut d'idb-keyval), à détruire. */
 export const LEGACY_RECORD_KEYS = ["fleetos-query-cache-v1", "fleetos-offline-queue-v1"] as const;
 /** Une copie plus ancienne est jetée à la lecture. */
 export const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+/** Âge maximal d'un cache de lecture contenant des données du chauffeur (mission, pleins, fiche). */
+export const DRIVER_CACHE_MAX_AGE_MS = 72 * 60 * 60 * 1000;
 
 export function offlineDbName(userId: number): string {
   if (!Number.isInteger(userId) || userId <= 0) {
@@ -62,6 +71,15 @@ export function createDbRegistry(storage: () => Pick<Storage, "getItem" | "setIt
   }
   return {
     list: read,
+    remove(name: string): void {
+      try {
+        const known = read();
+        if (!known.includes(name)) return;
+        storage()?.setItem(OFFLINE_DB_REGISTRY_KEY, JSON.stringify(known.filter((n) => n !== name)));
+      } catch (err) {
+        clientLogger.warn("Registre des magasins hors ligne non mis à jour", { err, name });
+      }
+    },
     add(name: string): void {
       if (!isOfflineDbName(name)) return;
       try {
@@ -156,7 +174,7 @@ function myWorkOrdersOf(data: unknown): Array<{ id: number; vehicleId: number | 
  * sans donnée n'est jamais retenue. Tout le reste (catalogue de pièces,
  * tableaux de bord, factures, autres OT) est exclu.
  */
-export function selectPersistableQueries<T extends CachedQueryLike>(queries: readonly T[]): T[] {
+export function selectTechnicianQueries<T extends CachedQueryLike>(queries: readonly T[]): T[] {
   const mine = queries.find(
     (q) => q.queryKey.length === 1 && q.queryKey[0] === MY_WORK_ORDERS_PATH && q.state.status === "success",
   );
@@ -180,6 +198,113 @@ export function selectPersistableQueries<T extends CachedQueryLike>(queries: rea
 }
 
 // ---------------------------------------------------------------------------
+// Profils de lecture hors ligne (une table, aucun `if role`)
+// ---------------------------------------------------------------------------
+
+/** Statuts de mission lisibles hors ligne pour un chauffeur (décision 3 de V5b). */
+export const DRIVER_OFFLINE_MISSION_STATUSES: readonly string[] = ["in_progress", "delivered"];
+
+export const DRIVER_ME_PATH = "/api/drivers/me";
+export const FUEL_CARD_BALANCE_PATH = "/api/fuel-card/balance";
+type FlagReader = (flag: string) => boolean;
+
+/**
+ * Un profil dit quelles requêtes sont gardées et sous quels drapeaux. L'ancre (la
+ * requête qui prouve à qui appartient le cache) vient des données du compte, jamais
+ * de l'URL : sans ancre valide, le profil ne retient rien.
+ */
+export interface OfflineReadProfile {
+  id: string;
+  /** Drapeaux qui doivent tous être allumés ; aucun = toujours actif. */
+  flags: readonly string[];
+  select<T extends CachedQueryLike>(queries: readonly T[]): T[];
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function positiveInt(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
+ * Réduction de `/api/drivers/me` à l'identité du chauffeur et à ses missions en cours ou
+ * livrées. La fiche complète (permis, CNI, naissance, CPC, matricule) n'est jamais gardée.
+ */
+export function projectDriverMe(
+  data: unknown,
+): { driver: { id: number; firstName?: string; lastName?: string }; missions: Record<string, unknown>[] } | null {
+  const root = asRecord(data);
+  const driver = asRecord(root?.driver);
+  const driverId = positiveInt(driver?.id);
+  if (!root || !driver || driverId === null || !Array.isArray(root.missions)) return null;
+  const missions = root.missions.flatMap((m) => {
+    const mission = asRecord(m);
+    const id = positiveInt(mission?.id);
+    if (!mission || id === null || !DRIVER_OFFLINE_MISSION_STATUSES.includes(String(mission.status))) return [];
+    return [mission];
+  });
+  return pickFields({ driver, missions }, DRIVER_ME_SHAPE) as ReturnType<typeof projectDriverMe>;
+}
+
+function withData<T extends CachedQueryLike>(q: T, data: unknown): T {
+  return { ...q, state: { ...q.state, data } };
+}
+
+export const DRIVER_READ_PROFILE: OfflineReadProfile = {
+  id: "driver",
+  flags: ["driver-offline", "offline-writes"],
+  select<T extends CachedQueryLike>(queries: readonly T[]): T[] {
+    const anchor = queries.find(
+      (q) => q.queryKey.length === 1 && q.queryKey[0] === DRIVER_ME_PATH && q.state.status === "success",
+    );
+    const me = anchor ? projectDriverMe(anchor.state.data) : null;
+    if (!anchor || !me) return [];
+    const result: T[] = [withData(anchor, me)];
+    // Cache <= ecran : le tableau de bord chauffeur ne lit que sa fiche et le prix du litre.
+    for (const q of queries) {
+      if (q === anchor || q.state.status !== "success" || q.state.data === undefined) continue;
+      if (q.queryKey.length === 1 && q.queryKey[0] === FUEL_CARD_BALANCE_PATH) {
+        result.push(withData(q, pickFields(q.state.data, FUEL_CARD_BALANCE_SHAPE)));
+      }
+    }
+    return result;
+  },
+};
+
+export const TECHNICIAN_READ_PROFILE: OfflineReadProfile = {
+  id: "technician",
+  flags: [],
+  select: selectTechnicianQueries,
+};
+
+/** Table des profils : ajouter un profil ici, jamais un test de rôle ailleurs. */
+export const OFFLINE_READ_PROFILES: readonly OfflineReadProfile[] = [TECHNICIAN_READ_PROFILE, DRIVER_READ_PROFILE];
+
+/**
+ * Requêtes à persister : union des profils actifs. Sans lecteur de drapeaux, seuls les
+ * profils sans drapeau (technicien) sont actifs, donc rien ne change drapeaux éteints.
+ */
+export function selectPersistableQueries<T extends CachedQueryLike>(
+  queries: readonly T[],
+  isFlagOn: FlagReader = () => false,
+): T[] {
+  const picked = new Set<T>();
+  const ordered: T[] = [];
+  for (const profile of OFFLINE_READ_PROFILES) {
+    if (!profile.flags.every((flag) => isFlagOn(flag))) continue;
+    for (const q of profile.select(queries)) {
+      if (picked.has(q)) continue;
+      picked.add(q);
+      ordered.push(q);
+    }
+  }
+  return ordered;
+}
+
+// ---------------------------------------------------------------------------
 // Magasin cloisonné
 // ---------------------------------------------------------------------------
 
@@ -190,6 +315,8 @@ export interface OfflineKv {
   del(db: string, key: string): Promise<void>;
   /** Vide la base nommée (elle reste, sans enregistrement). */
   clearDb(db: string): Promise<void>;
+  /** Supprime la base vidée (et son entrée du registre), pour ne pas laisser de base vide par compte. Facultatif, au mieux. */
+  dropDb?(db: string): Promise<void>;
   /** Noms des bases `fleetos-offline-u*` connues du navigateur. */
   listDbs(): Promise<string[]>;
   /** Supprime une clé du store par défaut (ancien format global). */
@@ -214,6 +341,12 @@ interface QueueEnvelope<T> {
   actions: T[];
 }
 
+/** Envois détruits par une purge : décompte et types seulement, jamais de contenu ni d'identifiant. */
+export interface QueueLoss {
+  count: number;
+  types: Record<string, number>;
+}
+
 export function createOfflineScope(kv: OfflineKv) {
   // Une purge d'un magasin incrémente son compteur : toute écriture démarrée
   // avant lui s'annule au lieu de ressusciter les données purgées.
@@ -226,12 +359,31 @@ export function createOfflineScope(kv: OfflineKv) {
       await kv.clearDb(db);
     } catch (err) {
       clientLogger.warn("Échec de purge d'un magasin hors ligne", { err, db });
+      return;
+    }
+    try {
+      await kv.dropDb?.(db);
+    } catch (err) {
+      clientLogger.warn("Suppression d'un magasin hors ligne vidé impossible", { err, db });
     }
   }
 
   /** Supprime le seul cache de lecture d'un magasin ; une sauvegarde en cours s'annule. */
   async function dropReadCache(db: string): Promise<void> {
     epochs.set(db, epochOfDb(db) + 1);
+    try {
+      await kv.del(db, CACHE_RECORD_KEY);
+    } catch (err) {
+      clientLogger.warn("Échec de purge d'un cache hors ligne", { err, db });
+    }
+  }
+
+  // Compteur propre au cache de lecture : l'abandonner ne touche pas la file d'écritures.
+  const cacheEpochs = new Map<string, number>();
+  const cacheEpochOfDb = (db: string) => cacheEpochs.get(db) ?? 0;
+
+  async function dropReadCacheOnly(db: string): Promise<void> {
+    cacheEpochs.set(db, cacheEpochOfDb(db) + 1);
     try {
       await kv.del(db, CACHE_RECORD_KEY);
     } catch (err) {
@@ -247,6 +399,31 @@ export function createOfflineScope(kv: OfflineKv) {
       return 0;
     }
   }
+
+  /** Nombre d'envois d'un magasin et répartition par type d'écriture (clé du registre), sans contenu. */
+  async function summarizeQueued(db: string): Promise<QueueLoss> {
+    try {
+      const saved = await kv.get<QueueEnvelope<unknown>>(db, QUEUE_RECORD_KEY);
+      const actions = saved && Array.isArray(saved.actions) ? saved.actions : [];
+      const types: Record<string, number> = {};
+      for (const action of actions) {
+        const type =
+          action && typeof action === "object" && typeof (action as { type?: unknown }).type === "string"
+            ? (action as { type: string }).type.slice(0, 64)
+            : "inconnu";
+        types[type] = (types[type] ?? 0) + 1;
+      }
+      return { count: actions.length, types };
+    } catch {
+      return { count: 0, types: {} };
+    }
+  }
+
+  const mergeLoss = (losses: QueueLoss[]): QueueLoss => {
+    const types: Record<string, number> = {};
+    for (const loss of losses) for (const [type, n] of Object.entries(loss.types)) types[type] = (types[type] ?? 0) + n;
+    return { count: losses.reduce((a, l) => a + l.count, 0), types };
+  };
 
   async function listOfflineDbs(): Promise<string[] | null> {
     try {
@@ -268,18 +445,35 @@ export function createOfflineScope(kv: OfflineKv) {
   }
 
   return {
+    /** Nombre d'écritures en file (tous états) d'un compte, sans exiger qu'il soit actif. */
+    queuedCount: (userId: number) => countQueued(offlineDbName(userId)),
+
+    /** Supprime le seul cache de lecture d'un compte (session expirée) ; sa file d'écritures est gardée. */
+    dropUserReadCache: (userId: number) => dropReadCacheOnly(offlineDbName(userId)),
+
     /** Compteur de purge du magasin d'un utilisateur, à relever avant une écriture asynchrone. */
     epochOf: (userId: number) => epochOfDb(offlineDbName(userId)),
 
-    async saveCache(userId: number, queries: readonly CachedQueryLike[], now = Date.now()): Promise<number> {
+    async saveCache(
+      userId: number,
+      queries: readonly CachedQueryLike[],
+      now = Date.now(),
+      isFlagOn?: FlagReader,
+      options: { dropIfEmpty?: boolean } = {},
+    ): Promise<number> {
       const db = offlineDbName(userId);
       const startedAt = epochOfDb(db);
-      const persistable = selectPersistableQueries(queries).map((q) => ({
+      const cacheStartedAt = cacheEpochOfDb(db);
+      const persistable = selectPersistableQueries(queries, isFlagOn).map((q) => ({
         queryKey: q.queryKey,
         state: { data: q.state.data, dataUpdatedAt: q.state.dataUpdatedAt },
       }));
       // Rien à garder (cache pas encore rempli) : ne pas écraser la copie existante par du vide.
-      if (persistable.length === 0) return 0;
+      // Sauf si les drapeaux, connus et éteints, interdisent d'en garder une.
+      if (persistable.length === 0) {
+        if (options.dropIfEmpty) await dropReadCacheOnly(db);
+        return 0;
+      }
       const envelope: CacheEnvelope = {
         version: OFFLINE_SCHEMA_VERSION,
         userId,
@@ -287,6 +481,10 @@ export function createOfflineScope(kv: OfflineKv) {
         queries: persistable,
       };
       await kv.set(db, CACHE_RECORD_KEY, envelope);
+      if (epochOfDb(db) === startedAt && cacheEpochOfDb(db) !== cacheStartedAt) {
+        await kv.del(db, CACHE_RECORD_KEY);
+        return 0;
+      }
       if (epochOfDb(db) !== startedAt) {
         await clearDb(db);
         return 0;
@@ -294,7 +492,7 @@ export function createOfflineScope(kv: OfflineKv) {
       return persistable.length;
     },
 
-    async loadCache(userId: number, now = Date.now()): Promise<PersistedQuery[]> {
+    async loadCache(userId: number, now = Date.now(), isFlagOn?: FlagReader): Promise<PersistedQuery[]> {
       const db = offlineDbName(userId);
       const saved = await kv.get<CacheEnvelope>(db, CACHE_RECORD_KEY);
       if (!saved) return [];
@@ -302,7 +500,8 @@ export function createOfflineScope(kv: OfflineKv) {
         await kv.del(db, CACHE_RECORD_KEY);
         return [];
       }
-      if (now - saved.timestamp > CACHE_MAX_AGE_MS) {
+      const hasDriverData = Array.isArray(saved.queries) && saved.queries.some((q) => q.queryKey?.[0] === DRIVER_ME_PATH);
+      if (now - saved.timestamp > (hasDriverData ? DRIVER_CACHE_MAX_AGE_MS : CACHE_MAX_AGE_MS)) {
         await kv.del(db, CACHE_RECORD_KEY);
         return [];
       }
@@ -312,6 +511,7 @@ export function createOfflineScope(kv: OfflineKv) {
           queryKey: q.queryKey,
           state: { data: q.state?.data, dataUpdatedAt: q.state?.dataUpdatedAt, status: "success" },
         })),
+        isFlagOn,
       ).map((q) => ({
         queryKey: q.queryKey,
         state: { data: q.state.data, dataUpdatedAt: q.state.dataUpdatedAt },
@@ -341,18 +541,36 @@ export function createOfflineScope(kv: OfflineKv) {
      * Déconnexion : le magasin du compte qui se déconnecte est vidé, file comprise ; les
      * autres comptes perdent leur cache de lecture mais gardent leur file (même règle que
      * `purgeOthers` : tablette partagée). L'ancien format global est détruit.
-     * Renvoie le nombre d'écritures du compte sortant détruites (journalisé ; avertissement : lot #10c).
+     * Avec `dropOtherQueues`, les magasins des autres comptes sont vidés entièrement, file
+     * comprise (décision V5b : purge complète à la déconnexion).
+     * Renvoie le nombre d'écritures du compte sortant détruites (journalisé).
      */
-    async purgeAll(activeUserId: number | null = getActiveOfflineUserId()): Promise<number> {
+    async purgeAll(
+      activeUserId: number | null = getActiveOfflineUserId(),
+      options: { dropOtherQueues?: boolean } = {},
+    ): Promise<number> {
       const own = activeUserId !== null ? offlineDbName(activeUserId) : null;
       const others = ((await listOfflineDbs()) ?? []).filter((name) => name !== own);
-      const lost = own ? await countQueued(own) : 0;
-      await Promise.all([...(own ? [clearDb(own)] : []), ...others.map(dropReadCache)]);
+      const ownLoss = own ? await summarizeQueued(own) : { count: 0, types: {} };
+      const lost = ownLoss.count;
+      const lostOthers = options.dropOtherQueues
+        ? mergeLoss(await Promise.all(others.map(summarizeQueued)))
+        : { count: 0, types: {} };
+      await Promise.all([
+        ...(own ? [clearDb(own)] : []),
+        ...others.map(options.dropOtherQueues ? clearDb : dropReadCache),
+      ]);
       await purgeLegacy();
+      if (lostOthers.count > 0) {
+        clientLogger.warn("Écritures hors ligne d'autres comptes détruites à la déconnexion", {
+          lost: lostOthers.count,
+          types: lostOthers.types,
+        });
+      }
       if (lost > 0) {
         clientLogger.warn("Écritures hors ligne non synchronisées détruites à la déconnexion", {
           lost,
-          userId: activeUserId,
+          types: ownLoss.types,
         });
       }
       return lost;
@@ -360,13 +578,23 @@ export function createOfflineScope(kv: OfflineKv) {
 
     /**
      * Changement d'utilisateur sans déconnexion (tablette partagée) : le cache de lecture
-     * des autres comptes est supprimé, leur file d'écritures est gardée pour leur
-     * prochaine connexion. Elle reste illisible ici : `readQueue` exige le même userId.
+     * des autres comptes est supprimé ; leur file d'écritures est gardée pour leur
+     * prochaine connexion, sauf avec `dropQueues` (purge complète, décision V5b).
+     * Gardée, elle reste illisible ici : `readQueue` exige le même userId.
      */
-    async purgeOthers(keepUserId: number): Promise<number> {
+    async purgeOthers(keepUserId: number, options: { dropQueues?: boolean } = {}): Promise<number> {
       const keep = offlineDbName(keepUserId);
       const others = ((await listOfflineDbs()) ?? []).filter((name) => name !== keep);
-      await Promise.all(others.map(dropReadCache));
+      if (options.dropQueues) {
+        const lost = mergeLoss(await Promise.all(others.map(summarizeQueued)));
+        if (lost.count > 0) {
+          clientLogger.warn("Écritures hors ligne d'un autre compte détruites au changement de compte", {
+            lost: lost.count,
+            types: lost.types,
+          });
+        }
+      }
+      await Promise.all(others.map(options.dropQueues ? clearDb : dropReadCache));
       return others.length;
     },
 

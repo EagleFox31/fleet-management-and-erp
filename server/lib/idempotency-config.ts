@@ -1,40 +1,21 @@
-import type { ApiErrorCode } from "@shared/errors";
 import type { FeatureKey } from "@shared/feature-flags";
+import type { ApiErrorCode } from "@shared/errors";
 
 /**
- * Routes d'écriture rejouables sans doublon (CDC #10, saisie hors ligne).
- *
- * Le garde `server/middleware/idempotency-guard.ts` applique ces règles ; une route s'ajoute
- * ici, jamais dans le garde. Une route listée n'est protégée que si le client envoie
- * l'en-tête `Idempotency-Key` : sans en-tête, la requête passe comme avant.
+ * Routes d'écriture rejouables sans doublon : la liste et ses utilitaires vivent dans
+ * `shared/idempotency-routes.ts` (lue aussi par la file hors ligne du client). Ce module les
+ * ré-exporte : aucun changement de comportement serveur.
  */
-export type IdempotencyRoute = {
-  method: "POST" | "PUT" | "PATCH" | "DELETE";
-  /** Motif sur le chemin sans préfixe `/api`, en minuscules, par exemple `^/work-orders/\d+/time-entries$`. */
-  pattern: RegExp;
-  /**
-   * Délai de reprise d'une clé restée `in_progress`. `null` : jamais reprise (elle expire avec
-   * `expires_at`). Par défaut `IDEMPOTENCY_STALE_SECONDS`. `null` pour une écriture qui ne se
-   * rejoue pas à l'identique (stock) : reprendre la clé réécrirait l'ajustement.
-   */
-  staleSeconds?: number | null;
-  /**
-   * Issue incertaine (5xx, ou réponse 2xx-4xx non enregistrée) : la clé reste `in_progress` au
-   * lieu d'être libérée. L'écriture a pu être validée ; un réessai avec la même clé reçoit 409,
-   * jamais une seconde exécution. Seuls 401, 403, 408 et 429 (refus avant écriture) libèrent.
-   */
-  keepKeyOnUncertainOutcome?: boolean;
-  /** Protégée même drapeau `offline-writes` coupé : l'intégrité ne dépend pas du hors-ligne. */
-  ignoreFeatureFlag?: boolean;
-  /** Message du 409 « clé en cours », propre à la route. */
-  inProgressMessage?: string;
-};
-
-/** En-tête portant la clé d'idempotence choisie par le client. */
-export const IDEMPOTENCY_HEADER = "Idempotency-Key";
-
-/** En-tête posé sur une réponse rejouée depuis `idempotency_keys`. */
-export const IDEMPOTENCY_REPLAYED_HEADER = "Idempotent-Replayed";
+export {
+  IDEMPOTENCY_HEADER,
+  IDEMPOTENCY_KEY_PATTERN,
+  IDEMPOTENCY_REPLAYED_HEADER,
+  IDEMPOTENCY_RETENTION_DAYS,
+  IDEMPOTENCY_STALE_SECONDS,
+  IDEMPOTENCY_ROUTES,
+  OFFLINE_OWNER_HEADER,
+  type IdempotencyRoute,
+} from "@shared/idempotency-routes";
 
 /**
  * Drapeau serveur du garde et de la purge, indépendant du rôle. Les drapeaux d'écran
@@ -42,44 +23,12 @@ export const IDEMPOTENCY_REPLAYED_HEADER = "Idempotent-Replayed";
  */
 export const IDEMPOTENCY_FLAG: FeatureKey = "offline-writes";
 
-/**
- * Lot #10b, périmètre chauffeur : statut de mission et kilométrage. Le stock (ajustement manuel)
- * ne se rejoue pas à l'identique : sa clé n'est ni reprise ni libérée sur une issue incertaine.
- * La position du chauffeur n'a pas encore de route (télémétrie, lot #6).
- */
-export const IDEMPOTENCY_ROUTES: readonly IdempotencyRoute[] = [
-  { method: "PUT", pattern: /^\/missions\/\d+\/status$/ },
-  { method: "PUT", pattern: /^\/vehicles\/\d+\/mileage$/ },
-  // Ajustement manuel de stock : un rejeu ne doit jamais réappliquer l'ajustement.
-  {
-    method: "POST",
-    pattern: /^\/parts\/\d+\/update-stock$/,
-    staleSeconds: null,
-    keepKeyOnUncertainOutcome: true,
-    ignoreFeatureFlag: true,
-    inProgressMessage: "Opération en cours ou au résultat incertain : vérifiez le stock avant de réessayer.",
-  },
-  // Panne déclarée par le chauffeur (V5b-1) : un rejeu ne doit créer ni second incident ni second OT.
-  // Clé jamais reprise ni libérée sur une issue incertaine : l'incident a pu être validé, un réessai
-  // reçoit 409 `IDEMPOTENCY_IN_PROGRESS` ou la réponse enregistrée, jamais une seconde exécution.
-  {
-    method: "POST",
-    pattern: /^\/driver\/breakdowns$/,
-    staleSeconds: null,
-    keepKeyOnUncertainOutcome: true,
-    inProgressMessage: "Cette déclaration est déjà en cours d'envoi. Elle apparaîtra dès que le serveur l'aura enregistrée.",
-  },
-];
-
-/** Clé acceptée : 1 à 255 caractères ASCII imprimables sans espace (UUID conseillé). */
-export const IDEMPOTENCY_KEY_PATTERN = /^[\x21-\x7e]{1,255}$/;
 
 /**
  * Délai au-delà duquel une clé restée `in_progress` (serveur arrêté pendant l'écriture) est
  * reprise, sauf route à `staleSeconds: null`. Sans risque pour mission et kilométrage : un
  * kilométrage se réécrit à l'identique et une transition déjà faite est refusée par la machine d'états.
  */
-export const IDEMPOTENCY_STALE_SECONDS = 60;
 
 /**
  * Statuts conservés et rejoués. Les 5xx et les refus liés à la session ou au débit
@@ -90,9 +39,10 @@ export const PRE_WRITE_REFUSALS: readonly number[] = [401, 403, 408, 429];
 
 /**
  * Refus métier prononcés avant toute écriture, reconnus au `code` du corps d'erreur : libérés comme
- * `PRE_WRITE_REFUSALS`. `VEHICLE_RETIRED` (L3) : une fois le véhicule restauré, la même clé doit écrire.
+ * `PRE_WRITE_REFUSALS`. `VEHICLE_RETIRED` (L3) : une fois le véhicule restauré, la même clé doit écrire. Déclaration de panne (V5b-1b) :
+ * `INCIDENT_WRITE_FAILED` (transaction échouée, rien de validé) et `INCIDENT_VEHICLE_NOT_FOUND`.
  */
-export const PRE_WRITE_REFUSAL_CODES: readonly ApiErrorCode[] = ["VEHICLE_RETIRED"];
+export const PRE_WRITE_REFUSAL_CODES: readonly ApiErrorCode[] = ["VEHICLE_RETIRED", "INCIDENT_WRITE_FAILED", "INCIDENT_VEHICLE_NOT_FOUND"];
 
 /** Vrai si la réponse est un refus prononcé avant toute écriture : la clé est libérée, jamais rejouée. */
 export function isPreWriteRefusal(status: number, body?: unknown): boolean {

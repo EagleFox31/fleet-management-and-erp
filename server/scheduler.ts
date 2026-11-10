@@ -2,6 +2,7 @@ import { alertService } from "./services/alert-service";
 import { moduleLogger } from "./lib/logger";
 import { backupTick } from "./jobs/backup-production";
 import { idempotencyPurgeTick } from "./jobs/idempotency-purge";
+import { gpsPositionsPurgeTick } from "./jobs/gps-positions-purge";
 import { preventiveDateCheckTick } from "./jobs/preventive-date-check";
 import { isPreventiveDateJobEnabled } from "./lib/preventive-date-job-config";
 import { clientBillingService } from "./services/client-billing-service";
@@ -40,6 +41,10 @@ let alertCycleSkipped = 0;
 let backupTickRunning = false;
 let idempotencyPurgeRunning = false;
 let idempotencyPurgeLastRunAt = 0;
+let gpsPurgeRunning = false;
+let gpsPurgeLastRunAt = 0;
+/** Une purge des positions GPS par jour. */
+export const GPS_PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Exécute un cycle d'alertes en interdisant le chevauchement.
@@ -131,6 +136,19 @@ async function runIdempotencyPurgeTick(): Promise<void> {
   }
 }
 
+/** Purge des positions GPS (rétention), au plus une fois par jour, sans effet tant que le drapeau `gps` est coupé. */
+async function runGpsPurgeTick(): Promise<void> {
+  if (gpsPurgeRunning) return;
+  if (Date.now() - gpsPurgeLastRunAt < GPS_PURGE_INTERVAL_MS) return;
+  gpsPurgeRunning = true;
+  gpsPurgeLastRunAt = Date.now();
+  try {
+    await gpsPositionsPurgeTick();
+  } finally {
+    gpsPurgeRunning = false;
+  }
+}
+
 /** Démarre les tâches de fond. Idempotent: un second appel est sans effet. */
 export function startBackgroundJobs(): void {
   if (schedulerStarted) {
@@ -142,12 +160,14 @@ export function startBackgroundJobs(): void {
     void runAlertCycle("démarrage");
     void runBackupTick("démarrage");
     void runIdempotencyPurgeTick();
+    void runGpsPurgeTick();
   }, INITIAL_DELAY_MS);
 
   setInterval(() => {
     void runAlertCycle("périodique");
     void runBackupTick("périodique");
     void runIdempotencyPurgeTick();
+    void runGpsPurgeTick();
   }, ALERT_CHECK_INTERVAL_MS);
 
   log.info({ intervalSeconds: ALERT_CHECK_INTERVAL_MS / 1000 }, "cycle d'alertes et sauvegarde planifiés");

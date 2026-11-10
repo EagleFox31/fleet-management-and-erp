@@ -368,6 +368,11 @@ export const VEHICLE_RESTRICTED_PATCH_FIELDS: Readonly<Record<string, readonly s
  */
 export const FUEL_CARD_MANAGER_ROLES = ["admin", "logistics", "secretary"] as const satisfies readonly AppRole[];
 // Solde et historique de la carte en consultation : les gestionnaires plus le comptable, qui ne recharge pas.
+/**
+ * Saisie d'un plein depuis l'écran carburant (`isFuelRecordWriter`, POST/PATCH /api/fuel-records).
+ * Le technicien n'en saisit pas ; le chauffeur passe par sa mission.
+ */
+export const FUEL_RECORD_WRITER_ROLES = ["admin", "workshop_manager", "secretary", "logistics"] as const satisfies readonly AppRole[];
 export const FUEL_CARD_VIEWER_ROLES = [...FUEL_CARD_MANAGER_ROLES, "accountant"] as const satisfies readonly AppRole[];
 
 /** Saisie de la capacité des réservoirs : tous les rôles du PATCH véhicule. */
@@ -575,6 +580,15 @@ export const PART_SALE_READ_ROLES = [...PART_SALE_ROLES, "management"] as const 
 /** Positions GPS des véhicules (`/api/vehicle-positions`). Pas de vue client prévue à ce stade. */
 export const GPS_VIEW_ROLES = ["admin", "logistics", "management", "workshop_manager"] as const satisfies readonly AppRole[];
 
+/**
+ * Trace d'une mission (`GET /api/missions/:id/track`) : minimisation, le chef d'atelier lit la dernière
+ * position (GPS_VIEW_ROLES) mais pas le trajet. Le chauffeur de la mission s'y ajoute côté route.
+ */
+export const GPS_TRACK_ROLES = ["admin", "logistics", "management"] as const satisfies readonly AppRole[];
+
+/** Points A et B d'une mission (`PATCH /api/missions/:id/geo`). */
+export const MISSION_GEO_WRITE_ROLES = ["admin", "logistics"] as const satisfies readonly AppRole[];
+
 /** Import Excel, tous types sauf les interventions. */
 export const IMPORT_ROLES = ["admin"] as const satisfies readonly AppRole[];
 
@@ -614,6 +628,9 @@ export function canRoleSetMissionStatus(role: string | null | undefined, targetS
 
 /** Avis de maintenance rattachés aux missions (`/api/mission-advisories`) : logistique et atelier. */
 export const MISSION_ADVISORY_ROLES = ["admin", "logistics", "workshop_manager"] as const satisfies readonly AppRole[];
+
+/** Pannes déclarées : atelier et logistique reçoivent `incident_reported` et lisent la liste (`GET /api/incidents`). */
+export const INCIDENT_AUDIENCE_ROLES: readonly AppRole[] = [...new Set<AppRole>(["admin", "workshop_manager", ...MISSION_ADVISORY_ROLES])];
 
 /**
  * Gestion des demandes de pièce (`PATCH /api/part-requirements/:id`, `isInventoryManager`).

@@ -1,98 +1,75 @@
-import { get, set, del, clear, createStore, type UseStore } from "idb-keyval";
 import type { QueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
-import { toast } from "@/hooks/use-toast";
 import { clientLogger } from "@/lib/logger";
+import { applyRestoredQueries } from "@/lib/offline-restore";
 import { pendingServerLogout } from "@/lib/pending-logout";
 import {
-  createDbRegistry,
-  createOfflineScope,
+  DRIVER_READ_PROFILE,
   getActiveOfflineUserId,
   setActiveOfflineUserId,
   subscribeActiveOfflineUser,
-  isOfflineDbName,
-  type OfflineKv,
 } from "@/lib/offline-user-scope";
+import { offlineScope } from "@/lib/offline-kv";
+import { sessionChannel } from "@/lib/offline-session-channel";
+import {
+  announceKeptSends,
+  cancelScheduledReplay,
+  enqueueOfflineWrite,
+  isOfflineFlagEnabled,
+  replayOnReconnect,
+  startOfflineQueueRuntime,
+} from "@/lib/offline-queue";
+import { FEATURE_FLAGS_PATH, isFeatureKey } from "@shared/feature-flags";
+import { releaseReplayGate } from "@/lib/offline-replay-gate";
+import { OFFLINE_QUEUED_MESSAGE } from "@/lib/offline-queue-core";
+import { toast } from "@/hooks/use-toast";
 
 /**
  * Stockage hors ligne cloisonné par utilisateur.
  *
  * Une base IndexedDB par compte (`fleetos-offline-u<id>`), une liste blanche de
  * requêtes persistées et une file d'écritures par compte. La logique pure est dans
- * `offline-user-scope.ts` ; ce module la branche sur idb-keyval, le QueryClient
- * et la reconnexion réseau.
+ * `offline-user-scope.ts` ; l'adaptateur idb-keyval dans `offline-kv.ts` ; la file
+ * d'écritures (v2) dans `offline-queue-core.ts` / `offline-queue.ts`. Ce module
+ * branche le tout sur le QueryClient et la reconnexion réseau.
  *
  * Pour le lot hors ligne technicien : lire et écrire par `getActiveOfflineUserId()`
- * et `offlineScope` (jamais par une clé globale), purger par `purgeOfflineSession`.
+ * et `offlineScope` (jamais par une clé globale), purger par `purgeOfflineSession`,
+ * mettre en file par `enqueueOfflineWrite` (registre `offline-action-registry.ts`).
  */
 
+export { offlineScope };
+
 export interface OfflineAction {
-  id: string;
   type: "fuel_entry" | "work_order_note" | "odometer_reading";
   endpoint: string;
   method: "POST" | "PATCH";
   payload: Record<string, unknown>;
-  createdAt: number;
   label: string;
+  missionId?: number;
+  idempotencyKey?: string;
 }
-
-const DB_STORE_NAME = "kv";
-const stores = new Map<string, UseStore>();
-
-function storeOf(db: string): UseStore {
-  let store = stores.get(db);
-  if (!store) {
-    store = createStore(db, DB_STORE_NAME);
-    stores.set(db, store);
-  }
-  return store;
-}
-
-const dbRegistry = createDbRegistry(() => (typeof window === "undefined" ? null : window.localStorage));
-
-const idbKv: OfflineKv = {
-  get: <T>(db: string, key: string) => get<T>(key, storeOf(db)),
-  set: (db, key, value) => {
-    dbRegistry.add(db);
-    return set(key, value, storeOf(db));
-  },
-  del: (db, key) => del(key, storeOf(db)),
-  clearDb: (db) => clear(storeOf(db)),
-  // Un magasin n'est jamais supprimé (deleteDatabase reste bloqué tant que la
-  // connexion idb-keyval est ouverte) : il est vidé, ce qui suffit à la cloison.
-  // Énumération : registre local (tous navigateurs) + bases connues du navigateur.
-  async listDbs() {
-    const names = new Set(dbRegistry.list());
-    const factory = indexedDB as IDBFactory & { databases?: () => Promise<Array<{ name?: string }>> };
-    if (typeof factory.databases === "function") {
-      try {
-        for (const db of await factory.databases()) {
-          if (isOfflineDbName(db.name)) names.add(db.name);
-        }
-      } catch (err) {
-        clientLogger.warn("Énumération des bases IndexedDB impossible", { err });
-      }
-    }
-    return Array.from(names);
-  },
-  delLegacy: (key) => del(key),
-};
-
-export const offlineScope = createOfflineScope(idbKv);
 
 /**
  * Appelé à chaque connexion et à chaque restauration de session. Si l'utilisateur
  * change, le cache TanStack du précédent est vidé, ses copies hors ligne et
  * l'ancien format global (propriétaire inconnu) sont détruits.
  */
-export function activateOfflineUser(queryClient: QueryClient, userId: number): void {
+export function activateOfflineUser(
+  queryClient: QueryClient,
+  userId: number,
+  options: { broadcast?: boolean } = {},
+): void {
   if (getActiveOfflineUserId() === userId) return;
   queryClient.clear();
   setActiveOfflineUserId(userId);
+  // Cookie partagé : les autres onglets cessent de rejouer au nom de l'ancien compte.
+  if (options.broadcast !== false) sessionChannel.post({ type: "session-changed", userId });
   void offlineScope.purgeLegacy();
-  void offlineScope.purgeOthers(userId).then((count) => {
+  cancelScheduledReplay();
+  // Changement de compte : les copies et les envois en attente de l'autre compte sont détruits (S1).
+  void offlineScope.purgeOthers(userId, { dropQueues: true }).then((count) => {
     if (count > 0) {
-      clientLogger.warn("Cache de lecture hors ligne d'un autre compte supprimé (file gardée)", { count });
+      clientLogger.warn("Données hors ligne d'un autre compte supprimées", { count });
     }
   });
 }
@@ -101,9 +78,15 @@ export function activateOfflineUser(queryClient: QueryClient, userId: number): v
  * Déconnexion : plus aucun utilisateur actif, cache TanStack vidé, magasins
  * hors ligne (cache et file d'écritures) vidés. Ne lève jamais.
  */
-export async function purgeOfflineSession(queryClient: QueryClient): Promise<void> {
+export async function purgeOfflineSession(
+  queryClient: QueryClient,
+  options: { broadcast?: boolean } = {},
+): Promise<void> {
   const active = getActiveOfflineUserId();
   setActiveOfflineUserId(null);
+  cancelScheduledReplay();
+  // Les autres onglets de l'appareil se purgent aussi (la file est partagée entre onglets).
+  if (options.broadcast !== false) sessionChannel.post({ type: "logout" });
   try {
     await queryClient.cancelQueries();
   } catch (err) {
@@ -111,7 +94,7 @@ export async function purgeOfflineSession(queryClient: QueryClient): Promise<voi
   }
   queryClient.clear();
   try {
-    await offlineScope.purgeAll(active);
+    await offlineScope.purgeAll(active, { dropOtherQueues: true });
   } catch (err) {
     clientLogger.error("Purge du stockage hors ligne en échec", { err });
   }
@@ -126,13 +109,21 @@ export async function purgeOfflineSession(queryClient: QueryClient): Promise<voi
 export async function expireOfflineSession(queryClient: QueryClient, userId: number): Promise<void> {
   if (getActiveOfflineUserId() !== userId) return;
   setActiveOfflineUserId(null);
+  cancelScheduledReplay();
   try {
     await queryClient.cancelQueries();
   } catch (err) {
     clientLogger.warn("Annulation des requêtes à l'expiration de session en échec", { err });
   }
   queryClient.clear();
+  // Session expirée : plus de lecture hors ligne pour ce compte (la file d'envois est gardée).
+  await offlineScope.dropUserReadCache(userId);
+  // Envois gardés : l'utilisateur est prévenu qu'il doit se reconnecter pour qu'ils partent.
+  void announceKeptSends(userId);
 }
+
+/** Lecteur de drapeaux des profils de lecture hors ligne (un drapeau inconnu est éteint). */
+const readFlag = (flag: string): boolean => isFeatureKey(flag) && isOfflineFlagEnabled(flag);
 
 /**
  * Persiste dans IndexedDB les seules requêtes de la liste blanche, dans le
@@ -141,6 +132,7 @@ export async function expireOfflineSession(queryClient: QueryClient, userId: num
 export async function persistQueryClientToIndexedDB(queryClient: QueryClient): Promise<void> {
   const userId = getActiveOfflineUserId();
   if (userId === null) return;
+  const flagsKnown = queryClient.getQueryData([FEATURE_FLAGS_PATH]) !== undefined;
   try {
     await offlineScope.saveCache(
       userId,
@@ -152,6 +144,9 @@ export async function persistQueryClientToIndexedDB(queryClient: QueryClient): P
           dataUpdatedAt: query.state.dataUpdatedAt,
         },
       })),
+      Date.now(),
+      readFlag,
+      { dropIfEmpty: flagsKnown && !DRIVER_READ_PROFILE.flags.every(readFlag) },
     );
   } catch (err) {
     clientLogger.warn("Échec de sauvegarde du cache dans IndexedDB", { err });
@@ -166,19 +161,11 @@ export async function restoreQueryClientFromIndexedDB(queryClient: QueryClient):
   const userId = getActiveOfflineUserId();
   if (userId === null) return 0;
   try {
-    const queries = await offlineScope.loadCache(userId);
+    const queries = await offlineScope.loadCache(userId, Date.now(), readFlag);
     // L'utilisateur a pu changer pendant la lecture : ne rien appliquer.
     if (getActiveOfflineUserId() !== userId) return 0;
 
-    let restoredCount = 0;
-    for (const item of queries) {
-      if (queryClient.getQueryData(item.queryKey) !== undefined) continue;
-      queryClient.setQueryData(item.queryKey, item.state.data, {
-        updatedAt: typeof item.state.dataUpdatedAt === "number" ? item.state.dataUpdatedAt : undefined,
-      });
-      restoredCount++;
-    }
-    return restoredCount;
+    return applyRestoredQueries(queryClient, queries);
   } catch (err) {
     clientLogger.warn("Échec de restauration du cache IndexedDB", { err });
     return 0;
@@ -186,111 +173,33 @@ export async function restoreQueryClientFromIndexedDB(queryClient: QueryClient):
 }
 
 /**
- * Ajoute une action additive à la file d'attente hors-ligne de l'utilisateur actif
+ * Ancienne API de mise en file, conservée pour les appelants existants : elle délègue
+ * à la file v2 (clé d'idempotence stable, rejeu FIFO). Sans les drapeaux, la mise en
+ * file est refusée et l'appelant est prévenu.
  */
-export async function enqueueOfflineAction(action: Omit<OfflineAction, "id" | "createdAt">): Promise<void> {
-  const userId = getActiveOfflineUserId();
-  if (userId === null) {
-    clientLogger.error("Mise en file hors-ligne refusée : aucun utilisateur connecté", { label: action.label });
-    toast({
-      title: "Action non enregistrée",
-      description: "Reconnectez-vous pour enregistrer cette action hors ligne.",
-      variant: "destructive",
-    });
+export async function enqueueOfflineAction(action: OfflineAction): Promise<void> {
+  const result = await enqueueOfflineWrite({
+    type: action.type,
+    payload: action.payload,
+    endpoint: action.endpoint,
+    method: action.method,
+    missionId: action.missionId,
+    label: action.label,
+    idempotencyKey: action.idempotencyKey,
+  });
+  if (result.queued) {
+    toast({ title: "Mode Hors-Ligne", description: OFFLINE_QUEUED_MESSAGE });
     return;
   }
-
-  try {
-    // Compteur de purge relevé AVANT la lecture : une déconnexion survenue pendant
-    // la lecture ou l'écriture annule l'écriture au lieu de ressusciter la file.
-    const epoch = offlineScope.epochOf(userId);
-    const queue = await offlineScope.readQueue<OfflineAction>(userId);
-    const newAction: OfflineAction = {
-      ...action,
-      id: `offline-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      createdAt: Date.now(),
-    };
-
-    queue.push(newAction);
-    const saved = getActiveOfflineUserId() === userId && (await offlineScope.writeQueue(userId, queue, epoch));
-    if (!saved) {
-      clientLogger.warn("Mise en file hors-ligne annulée : la session a changé", { label: action.label });
-      toast({
-        title: "Action non enregistrée",
-        description: "La session a changé pendant l'enregistrement. Reconnectez-vous et recommencez.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    toast({
-      title: "Mode Hors-Ligne",
-      description: `${action.label} enregistré localement. Synchronisation dès retour du réseau.`,
-    });
-  } catch (err) {
-    clientLogger.error("Échec de mise en file hors-ligne", { err, label: action.label });
-  }
-}
-
-/**
- * Rejoue la file d'attente hors-ligne de l'utilisateur actif lors du retour de la connexion
- */
-export async function processOfflineQueue(queryClient: QueryClient): Promise<{
-  synced: number;
-  failed: number;
-}> {
-  const userId = getActiveOfflineUserId();
-  if (userId === null) return { synced: 0, failed: 0 };
-
-  try {
-    const queue = await offlineScope.readQueue<OfflineAction>(userId);
-    if (queue.length === 0) return { synced: 0, failed: 0 };
-    const startedAt = offlineScope.epochOf(userId);
-
-    let synced = 0;
-    let failed = 0;
-    const remainingQueue: OfflineAction[] = [];
-
-    for (const item of queue) {
-      // Déconnexion ou changement de compte en cours de rejeu : on s'arrête.
-      if (getActiveOfflineUserId() !== userId || offlineScope.epochOf(userId) !== startedAt) {
-        return { synced, failed };
-      }
-      try {
-        await apiRequest(item.method, item.endpoint, item.payload);
-        synced++;
-      } catch (err) {
-        clientLogger.error("Échec rejeu action hors-ligne", { err, label: item.label });
-        failed++;
-        remainingQueue.push(item);
-      }
-    }
-
-    // Aucune écriture si le magasin a été purgé pendant le rejeu.
-    await offlineScope.writeQueue(userId, remainingQueue, startedAt);
-
-    if (synced > 0) {
-      toast({
-        title: "Synchronisation réussie",
-        description: `${synced} action(s) hors-ligne synchronisée(s) avec succès.`,
-      });
-      // Invalidation globale des requêtes pour rafraîchir les données
-      queryClient.invalidateQueries();
-    }
-
-    if (failed > 0) {
-      toast({
-        title: "Attention",
-        description: `${failed} action(s) n'ont pas pu être synchronisées et restent en attente.`,
-        variant: "destructive",
-      });
-    }
-
-    return { synced, failed };
-  } catch (err) {
-    clientLogger.error("Erreur de traitement de la file hors-ligne", { err });
-    return { synced: 0, failed: 0 };
-  }
+  clientLogger.warn("Mise en file hors-ligne refusée", { label: action.label, reason: result.reason });
+  toast({
+    title: "Action non enregistrée",
+    description:
+      result.reason === "disabled"
+        ? "L'enregistrement hors ligne n'est pas activé. Réessayez avec du réseau."
+        : "Reconnectez-vous pour enregistrer cette action hors ligne.",
+    variant: "destructive",
+  });
 }
 
 /**
@@ -302,6 +211,17 @@ export function setupOfflinePersistence(queryClient: QueryClient): () => void {
   const unsubscribeUser = subscribeActiveOfflineUser((userId) => {
     if (userId !== null) void restoreQueryClientFromIndexedDB(queryClient);
   });
+  const stopQueueRuntime = startOfflineQueueRuntime();
+
+  // Un autre onglet s'est déconnecté : cet onglet se purge aussi, sans réémettre.
+  const unsubscribeChannel = sessionChannel.subscribe((message) => {
+    if (message.type === "logout") void purgeOfflineSession(queryClient, { broadcast: false });
+    // Un autre compte s'est connecté dans un autre onglet : cet onglet adopte ce compte, ce qui
+    // arrête tout rejeu en cours pour l'ancien (garde `aborted` de la file).
+    if (message.type === "session-changed" && getActiveOfflineUserId() !== message.userId) {
+      activateOfflineUser(queryClient, message.userId, { broadcast: false });
+    }
+  });
 
   // Sauvegarde debounced lors des modifications de cache
   let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -312,18 +232,21 @@ export function setupOfflinePersistence(queryClient: QueryClient): () => void {
     }, 2000);
   });
 
-  // Rejeu automatique lors de la reconnexion réseau
-  // Une déconnexion faite hors ligne est d'abord envoyée au serveur.
+  // Retour du réseau : déconnexion différée d'abord, puis rejeu de la file. La barrière
+  // du resync temps réel est levée dans tous les cas (voir offline-replay-gate.ts).
   const handleOnline = () => {
-    void pendingServerLogout.flush().then((outcome) => {
-      if (outcome !== "pending") void processOfflineQueue(queryClient);
-    });
+    void pendingServerLogout
+      .flush()
+      .then((outcome) => (outcome !== "pending" ? replayOnReconnect() : undefined))
+      .finally(() => releaseReplayGate());
   };
 
   window.addEventListener("online", handleOnline);
 
   return () => {
     unsubscribeUser();
+    unsubscribeChannel();
+    stopQueueRuntime();
     unsubscribe();
     if (timeoutId) clearTimeout(timeoutId);
     window.removeEventListener("online", handleOnline);

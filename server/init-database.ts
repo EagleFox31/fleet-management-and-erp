@@ -1543,9 +1543,10 @@ BEGIN
       USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
   END IF;
 
-  -- La mission ne se change pas ; elle ne se détache que vers NULL, et seulement par l'action de clé étrangère
-  -- (suppression de la mission : UPDATE lancé par un trigger, profondeur > 1). En direct, le plein sortirait du
-  -- budget de sa mission sans annulation tracée.
+  -- La mission ne se change pas ; elle ne se détache que vers NULL, et seulement depuis un trigger imbriqué
+  -- (pg_trigger_depth() > 1). C'est le cas de l'ON DELETE SET NULL d'une mission supprimée, mais l'exemption
+  -- couvre tout trigger imbriqué, pas la seule clé étrangère. En direct, le plein sortirait du budget de sa
+  -- mission sans annulation tracée.
   IF NEW.mission_id IS DISTINCT FROM OLD.mission_id AND (NEW.mission_id IS NOT NULL OR pg_trigger_depth() <= 1) THEN
     RAISE EXCEPTION 'Plein validé : la mission ne se change pas.'
       USING ERRCODE = 'check_violation', CONSTRAINT = 'fuel_records_validated_locked';
@@ -1738,6 +1739,149 @@ EXCEPTION WHEN lock_not_available THEN
   RAISE WARNING 'contraintes mission_pod_files non réconciliées : verrou de table indisponible';
 END $$;`;
 
+/**
+ * GPS V1 « position téléphone » : vehicle_positions, points A/B des missions, purge_vehicle_positions(jours).
+ * Doit rester identique à server/db/migrations/20261110_vehicle_positions_gps.sql
+ * (tests/unit/server/vehicle-positions-gps-schema.test.ts). Après MISSION_POD_FILES_SQL, avant reportCdcConstraintGaps.
+ */
+export const VEHICLE_POSITIONS_GPS_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+CREATE TABLE IF NOT EXISTS vehicle_positions (
+  id bigserial PRIMARY KEY,
+  vehicle_id integer NOT NULL
+    CONSTRAINT vehicle_positions_vehicle_id_vehicles_id_fk REFERENCES vehicles(id) ON DELETE CASCADE,
+  mission_id integer
+    CONSTRAINT vehicle_positions_mission_id_missions_id_fk REFERENCES missions(id) ON DELETE CASCADE,
+  driver_id integer
+    CONSTRAINT vehicle_positions_driver_id_drivers_id_fk REFERENCES drivers(id) ON DELETE SET NULL,
+  source text NOT NULL,
+  device_id integer,
+  submitted_by integer
+    CONSTRAINT vehicle_positions_submitted_by_users_id_fk REFERENCES users(id) ON DELETE CASCADE,
+  client_point_id uuid,
+  recorded_at timestamptz NOT NULL,
+  received_at timestamptz NOT NULL DEFAULT now(),
+  lat double precision NOT NULL,
+  lng double precision NOT NULL,
+  accuracy_m real,
+  speed_kmh real,
+  heading real,
+  suspect boolean NOT NULL DEFAULT false,
+  CONSTRAINT vehicle_positions_source_check CHECK (source IN ('phone', 'tracker')),
+  CONSTRAINT vehicle_positions_phone_check CHECK (source <> 'phone' OR (mission_id IS NOT NULL AND submitted_by IS NOT NULL AND client_point_id IS NOT NULL)),
+  CONSTRAINT vehicle_positions_tracker_check CHECK (source <> 'tracker' OR device_id IS NOT NULL),
+  CONSTRAINT vehicle_positions_coords_check CHECK (lat BETWEEN -90 AND 90 AND lng BETWEEN -180 AND 180),
+  CONSTRAINT vehicle_positions_measures_check CHECK ((accuracy_m IS NULL OR accuracy_m >= 0) AND (speed_kmh IS NULL OR speed_kmh >= 0) AND (heading IS NULL OR (heading >= 0 AND heading < 360))),
+  CONSTRAINT vehicle_positions_client_point_unique UNIQUE (source, submitted_by, client_point_id)
+);
+
+CREATE INDEX IF NOT EXISTS vehicle_positions_mission_recorded_idx ON vehicle_positions (mission_id, recorded_at);
+CREATE INDEX IF NOT EXISTS vehicle_positions_vehicle_recorded_idx ON vehicle_positions (vehicle_id, recorded_at DESC);
+
+DO $$
+DECLARE
+  c record;
+BEGIN
+  -- Ajoutées seulement si absentes : un ADD COLUMN IF NOT EXISTS prendrait le verrou de table à chaque démarrage.
+  FOR c IN SELECT * FROM (VALUES
+    ('pickup_lat', 'double precision'),
+    ('pickup_lng', 'double precision'),
+    ('pickup_hub_code', 'text'),
+    ('delivery_lat', 'double precision'),
+    ('delivery_lng', 'double precision'),
+    ('delivery_hub_code', 'text')
+  ) AS v(col, typ) LOOP
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                   WHERE table_schema = current_schema() AND table_name = 'missions' AND column_name = c.col) THEN
+      EXECUTE format('ALTER TABLE missions ADD COLUMN %I %s', c.col, c.typ);
+    END IF;
+  END LOOP;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'missions : points A/B non ajoutés, verrou de table indisponible';
+END $$;
+
+DO $$
+DECLARE
+  c record;
+BEGIN
+  -- Table déjà créée sans ces contraintes (drizzle-kit push antérieur) ou missions existante : CHECK posé
+  -- NOT VALID puis validé ; une ligne non conforme laisse un WARNING, relu par reportCdcConstraintGaps
+  -- (CDC_RECONCILED_CONSTRAINTS). Noms identiques à shared/schema.ts.
+  FOR c IN SELECT * FROM (VALUES
+    ('vehicle_positions', 'vehicle_positions_source_check', 'CHECK (source IN (''phone'', ''tracker''))'),
+    ('vehicle_positions', 'vehicle_positions_phone_check', 'CHECK (source <> ''phone'' OR (mission_id IS NOT NULL AND submitted_by IS NOT NULL AND client_point_id IS NOT NULL))'),
+    ('vehicle_positions', 'vehicle_positions_tracker_check', 'CHECK (source <> ''tracker'' OR device_id IS NOT NULL)'),
+    ('vehicle_positions', 'vehicle_positions_coords_check', 'CHECK (lat BETWEEN -90 AND 90 AND lng BETWEEN -180 AND 180)'),
+    ('vehicle_positions', 'vehicle_positions_measures_check', 'CHECK ((accuracy_m IS NULL OR accuracy_m >= 0) AND (speed_kmh IS NULL OR speed_kmh >= 0) AND (heading IS NULL OR (heading >= 0 AND heading < 360)))'),
+    ('missions', 'missions_pickup_geo_check', 'CHECK ((pickup_lat IS NULL) = (pickup_lng IS NULL) AND (pickup_lat IS NULL OR (pickup_lat BETWEEN -90 AND 90 AND pickup_lng BETWEEN -180 AND 180)) AND (pickup_hub_code IS NULL OR (pickup_lat IS NOT NULL AND pickup_hub_code <> '''')))'),
+    ('missions', 'missions_delivery_geo_check', 'CHECK ((delivery_lat IS NULL) = (delivery_lng IS NULL) AND (delivery_lat IS NULL OR (delivery_lat BETWEEN -90 AND 90 AND delivery_lng BETWEEN -180 AND 180)) AND (delivery_hub_code IS NULL OR (delivery_lat IS NOT NULL AND delivery_hub_code <> '''')))')
+  ) AS v(tbl, name, def) LOOP
+    -- Bloc précédent abandonné sur verrou : colonnes A/B absentes, contrainte sautée (sinon 42703 et démarrage
+    -- en échec) ; reportCdcConstraintGaps la signale, le démarrage suivant la pose.
+    IF c.tbl = 'missions' AND (SELECT count(*) FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = 'missions'
+          AND column_name IN ('pickup_lat', 'pickup_lng', 'pickup_hub_code', 'delivery_lat', 'delivery_lng', 'delivery_hub_code')) < 6 THEN
+      RAISE WARNING 'missions : colonnes A/B absentes, contrainte % non posée', c.name;
+      CONTINUE;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name) THEN
+      EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I %s NOT VALID', c.tbl, c.name, c.def);
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = c.tbl::regclass AND conname = c.name AND NOT convalidated) THEN
+      BEGIN
+        EXECUTE format('ALTER TABLE %I VALIDATE CONSTRAINT %I', c.tbl, c.name);
+      EXCEPTION WHEN check_violation THEN
+        RAISE WARNING '% : lignes hors contrainte %, laissée NOT VALID', c.tbl, c.name;
+      END;
+    END IF;
+  END LOOP;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'vehicle_positions'::regclass
+                 AND conname = 'vehicle_positions_client_point_unique') THEN
+    BEGIN
+      ALTER TABLE vehicle_positions ADD CONSTRAINT vehicle_positions_client_point_unique UNIQUE (source, submitted_by, client_point_id);
+    EXCEPTION WHEN unique_violation THEN
+      RAISE WARNING 'vehicle_positions : points en double, contrainte vehicle_positions_client_point_unique non posée';
+    END;
+  END IF;
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'contraintes GPS (vehicle_positions, missions) non réconciliées : verrou de table indisponible';
+END $$;
+
+DO $$
+DECLARE
+  -- Purge des points relevés il y a plus de p_retention_days jours. Renvoie le nombre de lignes supprimées :
+  -- un second passage le même jour renvoie 0 et n'écrit rien.
+  purge_body text := $body$
+DECLARE
+  deleted integer;
+BEGIN
+  IF p_retention_days IS NULL OR p_retention_days < 1 THEN
+    RAISE EXCEPTION 'Durée de conservation des positions invalide : %', p_retention_days
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
+  DELETE FROM vehicle_positions WHERE recorded_at < now() - make_interval(days => p_retention_days);
+  GET DIAGNOSTICS deleted = ROW_COUNT;
+  RETURN deleted;
+END
+$body$;
+BEGIN
+  -- Recréée seulement si absente ou différente (fins de ligne ignorées) : rejouer n'écrit pas dans le catalogue.
+  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE oid = to_regprocedure('purge_vehicle_positions(integer)')
+                 AND replace(prosrc, chr(13), '') = replace(purge_body, chr(13), '')) THEN
+    EXECUTE format('CREATE OR REPLACE FUNCTION purge_vehicle_positions(p_retention_days integer) RETURNS integer LANGUAGE plpgsql AS %L', purge_body);
+  END IF;
+END $$;`;
+
+
+/**
+ * GPS V1 : index (mission_id, driver_id). Identique à server/db/migrations/20261110_vehicle_positions_mission_driver_idx.sql
+ * (tests/unit/server/vehicle-positions-gps-schema.test.ts). Après VEHICLE_POSITIONS_GPS_SQL (appelé après reportCdcConstraintGaps).
+ */
+export const VEHICLE_POSITIONS_MISSION_DRIVER_IDX_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+CREATE INDEX IF NOT EXISTS vehicle_positions_mission_driver_idx ON vehicle_positions (mission_id, driver_id);`;
 // Grille tarifaire (O3) — jumelle de server/db/migrations/20261106_tariff_grid.sql.
 export const TARIFF_GRID_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
 SET LOCAL lock_timeout = '5s';
@@ -2306,6 +2450,20 @@ export const CDC_RECONCILED_CONSTRAINTS: readonly string[] = [
   'mission_pod_files_mime_check',
   'mission_pod_files_size_check',
   'mission_pod_files_mission_sha256_unique',
+  // Posées par VEHICLE_POSITIONS_GPS_SQL (GPS V1). Les FK ne sont posées qu'à la création de la table :
+  // relues ici pour signaler leur absence si la table préexistait sans elles.
+  'vehicle_positions_source_check',
+  'vehicle_positions_phone_check',
+  'vehicle_positions_tracker_check',
+  'vehicle_positions_coords_check',
+  'vehicle_positions_measures_check',
+  'vehicle_positions_client_point_unique',
+  'vehicle_positions_vehicle_id_vehicles_id_fk',
+  'vehicle_positions_mission_id_missions_id_fk',
+  'vehicle_positions_driver_id_drivers_id_fk',
+  'vehicle_positions_submitted_by_users_id_fk',
+  'missions_pickup_geo_check',
+  'missions_delivery_geo_check',
 ];
 
 type Queryable = { query: (text: string, params?: unknown[]) => Promise<{ rows: any[] }> };
@@ -2931,9 +3089,13 @@ export async function initializeDatabase() {
     await pool.query(MISSION_BUDGET_SETTLEMENT_SQL);
     // Preuve de livraison — jumelle de server/db/migrations/20261110_mission_pod_files.sql.
     await pool.query(MISSION_POD_FILES_SQL);
+    // GPS V1 (positions, points A/B, purge) — jumelle de server/db/migrations/20261110_vehicle_positions_gps.sql.
+    await pool.query(VEHICLE_POSITIONS_GPS_SQL);
     // Relu après le dernier SQL qui pose une contrainte réconciliée : au premier démarrage, une table
     // pas encore créée serait signalée à tort.
     await reportCdcConstraintGaps(pool);
+    // Index GPS (mission, chauffeur) — jumelle de server/db/migrations/20261110_vehicle_positions_mission_driver_idx.sql.
+    await pool.query(VEHICLE_POSITIONS_MISSION_DRIVER_IDX_SQL);
     // FK vehicle_documents.type → vehicle_document_types(code), NOT VALID — jumelle de
     // server/db/migrations/20261106_vehicle_documents_type_fk.sql ; nombre de lignes hors référentiel journalisé.
     await pool.query(VEHICLE_DOCUMENTS_TYPE_FK_SQL);

@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
-import { VEHICLES_PAGE_SIZE } from "../../../client/src/lib/fetch-all-pages";
+import { PARTS_PAGE_SIZE, VEHICLES_PAGE_SIZE } from "../../../client/src/lib/fetch-all-pages";
 import { WORK_ORDERS_PAGE_SIZE } from "../../../client/src/lib/fetch-all-work-orders";
 
 /**
@@ -39,26 +39,8 @@ const DEFAULT_LIMITS: Record<string, number> = {
 };
 
 const FROZEN: Record<string, number> = {
-  // Lot 2, sélecteurs de véhicule (10 premiers proposés) : formulaires plein, plan de maintenance, OT.
-  "client/src/components/fuel/fuel-record-form.tsx": 1,
-  "client/src/components/maintenance/maintenance-schedule-form.tsx": 1,
-  "client/src/components/maintenance/work-order-form.tsx": 1,
-  "client/src/pages/maintenance-schedules.tsx": 1,
-  "client/src/pages/maintenance-simple-new.tsx": 1,
-  // Lot 2 : sélecteur de véhicule des rotations (sa requête écrit un tableau sous `["/api/vehicles"]`,
-  // clé que d'autres écrans lisent comme `{ vehicles, total }`), inspections récentes et rotations.
-  "client/src/pages/inventory/tires/index.tsx": 4,
-  // Lot 3, tuiles et agrégats : flotte et stock du technicien, OT par technicien, tableaux de bord.
-  "client/src/pages/technician/fleet-status.tsx": 2,
-  "client/src/pages/technicians/index.tsx": 1,
-  "client/src/pages/maintenance/gmao-dashboard.tsx": 1,
-  "client/src/pages/workshop-manager/dashboard.tsx": 1,
-  "client/src/pages/lot/screens.tsx": 1,
-  "client/src/pages/inventory/parts-database.tsx": 1,
-  // `getAll` des services et hooks génériques, sans appelant d'écran repéré : à vérifier, pas supprimé.
-  "client/src/lib/api-calls.ts": 4,
-  "client/src/hooks/useVehicles.ts": 1,
-  "client/src/hooks/useMaintenance.ts": 1,
+  // Lot 2b : rotations (la route ignore `limit` et rend tout ; lecture sans `limit` à lever avec la route).
+  "client/src/pages/inventory/tires/index.tsx": 1,
 };
 
 const ROOT = join(__dirname, "..", "..", "..");
@@ -74,9 +56,36 @@ function lastIndex(re: RegExp, text: string): number {
   return index;
 }
 
+/**
+ * Lectures par constante : `const KEY = ["<route>"]` (ou `= "<route>"`) puis `queryKey: KEY`,
+ * `queryKey: [KEY]`, `fetch(KEY)` ou `apiRequest("GET", KEY)`. Une clé de deux éléments ou plus
+ * (`["<route>", "all"]`) est paramétrée et n'est pas visée.
+ */
+function constantKeyReads(src: string): number {
+  let count = 0;
+  for (const route of Object.keys(DEFAULT_LIMITS)) {
+    const decl = new RegExp(
+      String.raw`\b(?:const|let|var)\s+(\w+)\s*(?::[^=]+)?=\s*\[?\s*(["'\`])${esc(route)}\2\s*\]?\s*(?:as\s+const)?\s*[;\n]`,
+      "g",
+    );
+    for (const m of src.matchAll(decl)) {
+      const name = m[1];
+      const use = new RegExp(
+        String.raw`queryKey\s*:\s*\[?\s*${name}\s*\]?\s*[,}]|\bfetch\(\s*${name}\s*[,)]|\bapiRequest\(\s*["']GET["']\s*,\s*${name}\s*[,)]`,
+        "g",
+      );
+      for (const u of src.matchAll(use)) {
+        const before = src.slice(Math.max(0, (u.index ?? 0) - 400), u.index);
+        if (!u[0].startsWith("queryKey") || lastIndex(READ_CALL, before) > lastIndex(CACHE_CALL, before)) count++;
+      }
+    }
+  }
+  return count;
+}
+
 /** Nombre de lectures sans `limit` des routes à défaut dans un source. */
 function defaultPaginatedReads(src: string): number {
-  let count = 0;
+  let count = constantKeyReads(src);
   for (const route of Object.keys(DEFAULT_LIMITS)) {
     const key = new RegExp(`queryKey\\s*:\\s*\\[\\s*(["'\`])${esc(route)}\\1\\s*\\]`, "g");
     for (const m of src.matchAll(key)) {
@@ -137,6 +146,21 @@ describe("lectures sans limit des routes paginées par défaut (client/src)", ()
     ].join(";\n");
     expect(defaultPaginatedReads(sample)).toBe(4);
   });
+
+  it("le repère voit aussi les lectures par constante, pas les invalidations ni les clés paramétrées", () => {
+    const sample = [
+      `const VEHICLES_KEY = ["/api/vehicles"];`,
+      `const PARTS = "/api/parts";`,
+      `const ALL = ["/api/vehicles", "all"] as const;`,
+      `useQuery({ queryKey: VEHICLES_KEY })`, // lu
+      `useQuery({ queryKey: [PARTS], enabled })`, // lu
+      `fetch(PARTS)`, // lu
+      `apiRequest("GET", PARTS)`, // lu
+      `queryClient.invalidateQueries({ queryKey: VEHICLES_KEY })`,
+      `useQuery({ queryKey: ALL, queryFn })`,
+    ].join(";\n");
+    expect(constantKeyReads(sample)).toBe(4);
+  });
 });
 
 /**
@@ -174,5 +198,7 @@ describe("routes paginées par défaut : alignement sur le serveur", () => {
     expect(VEHICLES_PAGE_SIZE).toBeLessThanOrEqual(constant(vehicleListSrc, "VEHICLE_LIST_MAX_LIMIT"));
     const workOrdersMax = Number(handler("/api/work-orders").match(/Math\.min\(Math\.max\(requestedLimit,\s*1\),\s*(\d+)\)/)?.[1]);
     expect(WORK_ORDERS_PAGE_SIZE).toBeLessThanOrEqual(workOrdersMax);
+    const partsMax = Number(handler("/api/parts").match(/Math\.min\(rawLimit,\s*(\d+)\)/)?.[1]);
+    expect(PARTS_PAGE_SIZE).toBeLessThanOrEqual(partsMax);
   });
 });

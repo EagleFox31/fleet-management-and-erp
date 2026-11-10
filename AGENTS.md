@@ -440,6 +440,14 @@ Contrat unique : `shared/errors.ts` (`ApiErrorBody { message, code, requestId, e
   jamais par un état lu dans la `mutationFn`. TanStack v5 applique les options dans
   un `useEffect` : un `setSelected(x)` suivi de `mutate()` dans le même clic vise
   l'élément précédent.
+- **Écriture : POST/PATCH/DELETE en JSON, jamais en GET.** Le cookie de session est en
+  `SameSite=None` et il n'y a pas de jeton CSRF : une écriture déclenchée par un GET, un
+  formulaire (`application/x-www-form-urlencoded`) ou du `text/plain` est atteignable depuis
+  n'importe quel site. Toute route qui écrit refuse un autre type de corps que `application/json`
+  (`req.is("application/json")`, sinon `AppError(415, ...)`) et ne lit jamais ses données dans
+  `req.query`. `tests/unit/server/get-no-write-hygiene.test.ts` échoue sur un `router.get` de
+  `server/api/` qui appelle `.insert/.update/.delete` ou un `ingest*`/`create*` (liste gelée vide).
+  Un client qui ne sait envoyer que GET ou formulaire (appli Traccar) attend le jeton d'appareil.
 - **Corps de requête** : ne le journaliser que par `moduleLogger` (masque
   `*.password`), jamais par `console.*`.
 - Retrouver une erreur signalée par un utilisateur : chercher sa référence

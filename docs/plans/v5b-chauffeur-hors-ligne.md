@@ -80,6 +80,10 @@ Décision : **Adapt** la file IndexedDB existante (cloisonnée, jamais branchée
 
 V5b-2 livre le cœur commun que #10c technicien doit réutiliser (à coordonner).
 
+Statut V5b-2 (2026-11-10) : livré en PR brouillon `feat/v5b-2-offline-queue-core`. API : `enqueueOfflineWrite`, `replayOfflineQueue`, `useOfflineQueue`, `registerOfflineAction`, `useGuardedLogout`. Reste pour V5b-5 : constructeur multipart (`setOfflineMultipartBuilder`) et magasin de fichiers (préfixe de clé `files:` déjà réservé).
+
+Statut V5b-3 (2026-11-10) : livré en PR brouillon `feat/v5b-3-offline-read` (liste blanche chauffeur par profil, ancre `/api/drivers/me`, fiche personnelle coupée, bandeau sur le tableau de bord chauffeur, derrière `driver-offline` et `offline-writes`). e2e hors ligne reste à faire.
+
 ## 6. Décisions de 0a (2026-11-10)
 
 1. Déconnexion avec envois en attente : blocage + choix « Supprimer N envois » avec confirmation.
@@ -90,3 +94,7 @@ V5b-2 livre le cœur commun que #10c technicien doit réutiliser (à coordonner)
 6. V5b-2 partagé avec #10c technicien : API générique, aucun `if role`.
 7. Pas de chiffrement d'IndexedDB, accepté sous conditions : cloison par compte, purge complète à la déconnexion et au changement de compte, cache limité au strict nécessaire (ni documents personnels du chauffeur, ni pièces jointes hors POD en attente).
 8. Le plan est livré dans la PR V5b-1 (pas de PR docs séparée). V5b-1 : panne idempotente (clé durable, rejeu = même incident + même OT, deux requêtes concurrentes = un seul), 409 lisible avec code `IDEMPOTENCY_IN_PROGRESS`, drapeau `driver-offline` désactivé par défaut ; contrats rejeu + concurrence rouges sans correctif ; sécurité obligatoire ; tests base sur Postgres local uniquement ; V5b-5 après fusion de #629/#634.
+
+## Prérequis d'allumage de `offline-writes` (V5b-2b)
+
+Allumer `offline-writes` seulement après le déploiement de V5b-2b ET une période de mise à jour du service worker : un ancien bundle encore en cache dans un appareil rejoue sans `X-Offline-Owner`, donc sans la vérification du propriétaire à chaque envoi (le garde serveur laisse passer l'absence de l'en-tête pour rester compatible). Attendre que les appareils aient pris le nouveau bundle (cycle de mise à jour du service worker, plusieurs jours d'usage) avant de couper la compatibilité ou d'allumer le drapeau, et ne l'allumer qu'après la revue sécurité.
