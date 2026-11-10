@@ -3684,6 +3684,19 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/contract/management-dashboard-kpis.contract.test.ts` (GPS-FE-4) : sur `GET /api/management/dashboard`, véhicule sans mission en `stopped`, aucun véhicule avec coordonnée tant qu'aucune source n'existe. Rouge sur l'ancien service (1 échec), vert après.
 - **Leçon généralisée** : un champ de contrat obligatoire pousse à fabriquer une valeur quand la donnée manque. Toute donnée dont la source n'existe pas encore est optionnelle et accompagnée d'un champ qui dit d'où elle vient (ici `positionSource`) ; un repli « plausible » n'est jamais acceptable dans une réponse que lit la direction.
 
+## 2026-11-10 — APK FleetOS Tech : elle appelait `https://localhost/api` sans le signaler
+
+- **Contexte** : l'APK construite par `build-android-apk.yml` embarquait le bundle client (`dist/public`) servi par Capacitor sur `https://localhost`. Le client appelle l'API en chemin relatif (`fetch("/api…")`, `/ws`) : tous les appels partaient vers `https://localhost/api`, sur le téléphone lui-même. Le build était vert, l'APK s'installait, aucune connexion n'aboutissait. Rien ne le disait.
+- **Cause racine** : l'origine du serveur n'était une donnée ni du build ni de la config Capacitor. Le workflow ne vérifiait que la compilation, jamais qu'une APK installée joint un serveur.
+- **Classification** : livraison, artefact vert mais inutilisable (faux succès CI). Préexistant.
+- **Résolution** (#664) :
+  - `server.url` = origine servie, lue par `capacitor.config.ts` dans `CAP_SERVER_URL` (variable de dépôt `FLEETOS_APP_URL`), validée par `resolveNativeServer` (`shared/native-shell.ts`) : origine seule, http(s), sans identifiants.
+  - Le workflow avertit si la variable manque, refuse un keystore sans origine, ne signe qu'une origine `https`, et affiche l'origine réellement embarquée.
+  - Page hors ligne embarquée (`errorPath`) au lieu d'un écran blanc.
+- **Prévention vérifiable** :
+  - Job `smoke` : APK debug lancée sur émulateur contre un serveur témoin ; bridge, `/api`, cookie, `/ws`, service worker, IndexedDB, relance serveur coupé et page hors ligne vérifiés.
+  - `tests/unit/shared/native-shell.test.ts` : validation de l'origine, verrous de `capacitor.config.ts` (`cleartext: false` en https, aucun `allowNavigation`), manifeste sans trafic en clair, signature https seulement, keystore effacé, géolocalisation au premier plan seulement.
+- **Leçon généralisée** : un artefact qui parle à un serveur se prouve par un test qui l'exécute contre un serveur, pas par sa compilation. Et une preuve dans un environnement non sécurisé (`http://10.0.2.2`) peut masquer des API réservées aux contextes sécurisés (`navigator.serviceWorker`) : le banc doit avoir le même statut de sécurité que la prod (ici `localhost` par `adb reverse`).
 ## 2026-11-10 — Écriture déclenchable en GET avec un cookie SameSite=None (GPS V1 API, #660)
 
 - **Contexte** : le lot API des positions téléphone exposait `GET /api/driver/positions?lat=&lon=&timestamp=` (format OsmAnd) qui déposait une position, à côté du POST. L'audit sécurité de #660 l'a relevé avant tout allumage du drapeau `gps`.
@@ -3710,3 +3723,26 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/unit/client/offline-queue-core.test.ts` : « bascule de compte pendant la boucle : aucun envoi après le changement », 409 propriétaire classé auth, route non protégée jamais envoyée, envoi trop ancien non rejoué, plafond des 409 « en cours ».
   - `tests/unit/client/offline-registry-routes.test.ts` : chaque type du registre doit correspondre à une route protégée. Rouge sur les anciennes déclarations (3 échecs).
 - **Leçon généralisée** : un contrôle d'identité avant une boucle ne couvre pas la boucle, et le cookie est partagé entre onglets. L'identité se porte par requête et se vérifie côté serveur à chaque écriture, pas une fois côté client. Ne rejouer automatiquement qu'une écriture dont la protection contre le doublon est prouvée par un test, pas par une déclaration.
+
+## 2026-11-10 — Une identité persistée hors ligne est une brèche de cloison en puissance (V5b-3b)
+
+- **Contexte** : restaurer la lecture au démarrage sans réseau exige de savoir qui était connecté, donc de persister une identité (#56 l'interdisait en mémoire seule).
+- **Risque** : un marqueur mêlé au cache de lecture survit à une purge de cache ou est prolongé par chaque relance ; un compte B pourrait relire la copie de A.
+- **Prévention vérifiable** : `tests/unit/client/offline-resume*.test.ts` (clés persistées figées, TTL 72 h / +1 ms refusé, échéance jamais prolongée hors ligne, purge sur chaque événement de session, 401 distinct de réseau coupé, profil non chauffeur refusé, compte B sans accès à la copie de A).
+- **Leçon généralisée** : toute identité persistée vit dans un stockage séparé, ne contient que l'indispensable, s'éteint par échéance fixe jamais repoussée hors ligne, et ne remplace jamais la preuve serveur.
+- **Complément (révocation)** : une révocation qui dépend d'un stockage faillible a besoin d'une trace de repli indépendante (pierre tombale localStorage, `{ userId }` seulement) qui bloque la restauration et fait retenter la purge. Prévention : bloc « pierre tombale » de `tests/unit/client/offline-resume-storage.test.ts`.
+- **Complément (audit #671)** : un mode restauré hors ligne est une identité NON prouvée ; tout chemin qui agit au nom du compte (rejeu de la file) doit exiger un état explicite « session confirmée dans cette page », posé par le serveur. Une réponse HTTP (200 non JSON, redirection) n'est jamais un réseau coupé. Une prolongation de droit ne se déduit que d'une réponse réseau de session. Prévention : `tests/unit/client/offline-resume-replay.test.ts`, `session-check.test.ts`.
+
+## 2026-11-10 — Contrats « no tests » dans un worktree à `node_modules` en jonction (lot carburant, #675)
+
+- **Contexte** : le worktree `fm-acct` partage le `node_modules` du dépôt principal par une jonction Windows. Les contrats y étaient lancés depuis Git Bash (`cd /c/...`).
+- **Symptôme** : « Vitest failed to find the current suite. This is a bug in Vitest », pointé sur le `afterAll` de `tests/support/setup-contract.ts`, puis `Tests no tests`. Le contrat sain de référence (`fuel-record-cancel`) échouait pareil : le défaut ne venait donc pas du test écrit. Juste avant, un « relation "users" does not exist » venait d'une autre cause (base `fleet_test` vide sur le conteneur) : il fallait les séparer.
+- **Cause racine** : le runner vitest est chargé sous deux chemins différents. D'un côté, la racine du projet en `c:` minuscule (répertoire courant de Git Bash) à travers la jonction. De l'autre, le chemin réel résolu par Node en `C:`. Cela fait deux instances du module : le `afterAll` du fichier d'installation s'adresse à une instance qui n'a pas de suite en cours.
+- **Classification** : outillage local, faux échec. Aucun impact sur la CI (Linux, `npm ci`, pas de jonction). Coût : plusieurs relances avant le diagnostic, et le risque de conclure à un test cassé ou de « corriger » le harnais.
+- **Résolution** : mesuré sur le même contrat (14 tests).
+  - Depuis `c:` sans option : échec.
+  - Depuis `C:/...` sans option : vert.
+  - Depuis `c:` avec `node --preserve-symlinks` : vert.
+  - `resolve.preserveSymlinks: true` dans `vitest.contract.config.ts` : échec, donc écarté.
+- **Prévention** : consigne dans `tests/README.md` (section Postgres local) avec le symptôme exact et les deux parades. Prévention documentaire seulement : un garde automatique (refuser de démarrer si la racine vitest et le chemin réel du runner diffèrent par la casse ou par une jonction) reste à faire si le piège revient.
+- **Leçon généralisée** : sous Windows, un même fichier peut avoir plusieurs orthographes (casse de la lettre de lecteur, jonction, lien). Un outil qui identifie ses modules par chemin peut alors en charger deux copies. Devant une erreur qui touche aussi un test de référence sain, comparer d'abord le chemin réel et le chemin d'appel avant de soupçonner le code.

@@ -32,6 +32,12 @@ function harness(opts: { pending?: PendingLogoutOutcome; session?: SessionCheck;
       calls.push("purge");
       active = null;
     },
+    // Marqueur de reprise hors ligne : couvert par session-resume-offline.test.ts.
+    async recordOnline() {},
+    async restoreOffline() {
+      return false;
+    },
+    async clearResume() {},
   };
   return { resume: createSessionResume(deps), calls, active: () => active };
 }

@@ -35,13 +35,19 @@ const DEFAULT_LIMITS: Record<string, number> = {
   "/api/admin/users": 10,
   "/api/tire-inspections": 20,
   "/api/tire-inspections/recent": 10,
-  "/api/tire-rotations": 20,
 };
 
-const FROZEN: Record<string, number> = {
-  // Lot 2b : rotations (la route ignore `limit` et rend tout ; lecture sans `limit` à lever avec la route).
-  "client/src/pages/inventory/tires/index.tsx": 1,
+/**
+ * Routes qui lisent `limit` sans l'appliquer : elles rendent toute la liste, un tableau nu.
+ * Leur lecture sans `limit` n'est pas tronquée et n'est pas visée. Le second bloc vérifie
+ * qu'elles ne paginent toujours pas ; le jour où l'une pagine, elle repasse dans `DEFAULT_LIMITS`.
+ */
+const UNPAGINATED: Record<string, { call: string; reply: string }> = {
+  "/api/tire-rotations": { call: "tiresService.getTireRotations()", reply: "res.status(200).json(rotations)" },
 };
+
+/** Lecteurs restants, gelés par fichier. Vide : tout nouveau lecteur fait échouer le test. */
+const FROZEN: Record<string, number> = {};
 
 const ROOT = join(__dirname, "..", "..", "..");
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
@@ -191,6 +197,16 @@ describe("routes paginées par défaut : alignement sur le serveur", () => {
   for (const route of Object.keys(DEFAULT_LIMITS).filter((r) => r !== "/api/vehicles")) {
     it(`${route} : défaut du gestionnaire`, () => {
       expect(defaultOf(handler(route))).toBe(DEFAULT_LIMITS[route]);
+    });
+  }
+
+  for (const [route, { call, reply }] of Object.entries(UNPAGINATED)) {
+    it(`${route} : rend toute la liste (limit lu mais non appliqué)`, () => {
+      const body = handler(route);
+      // Appel sans argument : ni limit ni offset ne sont transmis au service, la liste part entière.
+      expect(body).toContain(call);
+      expect(body).toContain(reply);
+      expect(Object.keys(DEFAULT_LIMITS)).not.toContain(route);
     });
   }
 

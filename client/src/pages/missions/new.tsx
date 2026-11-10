@@ -19,6 +19,9 @@ import { userMessageOf } from "@/lib/api-error";
 import { TariffSuggestionPanel } from "@/components/missions/tariff-suggestion-panel";
 import { parseAgreedPrice } from "@/lib/tariff-suggestion";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
+import { useFeature } from "@/hooks/use-feature";
+import { MissionGeoField } from "@/components/gps/mission-geo-field";
+import { canEditMissionGeo, geoCreateFields, NO_GEO, type GeoSelection } from "@/lib/gps-display";
 import { canSetMissionPrice } from "@shared/constants/roles";
 import { getMissionEligibility } from "@shared/constants/vehicle-eligibility";
 import { isTrailerVehicleType } from "@shared/constants/assignments";
@@ -40,6 +43,10 @@ export default function NewMission() {
   const { user } = useAuth();
   const { toast } = useToast();
   const [currentStep, setCurrentStep] = useState(1);
+  // Points A/B pour le suivi sur carte (GPS V1) : drapeau `gps`, rôles admin et logistique seulement.
+  const geoEnabled = useFeature("gps") && canEditMissionGeo(user?.role);
+  const [pickupGeo, setPickupGeo] = useState<GeoSelection>(NO_GEO);
+  const [deliveryGeo, setDeliveryGeo] = useState<GeoSelection>(NO_GEO);
   
   // Form state
   const [formData, setFormData] = useState({
@@ -192,6 +199,7 @@ export default function NewMission() {
       volume: formData.volume ? parseFloat(formData.volume) : null,
       estimatedDistance: formData.estimatedDistance ? parseInt(formData.estimatedDistance) : null,
       specialInstructions: formData.specialInstructions,
+      ...(geoEnabled ? { ...geoCreateFields("pickup", pickupGeo), ...geoCreateFields("delivery", deliveryGeo) } : {}),
       // Prix enregistré seulement s'il a été saisi ou repris par « Utiliser ».
       ...(typeof agreedPrice === "number" ? { agreedPrice, tariffGridId: formData.tariffGridId } : {}),
       status: "planned",
@@ -369,6 +377,11 @@ export default function NewMission() {
                       data-testid="input-pickup-address"
                     />
                   </div>
+                  {geoEnabled && (
+                    <div className="md:col-span-3">
+                      <MissionGeoField which="pickup" value={pickupGeo} onChange={setPickupGeo} other={deliveryGeo} />
+                    </div>
+                  )}
                   <div className="space-y-2">
                     <Label htmlFor="pickupDate">Date d&apos;enlèvement <span className="text-xs text-gray-500">(facultative)</span></Label>
                     <Input
@@ -406,6 +419,11 @@ export default function NewMission() {
                       data-testid="input-delivery-address"
                     />
                   </div>
+                  {geoEnabled && (
+                    <div className="md:col-span-3">
+                      <MissionGeoField which="delivery" value={deliveryGeo} onChange={setDeliveryGeo} other={pickupGeo} />
+                    </div>
+                  )}
                   <div className="space-y-2">
                     <Label htmlFor="deliveryDate">Date Livraison <span className="text-xs text-gray-500">(facultative)</span></Label>
                     <Input

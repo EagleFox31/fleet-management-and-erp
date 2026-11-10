@@ -38,7 +38,7 @@ export async function startContractSession<A extends string>(actors: Record<A, T
     const response = await fetch(baseUrl + path, {
       method,
       headers: {
-        ...(options.body !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...(options.body !== undefined || ["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase()) ? { "Content-Type": "application/json" } : {}),
         ...(cookie ? { Cookie: cookie } : {}),
       },
       body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
@@ -55,7 +55,7 @@ export async function startContractSession<A extends string>(actors: Record<A, T
 
   /** Réponse brute (fichier binaire) : l'appelant lit `arrayBuffer()`. */
   function raw(method: string, path: string, actor: A, body?: BodyInit): Promise<Response> {
-    return fetch(baseUrl + path, { method, headers: { Cookie: cookies.get(actor)! }, body });
+    return fetch(baseUrl + path, { method, headers: { Cookie: cookies.get(actor)!, ...(body === undefined && ["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase()) ? { "Content-Type": "application/json" } : {}) }, body });
   }
 
   async function stop() {

@@ -51,6 +51,14 @@ const FROZEN: Record<string, number> = {
   "shared/contracts/workshop-labor-rates.ts": 2,
 };
 
+/**
+ * Ids de réponse portés par une colonne `bigserial` : l'int4 serait faux, la borne est
+ * `Number.MAX_SAFE_INTEGER`. Aucune valeur reçue du client. À ne pas étendre aux ids `serial`.
+ */
+const BIGSERIAL_RESPONSE_IDS: Record<string, number> = {
+  "shared/contracts/gps.ts": 1, // missionTrackPointSchema.id (vehicle_positions.id)
+};
+
 function countUnboundedIdFields(source: string, fileName = "x.ts"): number {
   const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true);
   let count = 0;
@@ -108,6 +116,6 @@ describe("ids Zod bornés à l'int4 (query et corps)", () => {
   });
 
   it("server/api et shared/contracts : aucun nouvel id Zod non borné", () => {
-    expect(actualCounts()).toEqual(FROZEN);
+    expect(actualCounts()).toEqual({ ...FROZEN, ...BIGSERIAL_RESPONSE_IDS });
   });
 });

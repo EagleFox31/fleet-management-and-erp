@@ -40,10 +40,10 @@ async function invoice(status: (typeof supplierInvoices.$inferInsert)["status"] 
 }
 
 const validate = (id: number | string, cookie?: string) =>
-  fetch(`${baseUrl}/api/supplier-invoices/${id}/validate`, { method: "PATCH", headers: cookie ? { Cookie: cookie } : {} });
+  fetch(`${baseUrl}/api/supplier-invoices/${id}/validate`, { method: "PATCH", headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) } });
 
 const approve = (id: number | string, cookie?: string) =>
-  fetch(`${baseUrl}/api/supplier-invoices/${id}/approve`, { method: "PATCH", headers: cookie ? { Cookie: cookie } : {} });
+  fetch(`${baseUrl}/api/supplier-invoices/${id}/approve`, { method: "PATCH", headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) } });
 
 async function rowOf(id: number) {
   const [row] = await db.select().from(supplierInvoices).where(eq(supplierInvoices.id, id));
@@ -163,7 +163,7 @@ describe("garde de statut : approbation et validation", { timeout: 120000 }, () 
     const { cookie } = await sessionOf("admin");
     const paid = await invoice("paid");
     const disputed = await invoice("disputed");
-    const res = await fetch(`${baseUrl}/api/supplier-invoices/auto-approve`, { method: "POST", headers: { Cookie: cookie } });
+    const res = await fetch(`${baseUrl}/api/supplier-invoices/auto-approve`, { method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie } });
     expect(res.status).toBe(200);
     expect((await rowOf(paid.id)).status).toBe("paid");
     expect((await rowOf(disputed.id)).status).toBe("disputed");

@@ -1,3 +1,5 @@
+import { purgeGpsBuffers } from "@/lib/gps-tracking";
+
 export type FormDraftPayload<TData, TMeta = undefined> = {
   version: number;
   data: TData;
@@ -98,6 +100,8 @@ export function purgeBrowserUserState(storage?: Pick<Storage, "length" | "key" |
     }
     keys.push(...GLOBAL_USER_KEYS);
     for (const key of keys) target.removeItem(key);
+    // Tampons GPS : hors du motif des brouillons, purgés explicitement (et les écritures en cours invalidées).
+    purgeGpsBuffers(target);
     return keys.length - GLOBAL_USER_KEYS.length;
   } catch {
     return 0;
