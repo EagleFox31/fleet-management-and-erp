@@ -63,6 +63,7 @@ const MIDDLEWARES_JUSTIFIES: Entree[] = [
   { name: "requestContext", file: APP, type: "sans-base", source: "server/middleware/error-handler.ts", raison: "pose requestId et l'en-tete X-Request-Id ; ne lit que les en-tetes de la requete" },
   { name: "accessLog", file: APP, type: "ecrit-apres-reponse", source: "server/middleware/error-handler.ts", raison: "journal pino sur `finish` (methode, chemin, statut, userId), sans corps ni lecture de donnee" },
   { name: "errorResponseGuard", file: APP, type: "sans-base", source: "server/middleware/error-handler.ts", raison: "enveloppe res.json pour normaliser les erreurs >= 400 ; aucune lecture avant la reponse" },
+  { name: "rejectNonCanonicalTarget", file: APP, type: "sans-base", source: "server/middleware/reject-non-canonical-target.ts", raison: "refuse en 400 une cible brute dont le chemin contient une barre inverse ou en forme absolue, avant tout routage ; ne lit que req.url" },
   { name: "compression", file: APP, type: "sans-base", raison: "compression de la reponse, sans etat metier" },
   { name: "routeIdRangeGuard", file: INDEX, type: "sans-base", source: "server/middleware/route-id-range-guard.ts", raison: "refuse en 400 un segment numerique de l'URL hors plage int4 avant toute lecture ; ne lit que le chemin" },
   { name: "(anonyme)@*", file: APP, type: "sans-base", occurrences: 2, raison: "deux fonctions : en-tetes Cache-Control sur /api, puis CORS (en-tetes d'origine, OPTIONS -> 204) ; aucun acces base" },
