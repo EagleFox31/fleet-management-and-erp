@@ -50,19 +50,20 @@ beforeAll(async () => {
     .update(clients)
     .set({ withholdingVatRate: "19.25", withholdingIsRate: "2.20", withholdingIsBase: "ttc", withholdingUpdatedBy: session.userIdOf("admin") })
     .where(eq(clients.id, clientId));
-  const invoice = await createTestClientInvoice({ clientId, amountHT: "100000.00", vatAmount: "19250.00", amountTTC: "119250.00" });
+  // Facture émise = gelée (trigger client_invoices_issued_locked) : le dépôt est posé à la création.
+  const invoice = await createTestClientInvoice({
+    clientId,
+    amountHT: "100000.00",
+    vatAmount: "19250.00",
+    amountTTC: "119250.00",
+    depositedAt: "2026-02-01",
+    depositedBy: session.userIdOf("admin"),
+    withholdingVatAmount: "19250",
+    withholdingIsAmount: "2624",
+    netPayable: "97376",
+  });
   ids.clientInvoiceIds.push(invoice.id);
   invoiceId = invoice.id;
-  await db
-    .update(clientInvoices)
-    .set({
-      depositedAt: "2026-02-01",
-      depositedBy: session.userIdOf("admin"),
-      withholdingVatAmount: "19250",
-      withholdingIsAmount: "2624",
-      netPayable: "97376",
-    })
-    .where(eq(clientInvoices.id, invoiceId));
   const vehicle = await createTestVehicle({ registrationNumber: uniqueTestToken("cff") });
   ids.vehicleIds.push(vehicle.id);
   const fuel = await createTestFuelRecord({ vehicleId: vehicle.id });

@@ -864,6 +864,114 @@ EXCEPTION WHEN lock_not_available THEN
 END $$;`;
 
 /**
+ * Verrou d'argent en base sur les factures clients émises (lot V1, D2). Doit rester identique à
+ * server/db/migrations/20261110_money_lock_invoices.sql (AGENTS.md §5), comparé par
+ * tests/unit/server/client-invoices-lock-schema.test.ts. Un seul envoi = une transaction (SET LOCAL
+ * lock_timeout borne l'attente du verrou de table ; un échec est toléré et relu après l'appel).
+ */
+export const CLIENT_INVOICES_ISSUED_LOCK_SQL = `SELECT pg_advisory_xact_lock(hashtext('fleetmaster_migrations'));
+SET LOCAL lock_timeout = '5s';
+
+CREATE OR REPLACE FUNCTION fn_client_invoices_issued_lock()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  -- Liste blanche : toute autre colonne (montants, TVA, lignes, client, mission, numéro, dates, notes, auteur...)
+  -- est gelée, y compris une colonne ajoutée plus tard, qui naît gelée.
+  -- Avoirs (lot V1, PR5) : ajouter 'credited_amount_ttc' à ce tableau, et sa règle (à la hausse seulement, au plus
+  -- le TTC) à l'emplacement marqué plus bas ; le reste de la logique ne change pas.
+  free_cols text[] := ARRAY['status', 'balance', 'updated_at',
+    'deposited_at', 'withholding_vat_amount', 'withholding_is_amount', 'net_payable', 'deposited_by'];
+BEGIN
+  -- Levée explicite pour la transaction en cours : rien à garder.
+  IF current_setting('fleetos.allow_money_override', true) = 'on' THEN
+    IF TG_OP = 'DELETE' THEN
+      RETURN OLD;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'Facture émise : suppression refusée.'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
+  END IF;
+
+  IF (to_jsonb(NEW) - free_cols) IS DISTINCT FROM (to_jsonb(OLD) - free_cols) THEN
+    RAISE EXCEPTION 'Facture émise : montants, lignes, client, mission, numéro et dates ne se modifient plus.'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
+  END IF;
+
+  -- Annulée : statut terminal, aucune sortie et aucun mouvement de solde (décision e de 0a).
+  IF OLD.status = 'cancelled'
+     AND (NEW.status IS DISTINCT FROM OLD.status OR NEW.balance IS DISTINCT FROM OLD.balance) THEN
+    RAISE EXCEPTION 'Facture annulée : statut terminal, ni sortie ni modification de montant.'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
+  END IF;
+
+  -- Solde : il ne fait que baisser (paiements), jamais sous zéro. Une hausse rouvrirait une facture payée ;
+  -- un solde déjà hors bornes (donnée ancienne) n'empêche pas de changer le statut tant qu'il ne bouge pas.
+  IF NEW.balance IS DISTINCT FROM OLD.balance AND (NEW.balance > OLD.balance OR NEW.balance < 0) THEN
+    RAISE EXCEPTION 'Facture émise : le solde ne fait que baisser, sans passer sous zéro.'
+      USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
+  END IF;
+
+  -- Avoirs (PR5) : règle de credited_amount_ttc ici.
+
+  -- Dépôt. Seul détachement permis après coup : deposited_by vers NULL par l'action de clé étrangère (suppression de
+  -- l'utilisateur ; UPDATE lancé par un trigger, profondeur > 1). pg_trigger_depth() > 1 couvre tout UPDATE émis
+  -- depuis un trigger : aujourd'hui seule cette action ON DELETE SET NULL écrit client_invoices ainsi ; un futur
+  -- trigger qui viderait deposited_by passerait aussi.
+  IF NEW.deposited_by IS NULL AND OLD.deposited_by IS NOT NULL AND pg_trigger_depth() > 1
+     AND (NEW.deposited_at, NEW.withholding_vat_amount, NEW.withholding_is_amount, NEW.net_payable)
+         IS NOT DISTINCT FROM (OLD.deposited_at, OLD.withholding_vat_amount, OLD.withholding_is_amount, OLD.net_payable) THEN
+    RETURN NEW;
+  END IF;
+  -- Sinon le dépôt se pose une seule fois, avec sa date et son auteur, sur une facture en attente de paiement
+  -- avant comme après l'UPDATE (ni payée ni annulée, comme finance-receivables-service.depositInvoice).
+  IF (NEW.deposited_at, NEW.withholding_vat_amount, NEW.withholding_is_amount, NEW.net_payable, NEW.deposited_by)
+       IS DISTINCT FROM (OLD.deposited_at, OLD.withholding_vat_amount, OLD.withholding_is_amount, OLD.net_payable, OLD.deposited_by) THEN
+    IF OLD.deposited_at IS NOT NULL OR OLD.status = 'cancelled' OR NEW.status = 'cancelled'
+       OR OLD.status = 'paid' OR NEW.status = 'paid'
+       OR NEW.deposited_at IS NULL OR NEW.deposited_by IS NULL THEN
+      RAISE EXCEPTION 'Facture émise : le dépôt se pose une seule fois, avec sa date et son auteur.'
+        USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION fn_client_invoices_truncate_lock()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF current_setting('fleetos.allow_money_override', true) = 'on' THEN
+    RETURN NULL;
+  END IF;
+  RAISE EXCEPTION 'Factures clients : vidage de la table refusé.'
+    USING ERRCODE = 'check_violation', CONSTRAINT = 'client_invoices_issued_locked';
+END;
+$$;
+
+DO $do$
+BEGIN
+  CREATE OR REPLACE TRIGGER trg_client_invoices_issued_lock
+  BEFORE UPDATE OR DELETE ON client_invoices
+  FOR EACH ROW
+  EXECUTE FUNCTION fn_client_invoices_issued_lock();
+
+  CREATE OR REPLACE TRIGGER trg_client_invoices_truncate_lock
+  BEFORE TRUNCATE ON client_invoices
+  FOR EACH STATEMENT
+  EXECUTE FUNCTION fn_client_invoices_truncate_lock();
+EXCEPTION WHEN lock_not_available THEN
+  RAISE WARNING 'triggers de verrou des factures non posés : verrou de table indisponible, nouvel essai au démarrage suivant';
+END $do$;`;
+
+/**
  * Lot Q1 (drapeau qhse) : contrôles inopinés QHSE. Doit rester identique à
  * server/db/migrations/20261105_qhse_inspections.sql : tests/unit/server/qhse-inspections-schema.test.ts
  * compare les deux. Semis des critères cités par le document QHSE, par code, sans jamais réécrire un critère
@@ -2399,6 +2507,19 @@ export async function initializeDatabase() {
     await pool.query(FUEL_RECORDS_REQUEST_KEY_SQL);
     // Retenues à la source (F1) — jumelle de server/db/migrations/20261105_finance_withholding.sql.
     await pool.query(FINANCE_WITHHOLDING_SQL);
+    // Facture émise verrouillée en base (lot V1) — jumelle de server/db/migrations/20261110_money_lock_invoices.sql.
+    await pool.query(CLIENT_INVOICES_ISSUED_LOCK_SQL);
+    // Verrou de table indisponible (lock_timeout) : le RAISE WARNING n'atteint pas les logs applicatifs, relire pg_trigger.
+    const { rows: invoiceLockTriggers } = await pool.query(
+      `SELECT tgname FROM pg_trigger WHERE tgrelid = 'client_invoices'::regclass
+          AND tgname IN ('trg_client_invoices_issued_lock', 'trg_client_invoices_truncate_lock')`,
+    );
+    if (invoiceLockTriggers.length < 2) {
+      initLog.warn(
+        { present: invoiceLockTriggers.map((r: { tgname: string }) => r.tgname) },
+        "Triggers de verrou des factures émises non posés (verrou de table indisponible) : nouvel essai au démarrage suivant.",
+      );
+    }
     // Suppression douce des pleins qui ont mouvementé la carte — jumelle de server/db/migrations/20261103_fuel_records_soft_delete.sql.
     await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS deleted_at timestamp`);
     await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS deleted_by integer REFERENCES users(id)`);
