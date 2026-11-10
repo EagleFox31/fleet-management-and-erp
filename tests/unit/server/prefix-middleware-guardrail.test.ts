@@ -68,6 +68,7 @@ const MIDDLEWARES_JUSTIFIES: Entree[] = [
   { name: "compression", file: APP, type: "sans-base", raison: "compression de la reponse, sans etat metier" },
   { name: "routeIdRangeGuard", file: INDEX, type: "sans-base", source: "server/middleware/route-id-range-guard.ts", raison: "refuse en 400 un segment numerique de l'URL hors plage int4 avant toute lecture ; ne lit que le chemin" },
   { name: "(anonyme)@*", file: APP, type: "sans-base", occurrences: 2, raison: "deux fonctions : en-tetes Cache-Control sur /api, puis CORS (en-tetes d'origine, OPTIONS -> 204) ; aucun acces base" },
+  { name: "requireJsonContentType", file: APP, type: "sans-base", source: "server/middleware/require-json-content-type.ts", raison: "anti-CSRF : refuse en 415 une ecriture /api qui n est ni JSON ni multipart, avant les analyseurs de corps ; ne lit que la methode et les en-tetes" },
   { name: "express.json", file: APP, type: "sans-base", raison: "analyse du corps JSON (limite par defaut d'Express)" },
   { name: "express.urlencoded", file: APP, type: "sans-base", raison: "analyse du corps urlencoded" },
   { name: "express.static", file: APP, type: "sans-base", raison: "fichiers statiques publics du dossier public/, hors /api" },

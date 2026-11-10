@@ -56,7 +56,7 @@ export const STATUS_MESSAGES: Record<ApiErrorCode, string> = {
 export const NETWORK_ERROR_MESSAGE = "Connexion au serveur impossible. Vérifiez votre réseau puis réessayez.";
 
 export function codeForStatus(status: number): ApiErrorCode {
-  if (status === 400 || status === 413 || status === 422) return "VALIDATION";
+  if (status === 400 || status === 413 || status === 415 || status === 422) return "VALIDATION";
   if (status === 401) return "UNAUTHENTICATED";
   if (status === 403) return "FORBIDDEN";
   if (status === 404) return "NOT_FOUND";

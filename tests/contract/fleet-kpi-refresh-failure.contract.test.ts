@@ -42,7 +42,7 @@ describe("POST /api/statistics/fleet-kpi/refresh : échec du calcul", { timeout:
     const spy = vi
       .spyOn(vehicleStatusService as any, "getFleetStatistics")
       .mockRejectedValue(new Error("panne simulée"));
-    const res = await fetch(`${baseUrl}/api/statistics/fleet-kpi/refresh`, { method: "POST", headers: { Cookie: cookie } });
+    const res = await fetch(`${baseUrl}/api/statistics/fleet-kpi/refresh`, { method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie } });
     spy.mockRestore();
 
     expect(res.status).toBe(500);
