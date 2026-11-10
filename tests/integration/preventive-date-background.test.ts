@@ -74,4 +74,13 @@ describe("V5a : échéance du véhicule rejouée par la tâche de fond", { timeo
     await db.update(workOrders).set({ status: "cancelled" }).where(eq(workOrders.vehicleId, vehicle.id));
     expect(await passOn(vehicle.id)).toBe(1);
   });
+
+  it("véhicule réformé (out_of_service) échu : aucun OT ; remis en service, l'échéance est traitée", async () => {
+    const vehicle = await vehicleDueIn(-20);
+    await db.update(vehicles).set({ status: "out_of_service" }).where(eq(vehicles.id, vehicle.id));
+    expect(await passOn(vehicle.id)).toBe(0);
+    expect(await otsOf(vehicle.id)).toHaveLength(0);
+    await db.update(vehicles).set({ status: "operational" }).where(eq(vehicles.id, vehicle.id));
+    expect(await passOn(vehicle.id)).toBe(1);
+  });
 });

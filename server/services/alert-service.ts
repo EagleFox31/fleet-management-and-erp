@@ -8,7 +8,6 @@ import { db } from "../db";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   alerts,
-  drivers,
   alertRecipientSettings,
   missions,
   assignments,
@@ -24,6 +23,7 @@ import {
 import { and, asc, eq, inArray, isNotNull, isNull, lt, max, or, sql, type SQL } from "drizzle-orm";
 import { classifyDocumentExpiry, documentExpiryDedupeKey } from "./document-expiry-rule";
 import { driverExpiryFindings } from "./driver-document-expiry";
+import { readActiveDriverDocumentExpiries } from "../lib/driver-scope";
 import { daysBetweenDateOnly, toExpiryDateOnly, todayUtcDateOnly } from "@shared/constants/expiry-day";
 import { moduleLogger } from "../lib/logger";
 import { broadcastAlertCreated } from "../lib/alert-broadcast";
@@ -42,7 +42,8 @@ export function emitLossContext(
   failed: readonly AlertCandidate[],
   abandonedFrom: number,
 ) {
-  const describe = (c: AlertCandidate) => ({ title: c.title, type: c.type });
+  // dedupeKey et non title : le titre d'une alerte chauffeur porte son nom et son échéance.
+  const describe = (c: AlertCandidate) => ({ dedupeKey: c.dedupeKey, type: c.type });
   const abandoned = candidates.length - abandonedFrom;
   return {
     err,
@@ -887,26 +888,11 @@ export class AlertService {
    * Papiers des chauffeurs actifs (V5a) : permis, CNI et CPC (date de formation + 731 jours).
    * Une alerte par document, par palier (J-30, J-7, échu) et par échéance : la clé de
    * dédoublonnage porte le palier et la date, donc un passage rejoué ne recrée rien et un
-   * renouvellement réarme. Destinataires : admin et logistique. Retourne le nombre de
+   * renouvellement réarme. Destinataires : DRIVER_MANAGER_ROLES (admin, logistique, secrétaire). Retourne le nombre de
    * candidates produites (l'émission dédoublonne ensuite).
    */
   async checkDriverDocumentAlerts(now: Date = new Date()): Promise<number> {
-    const rows = await db
-      .select({
-        id: drivers.id,
-        firstName: drivers.firstName,
-        lastName: drivers.lastName,
-        licenseExpiry: drivers.licenseExpiry,
-        cniExpiry: drivers.cniExpiry,
-        cpcTrainingDate: drivers.cpcTrainingDate,
-      })
-      .from(drivers)
-      .where(
-        and(
-          eq(drivers.isActive, true),
-          or(isNotNull(drivers.licenseExpiry), isNotNull(drivers.cniExpiry), isNotNull(drivers.cpcTrainingDate)),
-        ),
-      );
+    const rows = await readActiveDriverDocumentExpiries();
 
     let emitted = 0;
     for (const driver of rows) {
@@ -1073,7 +1059,7 @@ export class AlertService {
       return await this.emitAlertBatch(candidates);
     } catch (error) {
       if (candidates.length === 1) {
-        log.error({ err: error, title: candidates[0].title, type: candidates[0].type }, "création d'alerte en échec");
+        log.error({ err: error, dedupeKey: candidates[0].dedupeKey, type: candidates[0].type }, "création d'alerte en échec");
         return 0;
       }
       // Base injoignable : la reprise unitaire échouerait pareil, tout le lot est perdu.

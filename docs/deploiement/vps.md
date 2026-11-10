@@ -16,6 +16,8 @@ Profils :
 - `BACKUP_ENABLED=0` : la sauvegarde applicative exige `pg_dump` et `BACKUP_KEY`, absents de l'image ; sauvegarde par `pg_dump` depuis l'hôte (§6).
 - `PREVENTIVE_DATE_JOB_ENABLED` (facultative, active par défaut ; `false` ou `0` la coupe) : préventif par date et alertes permis/CNI/CPC dans le cycle du scheduler ; laisser active sur UNE seule instance.
 
+**Premier passage du préventif par date (V5a).** Au premier cycle après déploiement, `checkDateBasedMaintenance` parcourt tous les véhicules hors `out_of_service` (les véhicules vendus ou réformés sont écartés) et crée, une fois pour toutes, un OT pour chaque échéance `nextMaintenanceDate` déjà dépassée ou à moins de 30 jours, et pour chaque plan actif échu. Les passages suivants ne recréent rien (un OT ouvert, ou clos pour la même échéance, bloque le doublon). Procédure : avant d'activer en production, 0a compte en lecture seule les véhicules concernés (hors `out_of_service`, `next_maintenance_date <= aujourd'hui + 30 jours`, sans OT de même titre) ; si le volume surprend, déployer avec `PREVENTIVE_DATE_JOB_ENABLED=false`, vérifier, puis passer la variable à `true` (ou la retirer) et redémarrer. Les alertes permis/CNI/CPC des chauffeurs partent au même passage, dédoublonnées par clé.
+
 Dans `deploy/.env` : `RECETTE_DB_PASSWORD` et `PROD_DB_PASSWORD` (vides : Postgres refuse de démarrer).
 
 `PORT` est fixé à 5000 dans le compose. Santé : `GET /api/health`. Domaines et tags d'image : `deploy/.env`.

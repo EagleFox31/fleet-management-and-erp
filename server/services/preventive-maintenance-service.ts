@@ -1,5 +1,6 @@
 import { db } from "../db";
 import { maintenanceSchedules, workOrderPlanning, workOrders, vehicles, type MaintenanceSchedule, type WorkOrder } from "@shared/schema";
+import { VEHICLE_OUT_OF_SERVICE_STATUSES, type VehicleStatusKey } from "@shared/constants/vehicle-status";
 import { eq, and, gte, lte, lt, ne, isNotNull, desc, asc, sql } from "drizzle-orm";
 import { moduleLogger } from "../lib/logger";
 import { preventiveDueDay } from "../lib/kpi-rules";
@@ -168,6 +169,10 @@ export class PreventiveMaintenanceService {
       const generatedWorkOrders: WorkOrder[] = [];
 
       for (const vehicle of vehiclesToCheck) {
+        // Véhicule retiré de l'exploitation (vendu, réformé) : pas d'OT pour une échéance qui
+        // n'a plus d'atelier à planifier (rattrapage du premier passage en production).
+        if (VEHICLE_OUT_OF_SERVICE_STATUSES.includes(vehicle.status as VehicleStatusKey)) continue;
+
         // Vérifier nextMaintenanceDate (seulement si alertType absent ou === 'maintenance')
         if (!alertType || alertType === 'maintenance') {
           if (vehicle.nextMaintenanceDate) {

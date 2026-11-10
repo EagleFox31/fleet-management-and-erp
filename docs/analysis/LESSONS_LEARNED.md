@@ -3518,3 +3518,15 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/unit/client/secretary-dashboard-stats.test.ts` : les totaux valent null dès qu'un terme manque ou n'est pas numérique ; un champ absent n'est jamais compté zéro ;
   - le contrat serveur des noms servis est figé par `tests/contract/operations-budget-scope.contract.test.ts` (`totalFuelCost`, et `estimatedFuelCost` avec T2).
 - **Leçon généralisée** : un chiffre affiché lit un champ que le contrat serveur sert réellement, sous un type nommé et non `any`. Un repli `|| 0` sur une donnée lue est interdit : un champ absent est « inconnu », jamais zéro. Avant de brancher une tuile, vérifier le nom du champ dans la réponse réelle, par un test de contrat ou un test de rendu sur une réponse de la forme servie.
+
+## 2026-11-10 — Garde de doublon d'OT préventif limitée aux OT « en attente » (V5a)
+
+- **Contexte** : le contrôle `checkDateBasedMaintenance` passe de la route manuelle à l'ordonnanceur (plusieurs passages par jour). La garde de `createDateBasedWorkOrder` ne regardait que les OT « en attente ». L'échéance du véhicule (`vehicles.nextMaintenanceDate`) n'avance pas à la clôture de l'OT. Near miss : trouvé en revue avant le premier passage en production, aucun OT en double créé.
+- **Cause racine** : une garde d'idempotence écrite pour un appel manuel et rare, réutilisée telle quelle dans une tâche répétée, sans relire l'ensemble des états d'un OT (démarré, en attente de pièces, clos, annulé). Un OT démarré, en attente de pièces ou clos aurait été recréé à chaque passage.
+- **Classification** : idempotence incomplète lors du passage d'un traitement manuel à un traitement périodique ; quasi-incident évité en revue.
+- **Résolution** : garde alignée sur celle des plans (`isDateBasedDueAlreadyHandled`, `server/lib/preventive-due.ts`) : OT ouvert, ou clos pour une échéance égale ou postérieure, bloque ; annulé ne bloque pas. Le premier passage écarte aussi les véhicules `out_of_service`, et le déploiement dispose de l'interrupteur `PREVENTIVE_DATE_JOB_ENABLED`.
+- **Prévention vérifiée** :
+  - `tests/integration/preventive-date-background.test.ts`, cas « OT démarré, en attente de pièces puis clôturé : le rejeu ne crée jamais de second OT » : échoue (1 sur 3 en échec) si la garde se réduit à « en attente » ;
+  - même fichier, cas « véhicule réformé (out_of_service) échu : aucun OT » ;
+  - `tests/unit/server/preventive-date-check.test.ts` : table des états d'OT de `isDateBasedDueAlreadyHandled`.
+- **Leçon généralisée** : tout contrôle d'idempotence est revu état par état quand son appelant devient périodique ; une garde se teste sur chaque état possible de l'objet qu'elle protège, pas sur le cas qui l'a motivée.

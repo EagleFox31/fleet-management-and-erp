@@ -66,7 +66,7 @@ export async function runPreventiveDateCheck(deps: PreventiveDateCheckDeps): Pro
 /** Verrou consultatif Postgres sur une connexion dédiée de la chaîne directe (voir idempotency-purge). */
 async function createProductionLock(): Promise<NonNullable<PreventiveDateCheckDeps["lock"]>> {
   const { listenerPool } = await import("../db");
-  type Client = { query: (q: string, p: unknown[]) => Promise<{ rows: Array<{ ok?: boolean }> }>; release: () => void };
+  type Client = { query: (q: string, p: unknown[]) => Promise<{ rows: Array<{ ok?: boolean }> }>; release: (destroy?: boolean) => void };
   let client: Client | null = null;
   return {
     async tryLock() {
@@ -88,10 +88,14 @@ async function createProductionLock(): Promise<NonNullable<PreventiveDateCheckDe
       if (!client) return;
       const c = client;
       client = null;
+      let unlocked = false;
       try {
         await c.query("SELECT pg_advisory_unlock(hashtext($1))", [PREVENTIVE_DATE_CHECK_LOCK_KEY]);
+        unlocked = true;
       } finally {
-        c.release();
+        // Déverrouillage en échec : la connexion détient peut-être encore le verrou, la rendre au
+        // pool le garderait pris. On la détruit, ce qui libère le verrou côté Postgres.
+        c.release(unlocked ? undefined : true);
       }
     },
   };
@@ -112,6 +116,9 @@ export async function preventiveDateCheckTick(now: number = Date.now()): Promise
       check: () => preventiveMaintenanceService.checkDateBasedMaintenance(),
       lock: await createProductionLock(),
     });
+  } catch (err) {
+    // Ne lève jamais : sinon runAlertCycle saute la suite du cycle (factures clients en retard).
+    log.error({ err }, "préventif par date : passage en échec");
   } finally {
     running = false;
   }

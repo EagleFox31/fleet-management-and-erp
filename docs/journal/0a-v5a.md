@@ -11,3 +11,9 @@
 - **Preuve automatisée** : unitaires `driver-document-expiry`, `preventive-date-check` ; intégration `driver-document-alerts`, `preventive-date-background` (rouge/vert : garde réduite à « en attente », 1 échec sur 3 ; restaurée, 3/3).
 - **RAIDER** : couvert idempotence, non-régression, moindre privilège (alertes aux seuls lecteurs des données chauffeur) ; sans objet : migration.
 - **Reste / risques** : instance unique supposée (comme le cycle d'alertes) ; contrainte d'unicité en base sur les OT préventifs ouverts à signaler à fleet-db.
+
+## 2026-11-10 - Correctifs de relecture (V5a)
+- **Quoi** : véhicules `out_of_service` écartés du préventif par date (constante `VEHICLE_OUT_OF_SERVICE_STATUSES`) ; lecture des échéances de papiers chauffeur déplacée dans `server/lib/driver-scope.ts` (`readActiveDriverDocumentExpiries`), l'entrée ajoutée à la liste gelée d'hygiène est retirée ; verrou consultatif : `release(true)` si `pg_advisory_unlock` échoue (préventif et purge d'idempotence) ; `preventiveDateCheckTick` ne lève plus ; journaux d'échec d'émission d'alerte : `dedupeKey` au lieu de `title` (nom du chauffeur dans le titre).
+- **Preuve** : `preventive-date-tick` (rouge sans le try/catch, vert avec), `preventive-date-background` (réformé), `alert-emit-fallback-relink` (échantillon sans titre), `driver-personal-data-hygiene` sans entrée ajoutée.
+- **Documenté** : premier passage en production et procédure d'activation dans `docs/deploiement/vps.md` ; near miss dans `LESSONS_LEARNED.md`.
+
