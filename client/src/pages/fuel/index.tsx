@@ -552,7 +552,7 @@ export default function FuelPage() {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                className="h-7 w-7 p-0 text-destructive-text hover:text-destructive-text hover:bg-destructive/10"
                 onClick={(e) => {
                   e.stopPropagation();
                   setCancellingRecord(row);
