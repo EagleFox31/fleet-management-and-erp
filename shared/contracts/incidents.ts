@@ -42,6 +42,8 @@ export const incidentsQuerySchema = z.object({ status: z.enum(INCIDENT_STATUSES)
 export const incidentSchema = z.object({
   id: z.number().int(),
   vehicleId: z.number().int(),
+  /** Immatriculation du véhicule : l'écran l'affiche à la place de l'id. */
+  vehicleRegistration: z.string().nullable(),
   reportedBy: z.number().int().nullable(),
   reportedByName: z.string().nullable(),
   description: z.string(),

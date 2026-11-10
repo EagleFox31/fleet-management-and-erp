@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ContextualHelpButton } from "@/components/help";
+import { useGuardedLogout } from "@/components/offline/logout-guard";
 import { useToast } from "@/hooks/use-toast";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -694,7 +695,8 @@ function PerformanceTab({ missions }: { missions: Mission[] }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function DriverDashboard() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
+  const { requestLogout, guardDialog } = useGuardedLogout();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   useRealTimeSync(user?.id);
@@ -772,6 +774,7 @@ export default function DriverDashboard() {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {guardDialog}
           <ContextualHelpButton />
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-full bg-success flex items-center justify-center text-white text-xs font-bold">
@@ -779,7 +782,7 @@ export default function DriverDashboard() {
             </div>
             <p className="text-white text-sm font-medium hidden sm:block">{driverName}</p>
           </div>
-          <button onClick={() => logout()} className="text-green-300 hover:text-white transition-colors p-1" aria-label="Se déconnecter">
+          <button onClick={() => void requestLogout()} className="text-green-300 hover:text-white transition-colors p-1" aria-label="Se déconnecter">
             <LogOut className="h-4 w-4" />
           </button>
         </div>

@@ -25,7 +25,11 @@ vi.mock("idb-keyval", () => ({
 }));
 const toast = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/use-toast", () => ({ toast }));
-vi.mock("@/lib/queryClient", () => ({ apiRequest: vi.fn(), queryClient: undefined }));
+// Drapeaux hors ligne allumés : la file v2 refuse de mettre en file sans eux.
+vi.mock("@/lib/queryClient", () => ({
+  apiRequest: vi.fn(),
+  queryClient: { getQueryData: () => ({ "offline-writes": true, "driver-offline": true }) },
+}));
 vi.mock("@/lib/pending-logout", () => ({ pendingServerLogout: { flush: vi.fn(async () => "none") } }));
 
 import {
@@ -100,6 +104,19 @@ describe("mise en file hors ligne et déconnexion", () => {
   it("sans utilisateur actif, refuse la mise en file", async () => {
     await enqueueOfflineAction(action);
     expect(idb.dbs.size).toBe(0);
+    expect(toast).toHaveBeenCalledWith(expect.objectContaining({ variant: "destructive" }));
+  });
+});
+
+describe("file v2 : drapeaux", () => {
+  it("sans drapeau offline-writes, la mise en file est refusée et rien n'est écrit", async () => {
+    const client = new QueryClient();
+    activateOfflineUser(client, 5);
+    const { queryClient } = await import("@/lib/queryClient");
+    const spy = vi.spyOn(queryClient as unknown as { getQueryData: () => unknown }, "getQueryData").mockReturnValue({});
+    await enqueueOfflineAction(action);
+    spy.mockRestore();
+    expect(await queueOf(5)).toEqual([]);
     expect(toast).toHaveBeenCalledWith(expect.objectContaining({ variant: "destructive" }));
   });
 });

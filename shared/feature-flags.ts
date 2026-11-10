@@ -32,7 +32,7 @@ export const FEATURE_FLAGS = {
   "time-tracking": { level: "should", defaultEnabled: false, label: "Pointage" },
   "operations-tracking": { level: "should", defaultEnabled: false, label: "Suivi des opérations clients" },
   "pending-invoices": { level: "should", defaultEnabled: false, label: "Factures en attente" },
-  incidents: { level: "should", defaultEnabled: false, label: "Déclaration de panne" },
+  incidents: { level: "should", defaultEnabled: true, label: "Déclaration de panne" },
   "oil-change-prefill": { level: "should", defaultEnabled: false, label: "Intervalles de vidange préremplis" },
   "quality-check": { level: "should", defaultEnabled: false, label: "Contrôle qualité des ordres de travail" },
 

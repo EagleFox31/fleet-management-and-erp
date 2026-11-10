@@ -72,8 +72,11 @@ function buildHeaders(
   return merged;
 }
 
-export function apiRequest(method: string, url: string, data?: unknown): Promise<Response>;
-export function apiRequest(url: string, method: string, data?: unknown): Promise<Response>;
+/** Options d'une requête à signature positionnelle (en-têtes, annulation). */
+export type ApiRequestOptions = Pick<RequestInit, "headers" | "signal">;
+
+export function apiRequest(method: string, url: string, data?: unknown, options?: ApiRequestOptions): Promise<Response>;
+export function apiRequest(url: string, method: string, data?: unknown, options?: ApiRequestOptions): Promise<Response>;
 export function apiRequest(
   url: string,
   init?: Omit<RequestInit, "body"> & { body?: unknown },
@@ -82,6 +85,7 @@ export async function apiRequest(
   a: string,
   b?: string | (Omit<RequestInit, "body"> & { body?: unknown }),
   c?: unknown,
+  d?: ApiRequestOptions,
 ): Promise<Response> {
   let method = "GET";
   let url = "";
@@ -93,11 +97,13 @@ export async function apiRequest(
     method = a.toUpperCase();
     url = b;
     body = c;
+    init = { ...d };
     // Signature: apiRequest("/api/...", "METHOD", data?)
   } else if (typeof b === "string" && isMethod(b)) {
     method = b.toUpperCase();
     url = a;
     body = c;
+    init = { ...d };
     // Signature: apiRequest("/api/...", { method, body, ... })
   } else if (typeof b === "object" && b !== null) {
     url = a;

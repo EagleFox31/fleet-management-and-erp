@@ -9,6 +9,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { sessionMiddleware } from "./middleware/session";
 import { findActiveSessionUser } from "./services/session-user";
 import { moduleLogger } from "./lib/logger";
+import { upgradeRoute } from "./lib/upgrade-route";
 import { relayDatabaseEvent } from "./lib/db-event-relay";
 import { createApp } from "./app";
 import { setAuditSink } from "./lib/audit";
@@ -57,10 +58,12 @@ import { describeInvalidScope, normalizeScope, resolveRecipients } from "./lib/r
     return null;
   };
 
-  // Router manuellement les upgrades : /ws → app, reste → Vite HMR
+  // Router manuellement les upgrades : /ws → app, reste → Vite HMR en développement, refus sinon.
+  const isDevelopment = app.get("env") === "development";
   server.on('upgrade', (request, socket, head) => {
-    const pathname = request.url?.split('?')[0];
-    if (pathname !== '/ws') {
+    const route = upgradeRoute(request.url, isDevelopment);
+    if (route !== "app") {
+      if (route === "reject") socket.destroy();
       return;
     }
 

@@ -13,7 +13,7 @@ import {
 } from "../lib/idempotency-config";
 import { hashRequest, idempotencyStore, type IdempotencyStore } from "../lib/idempotency-store";
 import { moduleLogger } from "../lib/logger";
-import { routedPath } from "../lib/routed-path";
+import { API_PREFIX, routedPath } from "../lib/routed-path";
 
 /** Chargé à l'appel : importer la base au chargement casserait les tests unitaires sans base. */
 const findActiveSessionUser = async (id: number) => (await import("../services/session-user")).findActiveSessionUser(id);
@@ -69,7 +69,7 @@ export function idempotencyGuard(
     if (routes.length === 0) return next();
     const method = req.method.toUpperCase();
     // Chemin lu par le routeur (`\`, `//`, forme absolue), pas `originalUrl` brut (#631).
-    const path = normalizeIdempotencyPath(routedPath(req).replace(/^\/api(?=\/|$)/i, ""));
+    const path = normalizeIdempotencyPath(routedPath(req).replace(API_PREFIX, ""));
     const route = findIdempotentRoute(routes, method, path);
     if (!route) return next();
     if (!route.ignoreFeatureFlag && !isFeatureEnabled(IDEMPOTENCY_FLAG)) return next();
