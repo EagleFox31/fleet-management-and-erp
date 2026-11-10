@@ -75,36 +75,69 @@ function refusedFormat(file: { mimetype: string; originalname: string }): AppErr
   return new AppError(400, heic ? HEIC_UPLOAD_MESSAGE : UNREADABLE_UPLOAD_MESSAGE);
 }
 
-/** État de la remise en cours : dossier validé et fichiers ouverts (terminés ou non). */
-type PodRequest = Request & { podDir?: string; podStarted?: string[] };
+/** Un fichier ouvert pour cette remise : son flux d'écriture et sa fin (fermeture du descripteur). */
+type PodStarted = { path: string; out: fs.WriteStream; closed: Promise<void> };
+type PodRequest = Request & { podStarted?: PodStarted[] };
+
+/** Dossier de dépôt de la mission, validé (segment sûr, sous uploads/missions/pod). */
+function podDirectoryOf(req: Request): string {
+  const segment = `mission-${parseMissionId(req.params.id)}`; // isSafePathSegment( ci-dessous
+  if (!isSafePathSegment(segment)) throw new AppError(400, MISSION_ID_INVALID_MESSAGE);
+  const root = path.resolve(process.cwd(), ...POD_ROOT);
+  const dir = path.join(root, segment);
+  if (!isInsideDirectory(root, dir) || !realPathStaysInside(path.resolve(process.cwd(), "uploads"), dir)) {
+    throw new AppError(400, MISSION_ID_INVALID_MESSAGE);
+  }
+  return dir;
+}
+
+/**
+ * Stockage disque qui garde la main sur chaque flux d'écriture. multer ne connaît que les fichiers terminés :
+ * un flux tronqué laisse un fichier à moitié écrit, et l'ouverture du descripteur étant asynchrone, un
+ * `unlink` envoyé trop tôt est suivi de la création du fichier. Ici chaque flux est suivi dès son ouverture,
+ * détruit sur erreur, et la suppression attend sa fermeture.
+ */
+const podStorage: multer.StorageEngine = {
+  _handleFile(req, file, cb) {
+    let started: PodStarted;
+    try {
+      const dir = podDirectoryOf(req);
+      fs.mkdirSync(dir, { recursive: true });
+      // Extension tirée du type déclaré (déjà filtré), jamais de `originalname`.
+      const target = path.join(dir, `${randomUUID()}.${EXTENSION_OF_MIME[file.mimetype as UploadMime]}`);
+      const out = fs.createWriteStream(target, { flags: "wx" });
+      started = { path: target, out, closed: new Promise<void>((resolve) => out.once("close", () => resolve())) };
+    } catch (error) {
+      return cb(error as Error);
+    }
+    ((req as PodRequest).podStarted ??= []).push(started);
+    const { out, path: target } = started;
+    // Flux source interrompu (corps tronqué) : la sortie est détruite, donc fermée, et l'erreur remonte.
+    file.stream.once("error", (error) => out.destroy(error));
+    out.once("error", cb);
+    out.once("finish", () => cb(null, { destination: path.dirname(target), filename: path.basename(target), path: target, size: out.bytesWritten }));
+    file.stream.pipe(out);
+  },
+  _removeFile(_req, file, cb) {
+    try {
+      for (const candidate of uploadedFileCandidates((file as { path: string }).path)) fs.rmSync(candidate, { force: true });
+      cb(null);
+    } catch (error) {
+      cb(error as Error);
+    }
+  },
+};
+
+/** Ferme les flux encore ouverts de la remise, attend leur fermeture, puis supprime leurs fichiers. */
+async function discardStarted(req: Request): Promise<void> {
+  const started = (req as PodRequest).podStarted ?? [];
+  for (const item of started) item.out.destroy();
+  await Promise.all(started.map((item) => item.closed));
+  removeFiles(started);
+}
 
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: (req, _file, cb) => {
-      try {
-        const segment = `mission-${parseMissionId(req.params.id)}`; // isSafePathSegment( ci-dessous
-        if (!isSafePathSegment(segment)) throw new AppError(400, MISSION_ID_INVALID_MESSAGE);
-        const root = path.resolve(process.cwd(), ...POD_ROOT);
-        const dir = path.join(root, segment);
-        if (!isInsideDirectory(root, dir) || !realPathStaysInside(path.resolve(process.cwd(), "uploads"), dir)) {
-          throw new AppError(400, MISSION_ID_INVALID_MESSAGE);
-        }
-        fs.mkdirSync(dir, { recursive: true });
-        (req as PodRequest).podDir = dir; // déjà validé ci-dessus
-        cb(null, dir);
-      } catch (error) {
-        cb(error as Error, "");
-      }
-    },
-    // Extension tirée du type déclaré (déjà filtré), jamais de `originalname`.
-    filename: (req, file, cb) => {
-      const name = `${randomUUID()}.${EXTENSION_OF_MIME[file.mimetype as UploadMime]}`;
-      // Noté dès l'ouverture : multer ne connaît que les fichiers terminés, pas celui qu'un flux tronqué laisse à moitié écrit.
-      const tracked = req as PodRequest;
-      (tracked.podStarted ??= []).push(path.join(tracked.podDir ?? "", name));
-      cb(null, name);
-    },
-  }),
+  storage: podStorage,
   fileFilter: (_req, file, cb) => {
     const extension = path.extname(file.originalname).toLowerCase();
     if (ALLOWED_MIMES.includes(file.mimetype) && NAME_EXTENSIONS[file.mimetype as UploadMime].includes(extension)) {
@@ -134,9 +167,10 @@ async function ensureMissionExists(req: Request, _res: Response, next: NextFunct
 }
 
 function uploadFiles(req: Request, res: Response, next: NextFunction) {
-  upload(req, res, (error: unknown) => {
+  upload(req, res, async (error: unknown) => {
     if (!error) return next();
-    removeFiles(((req as PodRequest).podStarted ?? []).map((started) => ({ path: started })));
+    // La réponse part après la fermeture et la suppression : aucun fichier ne peut réapparaître.
+    await discardStarted(req).catch((cause) => log.warn({ err: cause, requestId: req.requestId }, "nettoyage d'une remise POD interrompue"));
     if (error instanceof multer.MulterError) {
       const message =
         error.code === "LIMIT_FILE_SIZE"

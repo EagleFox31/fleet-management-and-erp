@@ -24,3 +24,10 @@ export function isVoidAssignmentStatus(status: string | null | undefined): boole
 export function isActiveAssignmentStatus(status: string | null | undefined): boolean {
   return (ACTIVE_ASSIGNMENT_STATUSES as readonly string[]).includes(String(status ?? ""));
 }
+
+/** Types de véhicule qui peuvent être attelés comme remorque d'une affectation (vehicles.vehicle_type). */
+export const TRAILER_VEHICLE_TYPES = ["remorque", "semi_remorque"] as const;
+
+export function isTrailerVehicleType(vehicleType: string | null | undefined): boolean {
+  return (TRAILER_VEHICLE_TYPES as readonly string[]).includes(String(vehicleType ?? ""));
+}
