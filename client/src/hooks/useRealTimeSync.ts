@@ -1260,6 +1260,9 @@ export function handleDomainUpdate(update: RealTimeUpdate): void {
           queryClient.invalidateQueries({
             queryKey: [`/api/billing/invoices/${invoiceId}/payments`],
           });
+          queryClient.invalidateQueries({
+            queryKey: [`/api/billing/invoices/${invoiceId}/credit-notes`],
+          });
         }
       }
       queryClient.invalidateQueries({ queryKey: ["/api/billing"] });

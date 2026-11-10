@@ -27,6 +27,8 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { userMessageOf } from "@/lib/api-error";
 import { formatPrice } from "@/lib/utils";
 import { CardShell, HeaderCard, KpiGrid, KpiTile, PremiumTableShell, SectionLabel } from "@/components/design-system";
+import { InvoiceCreditNotes } from "@/components/billing/invoice-credit-notes";
+import { paidTtcOf } from "@shared/constants/client-invoices";
 
 interface ClientInvoiceDetails {
   id: number;
@@ -38,6 +40,8 @@ interface ClientInvoiceDetails {
   vatAmount: string;
   amountTTC: string;
   balance: string;
+  creditedAmountTtc?: string | null;
+  depositedAt?: string | null;
   status: string;
   items?: Array<{
     description: string;
@@ -271,8 +275,9 @@ export default function ClientInvoiceDetailsPage() {
 
   const statusInfo = statusConfig[invoice.status] || statusConfig.pending;
   const balance = Number.parseFloat(invoice.balance || "0");
-  const totalTTC = Number.parseFloat(invoice.amountTTC || "0");
-  const paidAmount = Math.max(0, totalTTC - balance);
+  const creditedAmount = Number.parseFloat(invoice.creditedAmountTtc || "0");
+  // Un avoir baisse le solde sans être un paiement : payé = TTC - avoirs - solde.
+  const paidAmount = Math.max(0, paidTtcOf(invoice));
   const canRecordClientPayment = ["admin", "secretary", "accountant"].includes(String(user?.role || ""));
   const hasActualMissionDeliveryDate = Boolean(invoice.mission?.actualDeliveryDate);
   const missionDeliveryDateLabel = hasActualMissionDeliveryDate
@@ -470,6 +475,12 @@ export default function ClientInvoiceDetailsPage() {
               <span className="font-semibold text-gray-700">Montant TTC</span>
               <span className="text-lg font-bold text-gray-900" data-testid="amount-ttc">{formatCurrency(invoice.amountTTC)}</span>
             </div>
+            {creditedAmount > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-gray-500">Avoirs (TTC)</span>
+                <span className="font-semibold text-gray-800" data-testid="amount-credited">- {formatCurrency(creditedAmount)}</span>
+              </div>
+            )}
             <div className="pt-2 mt-2 border-t border-gray-100 flex items-center justify-between">
               <span className="font-semibold text-amber-700">Solde dû</span>
               <span className="text-lg font-bold text-amber-700" data-testid="balance-due">{formatCurrency(balance)}</span>
@@ -549,6 +560,8 @@ export default function ClientInvoiceDetailsPage() {
             </table>
           )}
         </PremiumTableShell>
+
+        <InvoiceCreditNotes invoice={invoice} role={user?.role} />
       </div>
 
       <Dialog

@@ -487,8 +487,9 @@ export const DRIVER_DIRECTORY_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filte
 );
 
 /**
- * Lecteurs des missions (liste, fiche, preuves de livraison) : le personnel sans le technicien, qui n'a
- * aucun écran mission (adresses, client, chauffeurs). Le chauffeur y reste, cloisonné à ses missions par
+ * Lecteurs des missions : liste et fiche, preuves de livraison, contrôle de lancement, demandes de
+ * renouvellement d'une mission, listes d'exploitation (`/api/operations/missions*`), `/api/drivers/me`. Le personnel sans le
+ * technicien, qui n'a aucun écran mission (adresses, client, chauffeurs). Le chauffeur y reste, cloisonné à ses missions par
  * la garde des routeurs (`router.param("id")`, portée chauffeur de la liste).
  */
 export const MISSION_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "technician");
@@ -508,11 +509,12 @@ export const PART_CATALOG_EVENT_ROLES: readonly AppRole[] = STAFF_ROLES.filter((
 export const STOCK_VALUATION_READ_ROLES: readonly AppRole[] = PART_CATALOG_EVENT_ROLES;
 
 /**
- * Coûts, rapprochement par client et statistiques d'exploitation (`/api/operations`) : le
- * personnel sauf le chauffeur, même pour sa propre mission (amortissement tiré du prix d'achat,
- * agrégats de toute la flotte). Décision du 3 novembre 2026.
+ * Coûts, rapprochement par client et statistiques d'exploitation (`/api/operations`) : les lecteurs
+ * des missions sans le chauffeur, même pour sa propre mission (amortissement tiré du prix d'achat,
+ * agrégats de toute la flotte, décision du 3 novembre 2026). Le technicien en est exclu par
+ * `MISSION_READ_ROLES` : il n'a aucun écran mission ni client.
  */
-export const OPERATIONS_COST_READ_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "driver");
+export const OPERATIONS_COST_READ_ROLES: readonly AppRole[] = MISSION_READ_ROLES.filter((role) => role !== "driver");
 
 /**
  * Destinataires des événements de facturation client (création, paiement, retard) : les rôles
