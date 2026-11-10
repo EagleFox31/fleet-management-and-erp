@@ -5,6 +5,7 @@ import { CLIENT_CREDIT_NOTES_SQL, CLIENT_INVOICES_ISSUED_LOCK_SQL } from "../../
 import { withMoneyOverride } from "../../server/lib/money-override";
 import { isCheckViolation, moneyLockMessageOf, pgConstraintOf } from "../../server/lib/pg-errors";
 import { createCreditNote } from "../../server/services/client-credit-note-service";
+import { depositInvoice } from "../../server/services/finance-receivables-service";
 import { clientCreditNotes, clientInvoices } from "../../shared/schema";
 import { cleanupCreated, createIdBag } from "../support/cleanup";
 import { createTestClient, createTestClientInvoice, createTestUser } from "../support/factories";
@@ -213,5 +214,44 @@ describe("service createCreditNote", { timeout: 60_000 }, () => {
     const suffix = (n: string) => Number(n.split("-")[2]);
     expect(a.creditNote.creditNoteNumber.slice(0, 11)).toBe(b.creditNote.creditNoteNumber.slice(0, 11));
     expect(suffix(b.creditNote.creditNoteNumber)).toBe(suffix(a.creditNote.creditNoteNumber) + 1);
+  });
+});
+
+describe("dépôt concurrent d'un avoir (READ COMMITTED)", { timeout: 60_000 }, () => {
+  // Le dépôt attend le verrou de la facture pendant qu'un avoir s'enregistre : une fois le verrou libéré, il doit
+  // lire l'avoir validé et figer le net à payer sur la base nette (un SELECT ... FOR UPDATE avec sous-requêtes
+  // garderait l'instantané d'avant l'attente et figerait le brut).
+  it("avoir validé pendant l'attente du dépôt : net à payer sur la base nette, au plus le solde", async () => {
+    const invoice = await makeInvoice();
+    const depositDate = String(invoice.invoiceDate).slice(0, 10);
+    let deposit: Promise<unknown> | undefined;
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT id FROM client_invoices WHERE id = ${invoice.id} FOR UPDATE`);
+      deposit = depositInvoice(invoice.id, depositDate, userId, new Date(`${depositDate}T12:00:00Z`));
+      // Le dépôt démarre et se bloque sur le verrou tenu par cette transaction.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const [note] = await tx
+        .insert(clientCreditNotes)
+        .values({
+          creditNoteNumber: uniqueTestToken("AV-RC"),
+          invoiceId: invoice.id,
+          reason: "TEST course dépôt",
+          amountHT: "40000.00",
+          amountTTC: "40000.00",
+          requestKey: key(),
+          createdBy: userId,
+        })
+        .returning();
+      noteIds.push(note.id);
+      await tx
+        .update(clientInvoices)
+        .set({ balance: "60000.00", creditedAmountTtc: "40000.00", status: "partial" })
+        .where(eq(clientInvoices.id, invoice.id));
+    });
+    await deposit;
+    const after = await invoiceRow(invoice.id);
+    expect(after.depositedAt).not.toBeNull();
+    expect(Number(after.netPayable)).toBe(60000);
+    expect(Number(after.netPayable)).toBeLessThanOrEqual(Number(after.balance));
   });
 });

@@ -111,11 +111,18 @@ type Executor = Pick<typeof db, "execute">;
  * de la même facture sont sérialisés ; un changement de taux concurrent n'est pas bloqué, et le dépôt
  * fige les taux lus à cet instant (ceux validés avant la lecture). C'est voulu : le taux figé est
  * celui en vigueur au moment du dépôt, un changement ultérieur ne touche que les factures non déposées.
+ *
+ * Le verrou est posé par une instruction seule, la lecture vient après. En READ COMMITTED, un
+ * `SELECT ... FOR UPDATE OF i` qui a attendu ne relit que la ligne verrouillée : ses sous-requêtes sur
+ * `client_credit_notes` garderaient l'instantané d'avant l'attente, et un avoir validé pendant cette
+ * attente serait ignoré (dépôt figé sur le brut). Une nouvelle instruction prend un instantané frais.
  */
 async function invoiceRow(executor: Executor, id: number, lock: boolean): Promise<InvoiceRow | undefined> {
-  const result = await executor.execute(
-    lock ? sql`${SELECT_INVOICES} WHERE i.id = ${id} FOR UPDATE OF i` : sql`${SELECT_INVOICES} WHERE i.id = ${id}`,
-  );
+  if (lock) {
+    const locked = await executor.execute(sql`SELECT id FROM client_invoices WHERE id = ${id} FOR UPDATE`);
+    if (rowsOf<{ id: number }>(locked).length === 0) return undefined;
+  }
+  const result = await executor.execute(sql`${SELECT_INVOICES} WHERE i.id = ${id}`);
   return rowsOf<InvoiceRow>(result)[0];
 }
 
