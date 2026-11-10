@@ -8,6 +8,9 @@ import apiRouter from "./api";
 import { initializeDatabase } from "./init-database";
 import { moduleLogger } from "./lib/logger";
 import { isApiPath } from "./lib/routed-path";
+import { isAllowedOrigin } from "./lib/allowed-origins";
+import { requireSameOrigin } from "./middleware/require-same-origin";
+import { requireJsonContentType } from "./middleware/require-json-content-type";
 import { migrateLoginIdentifiers, pendingLoginIdentifiers } from "./services/login-identifier-migration";
 import { createIpFailureLimiter } from "./middleware/auth-ip-limit";
 import { trustProxyFromEnv } from "./lib/trust-proxy";
@@ -66,16 +69,7 @@ export async function createApp(
   app.use((req, res, next) => {
     const origin = req.headers.origin;
     if (origin) {
-      const allowedOrigins = [
-        "https://localhost",
-        "http://localhost",
-        "capacitor://localhost",
-        process.env.APP_URL,
-        process.env.CORS_ORIGIN,
-      ].filter(Boolean) as string[];
-
-      const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/.test(origin);
-      const isAllowed = allowedOrigins.includes(origin) || (process.env.NODE_ENV !== "production" && isLocalhost);
+      const isAllowed = isAllowedOrigin(origin);
 
       if (isAllowed) {
         res.setHeader("Access-Control-Allow-Origin", origin);
@@ -94,6 +88,10 @@ export async function createApp(
     next();
   });
 
+  // Avant tout analyseur de corps : une écriture /api venue d'un autre site est refusée en 403 (origine),
+  // puis en urlencoded ou text/plain en 415 (défense en profondeur).
+  app.use(requireSameOrigin);
+  app.use(requireJsonContentType);
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 

@@ -174,6 +174,7 @@ export async function deleteRecetteData(c: Queryable): Promise<void> {
     // Portée de la transaction (recette-reset ouvre BEGIN) : lève les verrous d'argent pour ce reset seul.
     `select set_config('fleetos.allow_money_override', 'on', true)`,
     `DELETE FROM client_payments WHERE invoice_id IN (SELECT id FROM client_invoices WHERE invoice_number LIKE 'RCT-%')`,
+    `DELETE FROM client_credit_notes WHERE invoice_id IN (SELECT id FROM client_invoices WHERE invoice_number LIKE 'RCT-%')`,
     `DELETE FROM client_invoices WHERE invoice_number LIKE 'RCT-%'`,
     `DELETE FROM missions WHERE order_number LIKE 'RCT-%'`,
     `DELETE FROM clients WHERE name LIKE 'RCT-%'`,

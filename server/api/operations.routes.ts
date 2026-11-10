@@ -6,11 +6,13 @@ import { AppError } from "../lib/app-error";
 import { authenticate, authorize } from "../middleware/auth";
 import { moduleLogger } from "../lib/logger";
 import { withLogContext } from "../lib/error-log-context";
-import { MISSION_MANAGER_ROLES, OPERATIONS_COST_READ_ROLES, STAFF_ROLES, type AppRole } from "@shared/constants/roles";
+import { MISSION_MANAGER_ROLES, OPERATIONS_COST_READ_ROLES, type AppRole } from "@shared/constants/roles";
 import { driverScopeOf } from "../lib/driver-scope";
 import { redactVehiclePriceDeep } from "../lib/vehicle-price-scope";
-import { omitMissionBudget, redactMissionBudget, redactMissionPrice } from "../lib/mission-response-scope";
+import { redactMissionBudget, redactMissionPrice } from "../lib/mission-response-scope";
+import { redactMissionClientContact } from "../lib/mission-client-contact-scope";
 import { parseQueryId, parseRouteId, MISSION_ID_INVALID_MESSAGE } from "../lib/route-id";
+import { emitMissionEvent } from "../lib/mission-events";
 
 const log = moduleLogger("operations");
 const router = Router();
@@ -26,36 +28,6 @@ const refuseDriver = (req: Request, _res: Response, next: NextFunction) => {
   const role = req.user?.role as AppRole | undefined;
   if (!role || !OPERATIONS_COST_READ_ROLES.includes(role)) return next(new AppError(403, OPERATIONS_COSTS_DRIVER_MESSAGE));
   next();
-};
-
-const broadcastOperationMissionUpdate = (
-  eventType: string,
-  payload: Record<string, unknown>,
-  options?: {
-    missionId?: number | null;
-    actorUserId?: number | null;
-    actorRole?: string | null;
-  },
-) => {
-  const broadcastUpdate = (global as any).broadcastUpdate;
-  if (typeof broadcastUpdate !== "function") {
-    return;
-  }
-
-  broadcastUpdate(eventType, {
-    version: 1,
-    entity: "mission",
-    entityId: options?.missionId ?? null,
-    // Trame diffusée à tout le personnel : sans montant du budget (Q19), les lecteurs relisent par HTTP.
-    payload: omitMissionBudget(payload),
-    // Missions, clients et pleins : données internes, jamais diffusées aux comptes client.
-    scope: { type: "roles", roles: [...STAFF_ROLES] },
-    actor: {
-      userId: options?.actorUserId ?? null,
-      role: options?.actorRole ?? null,
-    },
-    emittedAt: new Date().toISOString(),
-  });
 };
 
 /**
@@ -112,17 +84,20 @@ router.post("/missions/from-fuel", authorize([...MISSION_MANAGER_ROLES]), async 
           ? (result as any).id
           : null;
 
-    broadcastOperationMissionUpdate(
+    // Trame réduite aux identifiants (moindre donnée) : le contact client et les montants du plein
+    // se relisent par HTTP. Personnel hors chauffeur et technicien, chauffeur affecté à part (emitMissionEvent).
+    await emitMissionEvent(
       "mission_created_from_fuel",
+      missionId,
       {
-        fuelRecordId,
-        result: redactMissionPrice(null, result),
+        version: 1,
+        entity: "mission",
+        entityId: missionId,
+        payload: { missionId, fuelRecordId },
+        actor: { userId: req.user?.id ?? null, role: req.user?.role ?? null },
+        emittedAt: new Date().toISOString(),
       },
-      {
-        missionId,
-        actorUserId: req.session?.userId ?? null,
-        actorRole: req.session?.role ?? null,
-      },
+      req.requestId,
     );
 
     res.json(redactMissionBudget(req.user, result));
@@ -176,7 +151,7 @@ router.get("/missions", authenticate, async (req: Request, res: Response, next: 
 
     const missions = await operationsService.getAllMissions(filters, await driverScopeOf(req.user));
 
-    res.json(redactMissionBudget(req.user, redactMissionPrice(req.user, redactVehiclePriceDeep(req.user, missions))));
+    res.json(redactMissionBudget(req.user, redactMissionPrice(req.user, redactVehiclePriceDeep(req.user, missions.map((mission) => redactMissionClientContact(req.user, mission))))));
   } catch (error: any) {
     return next(withLogContext(error instanceof AppError ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error fetching missions:" }));
   }

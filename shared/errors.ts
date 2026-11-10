@@ -23,6 +23,8 @@ export type ApiErrorCode =
   | "INCIDENT_WRITE_FAILED"
   /** 404 d'une déclaration de panne sur un véhicule inexistant : refus prononcé avant toute écriture. */
   | "INCIDENT_VEHICLE_NOT_FOUND"
+  /** 409 du plafond de positions par mission : définitif pour ce paquet, le client le retire du tampon (pas de réessai). */
+  | "GPS_MISSION_CAP_REACHED"
   | "RATE_LIMITED"
   /** 400 : cible de requête que l'app et un routeur monté liraient différemment (`\` dans le chemin, forme absolue). */
   | "NON_CANONICAL_TARGET"
@@ -48,6 +50,7 @@ export const STATUS_MESSAGES: Record<ApiErrorCode, string> = {
   OFFLINE_OWNER_MISMATCH: "Ces envois appartiennent à un autre compte. Reconnectez-vous avec le compte qui les a enregistrés.",
   INCIDENT_WRITE_FAILED: "La déclaration n'a pas pu être enregistrée. Réessayez dans un instant.",
   INCIDENT_VEHICLE_NOT_FOUND: "Véhicule introuvable.",
+  GPS_MISSION_CAP_REACHED: "Trop de positions enregistrées pour cette mission. Contactez la logistique.",
   RATE_LIMITED: "Trop de tentatives. Patientez un instant avant de réessayer.",
   NON_CANONICAL_TARGET: "Adresse de requête invalide.",
   INTERNAL: "Une erreur technique est survenue. Réessayez dans un instant.",
@@ -56,7 +59,7 @@ export const STATUS_MESSAGES: Record<ApiErrorCode, string> = {
 export const NETWORK_ERROR_MESSAGE = "Connexion au serveur impossible. Vérifiez votre réseau puis réessayez.";
 
 export function codeForStatus(status: number): ApiErrorCode {
-  if (status === 400 || status === 413 || status === 422) return "VALIDATION";
+  if (status === 400 || status === 413 || status === 415 || status === 422) return "VALIDATION";
   if (status === 401) return "UNAUTHENTICATED";
   if (status === 403) return "FORBIDDEN";
   if (status === 404) return "NOT_FOUND";

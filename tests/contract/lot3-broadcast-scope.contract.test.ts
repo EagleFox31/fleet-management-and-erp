@@ -4,6 +4,7 @@ import { startContractActors } from "../support/contract-actors";
 import { createTestClient, createTestClientInvoice, createTestVehicle } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
 import { resolveRecipients, normalizeScope } from "../../server/lib/realtime-scope";
+import { CLIENT_DIRECTORY_READ_ROLES } from "../../shared/constants/roles";
 
 /**
  * Cloison temps réel (AGENTS.md §11, lot 3) : un événement sur le véhicule, la facture ou la
@@ -11,7 +12,7 @@ import { resolveRecipients, normalizeScope } from "../../server/lib/realtime-sco
  * personnel : l'événement de A atteint le personnel et A, jamais B. Les destinataires sont
  * calculés par `resolveRecipients`, le même module que le serveur WebSocket.
  */
-const ACTORS = { admin: "admin", secretary: "secretary", logistics: "logistics", staff: "workshop_manager", driver: "driver", clientA: "client", clientB: "client" } as const;
+const ACTORS = { admin: "admin", secretary: "secretary", logistics: "logistics", staff: "workshop_manager", technician: "technician", driver: "driver", clientA: "client", clientB: "client" } as const;
 type Actor = keyof typeof ACTORS;
 const ids = createIdBag();
 const token = uniqueTestToken("l3bs");
@@ -89,12 +90,15 @@ describe("portée des événements : ni broadcast, ni client hors périmètre", 
     });
   });
 
-  it("client_created : personnel seul, aucun compte client", async () => {
+  it("client_created : personnel hors chauffeur et technicien, aucun compte client", async () => {
     const res = await session.call("POST", "/api/clients", { actor: "admin", body: { name: token, email: `${token}@client.test` } });
     expect(res.status).toBe(201);
     ids.clientIds.push(res.body.id);
     const flat = receivers("client_created").actors.flat();
-    expect(flat).toEqual(expect.arrayContaining(["admin", "staff", "driver"]));
+    const expected = (Object.keys(ACTORS) as Actor[]).filter((actor) => CLIENT_DIRECTORY_READ_ROLES.includes(ACTORS[actor]));
+    expect([...flat].sort()).toEqual([...expected].sort());
+    expect(flat).not.toContain("driver");
+    expect(flat).not.toContain("technician");
     expect(flat).not.toContain("clientA");
     expect(flat).not.toContain("clientB");
   });
@@ -114,5 +118,30 @@ describe("portée des événements : ni broadcast, ni client hors périmètre", 
     expect(flat).not.toContain("clientA");
     expect(flat).not.toContain("clientB");
     expect(flat).not.toContain("driver");
+  });
+
+  it("client_credit_note_created : rôles de facturation seuls, aucun compte client ni chauffeur", async () => {
+    const client = await createTestClient();
+    ids.clientIds.push(client.id);
+    const invoice = await createTestClientInvoice({ clientId: client.id, amountHT: "100.00", vatAmount: "0.00", amountTTC: "100.00" });
+    ids.clientInvoiceIds.push(invoice.id);
+    const res = await session.call("POST", `/api/billing/invoices/${invoice.id}/credit-notes`, {
+      actor: "admin",
+      body: { amountHt: 10, reason: "TEST avoir scope", requestKey: token + "-av" },
+    });
+    expect(res.status).toBe(201);
+    const flat = receivers("client_credit_note_created").actors.flat();
+    expect(flat).toEqual(expect.arrayContaining(["admin", "secretary", "logistics"]));
+    expect(flat).not.toContain("clientA");
+    expect(flat).not.toContain("clientB");
+    expect(flat).not.toContain("driver");
+    // Le rejeu de la même clé n'émet rien de plus.
+    spy.mockClear();
+    const replay = await session.call("POST", `/api/billing/invoices/${invoice.id}/credit-notes`, {
+      actor: "admin",
+      body: { amountHt: 10, reason: "TEST avoir scope", requestKey: token + "-av" },
+    });
+    expect(replay.status).toBe(200);
+    expect(receivers("client_credit_note_created").actors).toHaveLength(0);
   });
 });

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatPrice } from "@/lib/utils";
+import { paidTtcOf } from "@shared/constants/client-invoices";
 import { format } from "date-fns";
 import { FileText, Eye, Download, AlertTriangle, CheckCircle, Clock } from "lucide-react";
 
@@ -122,7 +123,7 @@ export function MissionInvoicesTab({ missionId }: MissionInvoicesTabProps) {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-600">
-              {formatPrice(invoices.reduce((sum: number, inv: ClientInvoice) => sum + (parseFloat(inv.amountTTC) - parseFloat(inv.balance)), 0))}
+              {formatPrice(invoices.reduce((sum: number, inv: ClientInvoice) => sum + paidTtcOf(inv), 0))}
             </div>
           </CardContent>
         </Card>

@@ -225,7 +225,7 @@ test.describe("GPS V1 téléphone : espace chauffeur", () => {
     await expect.poll(() => page.evaluate((k) => window.localStorage.getItem(k), key), { timeout: 10_000 }).toBeNull();
   });
 
-  test("un compte non chauffeur nedépose pas de position (403)", async ({ browser }) => {
+  test("un compte non chauffeur ne dépose pas de position (403)", async ({ browser }) => {
     const context = await newE2EContext(browser, "logistique");
     const page = await context.newPage();
     await loginWithSession(page, logistics);

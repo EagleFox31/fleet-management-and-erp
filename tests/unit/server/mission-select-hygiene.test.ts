@@ -154,7 +154,7 @@ describe("lectures entières de la table missions (montants du budget, Q19)", ()
     for (const [entry, reason] of Object.entries(FROZEN)) expect(reason.length, entry).toBeGreaterThan(15);
   });
 
-  it("/api/operations : chaque réponse de mission ou de statistique passe par redactMissionBudget, la trame par omitMissionBudget", () => {
+  it("/api/operations : chaque réponse de mission ou de statistique passe par redactMissionBudget, la trame ne porte que des identifiants", () => {
     const src = read("server/api/operations.routes.ts");
     for (const path of ["/missions/from-fuel", "/missions/upcoming", "/missions/active", "/missions\"", "/missions/by-client/:clientName", "/stats/by-client", "/stats/by-destination"]) {
       const start = src.indexOf(`"${path.replace(/"$/, "")}"`);
@@ -162,7 +162,9 @@ describe("lectures entières de la table missions (montants du budget, Q19)", ()
       const handler = src.slice(start, src.indexOf("\n});", start));
       expect(handler, path).toMatch(/res\.json\(redactMissionBudget\(req\.user, /);
     }
-    expect(src).toContain("payload: omitMissionBudget(payload),");
+    // Trame mission_created_from_fuel : identifiants seuls, la ligne mission ne part jamais en temps réel.
+    expect(src).toContain("payload: { missionId, fuelRecordId },");
+    expect(src).not.toMatch(/broadcast\w*\(/);
   });
 
   it("justifications vérifiables : facturation réservée aux lecteurs du budget, export sans montant du budget", () => {

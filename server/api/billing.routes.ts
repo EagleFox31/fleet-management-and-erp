@@ -5,7 +5,9 @@ import { clientBillingService } from "../services/client-billing-service";
 import { getRevenueByClient, resolveRevenuePeriod } from "../services/client-revenue-service";
 import { pdfGenerationService } from "../services/pdf-generation-service";
 import { authorize } from "../middleware/auth";
-import { CLIENT_BILLING_EVENT_ROLES, CLIENT_BILLING_STATS_ROLES } from "@shared/constants/roles";
+import { CLIENT_BILLING_EVENT_ROLES, CLIENT_BILLING_STATS_ROLES, CREDIT_NOTE_WRITER_ROLES } from "@shared/constants/roles";
+import { createClientCreditNoteSchema } from "@shared/contracts/client-credit-notes";
+import { createCreditNote, getCreditNoteById, listCreditNotesOfInvoice } from "../services/client-credit-note-service";
 import { AppError, isAppError } from "../lib/app-error";
 import { withLogContext } from "../lib/error-log-context";
 import { parseQueryId, parseRouteId } from "../lib/route-id";
@@ -425,6 +427,82 @@ router.get("/invoices/:id/pdf", canAccessBilling, async (req: Request, res: Resp
     res.send(pdfBuffer);
   } catch (error: unknown) {
     next(withLogContext(isAppError(error) ? error : new AppError(500, "Erreur serveur.", { cause: error }), { event: "Error generating invoice PDF" }));
+  }
+});
+
+/**
+ * POST /api/billing/invoices/:id/credit-notes
+ * Émettre un avoir sur une facture (admin, comptable). Plafonné au solde ; la même `requestKey` rend le même avoir.
+ */
+router.post("/invoices/:id/credit-notes", authorize([...CREDIT_NOTE_WRITER_ROLES]), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = parseRouteId(req.params.id, "Identifiant de facture invalide.");
+    const { amountHt, reason, requestKey } = req.body ?? {};
+    const input = createClientCreditNoteSchema.parse({ amountHt, reason, requestKey });
+    if (!req.user?.id) {
+      throw new AppError(401, "Utilisateur non authentifié.");
+    }
+
+    const result = await createCreditNote(id, input, req.user.id);
+
+    // Saisie rejouée : rien n'a changé, rien à diffuser.
+    if (!result.replayed) {
+      broadcastClientInvoiceUpdate(
+        "client_credit_note_created",
+        { invoiceId: id, creditNoteId: result.creditNote.id, creditNoteNumber: result.creditNote.creditNoteNumber },
+        { invoiceId: id, actorUserId: req.user.id, actorRole: req.user.role ?? null },
+      );
+    }
+
+    res.status(result.replayed ? 200 : 201).json(result);
+  } catch (error: unknown) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/billing/invoices/:id/credit-notes
+ * Avoirs d'une facture (rôles de facturation ; un compte client n'y a pas accès).
+ */
+router.get("/invoices/:id/credit-notes", canAccessBilling, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = parseRouteId(req.params.id, "Identifiant de facture invalide.");
+    res.json(await listCreditNotesOfInvoice(id));
+  } catch (error: unknown) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/billing/credit-notes/:id/pdf
+ * Avoir en PDF, avec la facture d'origine et sa date de dépôt.
+ */
+router.get("/credit-notes/:id/pdf", canAccessBilling, async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = parseRouteId(req.params.id, "Identifiant d'avoir invalide.");
+    const creditNote = await getCreditNoteById(id);
+    const invoice = await clientBillingService.getInvoiceById(creditNote.invoiceId);
+    if (!invoice.client) {
+      throw new AppError(404, "Client lié à la facture introuvable.");
+    }
+
+    const pdfBuffer = await pdfGenerationService.generateCreditNotePDF({
+      creditNote,
+      invoice,
+      client: {
+        name: invoice.client.name,
+        address: toOptionalString(invoice.client.address),
+        email: toOptionalString(invoice.client.email),
+        phone: toOptionalString(invoice.client.phone),
+      },
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="Avoir_${creditNote.creditNoteNumber}.pdf"`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+    res.send(pdfBuffer);
+  } catch (error: unknown) {
+    next(error);
   }
 });
 
