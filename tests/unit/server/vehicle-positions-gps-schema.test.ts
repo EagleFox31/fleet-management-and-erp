@@ -58,9 +58,23 @@ describe("GPS V1 : vehicle_positions, points A/B, purge — init-database, migra
     expect(names).toHaveLength(10);
     for (const name of names) expect(sql, name).toMatch(new RegExp(`CONSTRAINT ${name}\\s`));
     expect(config.indexes.map((i) => i.config.name).sort()).toEqual([
+      "vehicle_positions_mission_driver_idx",
       "vehicle_positions_mission_recorded_idx",
       "vehicle_positions_vehicle_recorded_idx",
     ]);
+  });
+
+  it("l'index (mission_id, driver_id) : init-database et migration jumelle identiques, idempotents", () => {
+    const strip = (t: string) => norm(norm(t).split("\n").filter((l) => !l.startsWith("--")).join("\n"));
+    const src = norm(readFileSync("server/init-database.ts", "utf8"));
+    const marker = "export const VEHICLE_POSITIONS_MISSION_DRIVER_IDX_SQL = `";
+    const start = src.indexOf(marker);
+    expect(start).toBeGreaterThan(-1);
+    const fromInit = norm(src.slice(start + marker.length, src.indexOf("`;", start)));
+    const migration = strip(readFileSync("server/db/migrations/20261110_vehicle_positions_mission_driver_idx.sql", "utf8"));
+    expect(fromInit).toBe(migration);
+    expect(migration).toMatch(/CREATE INDEX IF NOT EXISTS vehicle_positions_mission_driver_idx ON vehicle_positions \(mission_id, driver_id\)/);
+    expect(src).toContain("await pool.query(VEHICLE_POSITIONS_MISSION_DRIVER_IDX_SQL);");
   });
 
   it("missions : les six colonnes A/B et leurs deux CHECK sont dans le SQL et dans Drizzle", () => {
