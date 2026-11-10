@@ -17,7 +17,7 @@ import { uniqueTestToken } from "../support/ids";
  * FDR = FDR, imprévus = frais annexes). Absent ou seulement demandé : refus qui dit quoi faire.
  * Le PUT de statut applique la même règle.
  */
-type Actor = "logistics" | "technician";
+type Actor = "logistics" | "warehouse";
 let session: Awaited<ReturnType<typeof startContractSession<Actor>>>;
 const missionIds: number[] = [];
 const driverIds: number[] = [];
@@ -73,7 +73,7 @@ function withFlags(value: string) {
 }
 
 beforeAll(async () => {
-  session = await startContractSession<Actor>({ logistics: "logistics", technician: "technician" });
+  session = await startContractSession<Actor>({ logistics: "logistics", warehouse: "warehouse" });
 }, 60000);
 
 afterAll(async () => {
@@ -171,9 +171,9 @@ describe("PUT /api/missions/:id/status vers in_progress, drapeau finance actif",
 describe("launch-readiness, montants du budget de mission réservés à ses lecteurs", { timeout: 60000 }, () => {
   describe("drapeau actif", () => {
     withFlags("finance=on");
-    it("technicien (personnel, non lecteur) : verdicts conservés, aucun montant", async () => {
+    it("magasinier (personnel, non lecteur) : verdicts conservés, aucun montant", async () => {
       const missionId = await missionWithBudget("approved");
-      const body = await readiness(missionId, "technician");
+      const body = await readiness(missionId, "warehouse");
       const checks = BUDGET_KEYS.map((key) => body.checks.find((c: any) => c.key === key));
       expect(checks.map((c: any) => [c.passed, c.detail])).toEqual([
         [true, "Budget approuvé."],
@@ -191,9 +191,9 @@ describe("launch-readiness, montants du budget de mission réservés à ses lect
   });
   describe("drapeau coupé", () => {
     withFlags("finance=off");
-    it("technicien : verdict conservé, ancien budget masqué (Q19)", async () => {
+    it("magasinier : verdict conservé, ancien budget masqué (Q19)", async () => {
       const missionId = await missionWithBudget("approved");
-      const [fuel, fdr, extras] = await budgetChecks(missionId, "technician");
+      const [fuel, fdr, extras] = await budgetChecks(missionId, "warehouse");
       expect([fuel, fdr, extras].map((c: any) => [c.passed, c.detail])).toEqual([
         [true, "Budget renseigné."],
         [true, "Budget renseigné."],

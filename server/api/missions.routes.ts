@@ -1577,7 +1577,7 @@ router.post("/:id/fuel-records/declare-no-refuel", async (req, res, next) => {
 });
 
 // GET /api/missions/:id/launch-readiness - Checklist métier de lancement mission
-router.get("/:id/launch-readiness", async (req, res, next) => {
+router.get("/:id/launch-readiness", authorize([...MISSION_READ_ROLES]), async (req, res, next) => {
   try {
     const missionId = parseMissionId(req.params.id);
 
@@ -3404,7 +3404,7 @@ router.put("/:id/status", authorize([...MISSION_STATUS_ROLES]), async (req, res,
 });
 
 // GET /api/missions/:id/document-renewal-requests - Lister les demandes documentaires ouvertes pour cette mission
-router.get("/:id/document-renewal-requests", async (req, res) => {
+router.get("/:id/document-renewal-requests", authorize([...MISSION_READ_ROLES]), async (req, res) => {
   try {
     const missionId = parseMissionId(req.params.id);
 

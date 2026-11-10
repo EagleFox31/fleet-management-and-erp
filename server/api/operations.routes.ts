@@ -6,7 +6,7 @@ import { AppError } from "../lib/app-error";
 import { authenticate, authorize } from "../middleware/auth";
 import { moduleLogger } from "../lib/logger";
 import { withLogContext } from "../lib/error-log-context";
-import { MISSION_MANAGER_ROLES, OPERATIONS_COST_READ_ROLES, type AppRole } from "@shared/constants/roles";
+import { MISSION_MANAGER_ROLES, MISSION_READ_ROLES, OPERATIONS_COST_READ_ROLES, type AppRole } from "@shared/constants/roles";
 import { driverScopeOf } from "../lib/driver-scope";
 import { redactVehiclePriceDeep } from "../lib/vehicle-price-scope";
 import { redactMissionBudget, redactMissionPrice } from "../lib/mission-response-scope";
@@ -18,15 +18,16 @@ const log = moduleLogger("operations");
 const router = Router();
 
 /**
- * Cloison chauffeur (AGENTS §11) : coûts, rapprochement par client et statistiques couvrent
- * toute l'exploitation (carburant, prix d'achat du véhicule, chiffre d'affaires). Le chauffeur
- * n'y a pas accès, même pour sa propre mission ; ses missions se lisent par les listes
+ * Cloison chauffeur (AGENTS §11) et moindre donnée : coûts, rapprochement par client et
+ * statistiques couvrent toute l'exploitation (carburant, prix d'achat du véhicule, chiffre
+ * d'affaires). Ni le chauffeur, même pour sa propre mission, ni le technicien, qui n'a aucun écran
+ * mission, n'y ont accès (OPERATIONS_COST_READ_ROLES). Le chauffeur lit ses missions par les listes
  * filtrées et par /api/missions/:id.
  */
-const OPERATIONS_COSTS_DRIVER_MESSAGE = "Accès refusé : les coûts et statistiques d'exploitation sont réservés au personnel de gestion.";
-const refuseDriver = (req: Request, _res: Response, next: NextFunction) => {
+const OPERATIONS_COSTS_REFUSED_MESSAGE = "Accès refusé : les coûts et statistiques d'exploitation sont réservés au personnel de gestion.";
+const operationsCostReader = (req: Request, _res: Response, next: NextFunction) => {
   const role = req.user?.role as AppRole | undefined;
-  if (!role || !OPERATIONS_COST_READ_ROLES.includes(role)) return next(new AppError(403, OPERATIONS_COSTS_DRIVER_MESSAGE));
+  if (!role || !OPERATIONS_COST_READ_ROLES.includes(role)) return next(new AppError(403, OPERATIONS_COSTS_REFUSED_MESSAGE));
   next();
 };
 
@@ -112,7 +113,8 @@ router.post("/missions/from-fuel", authorize([...MISSION_MANAGER_ROLES]), async 
  * GET /api/operations/missions/upcoming
  * Missions planifiées / assignées (pas encore démarrées)
  */
-router.get("/missions/upcoming", authenticate, async (req: Request, res: Response, next: NextFunction) => {
+// Listes d'exploitation : lecteurs des missions (sans technicien) ; le chauffeur, filtré à ses missions.
+router.get("/missions/upcoming", authenticate, authorize([...MISSION_READ_ROLES]), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const missions = await operationsService.getUpcomingMissions(await driverScopeOf(req.user));
     res.json(redactMissionBudget(req.user, redactMissionPrice(req.user, redactVehiclePriceDeep(req.user, missions))));
@@ -125,7 +127,7 @@ router.get("/missions/upcoming", authenticate, async (req: Request, res: Respons
  * GET /api/operations/missions/active
  * Missions en cours (in_progress)
  */
-router.get("/missions/active", authenticate, async (req: Request, res: Response, next: NextFunction) => {
+router.get("/missions/active", authenticate, authorize([...MISSION_READ_ROLES]), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const missions = await operationsService.getActiveMissions(await driverScopeOf(req.user));
     res.json(redactMissionBudget(req.user, redactMissionPrice(req.user, redactVehiclePriceDeep(req.user, missions))));
@@ -138,7 +140,7 @@ router.get("/missions/active", authenticate, async (req: Request, res: Response,
  * GET /api/operations/missions
  * Liste toutes les missions avec filtres optionnels
  */
-router.get("/missions", authenticate, async (req: Request, res: Response, next: NextFunction) => {
+router.get("/missions", authenticate, authorize([...MISSION_READ_ROLES]), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { status, clientId, startDate, endDate } = req.query;
 
@@ -161,7 +163,7 @@ router.get("/missions", authenticate, async (req: Request, res: Response, next: 
  * GET /api/operations/missions/by-client/:clientName
  * Récupérer missions et statistiques pour un client spécifique
  */
-router.get("/missions/by-client/:clientName", authenticate, refuseDriver, async (req: Request, res: Response, next: NextFunction) => {
+router.get("/missions/by-client/:clientName", authenticate, operationsCostReader, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { clientName } = req.params;
     const { status, startDate, endDate } = req.query;
@@ -183,7 +185,7 @@ router.get("/missions/by-client/:clientName", authenticate, refuseDriver, async 
  * GET /api/operations/stats/by-client
  * Statistiques globales par client (MAERSK, CNPCC, AGL, SODECOTON)
  */
-router.get("/stats/by-client", authenticate, refuseDriver, async (req: Request, res: Response, next: NextFunction) => {
+router.get("/stats/by-client", authenticate, operationsCostReader, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const stats = await operationsService.getStatsByClient();
     // Carburant estimé (`estimatedFuelCost`, alias déprécié `totalRevenue`) et marge dépréciée qui en
@@ -198,7 +200,7 @@ router.get("/stats/by-client", authenticate, refuseDriver, async (req: Request, 
  * GET /api/operations/stats/by-destination
  * Statistiques par destination (NDJAMENA, DLA-NDERE, TOUBORO)
  */
-router.get("/stats/by-destination", authenticate, refuseDriver, async (req: Request, res: Response, next: NextFunction) => {
+router.get("/stats/by-destination", authenticate, operationsCostReader, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const stats = await operationsService.getStatsByDestination();
     res.json(redactMissionBudget(req.user, stats));
@@ -211,7 +213,7 @@ router.get("/stats/by-destination", authenticate, refuseDriver, async (req: Requ
  * GET /api/operations/missions/:id/costs
  * Calculer les coûts détaillés d'une mission
  */
-router.get("/missions/:id/costs", authenticate, refuseDriver, async (req: Request, res: Response, next: NextFunction) => {
+router.get("/missions/:id/costs", authenticate, operationsCostReader, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const missionId = parseRouteId(req.params.id, MISSION_ID_INVALID_MESSAGE);
     const costs = await operationsService.calculateMissionCosts(missionId, req.user);
