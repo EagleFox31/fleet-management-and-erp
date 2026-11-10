@@ -11,11 +11,10 @@ import { listQueryView, queryView } from "@/lib/query-view";
 import { formatPrice } from "@/lib/utils";
 import type { PendingInvoice } from "@shared/contracts/pending-invoices";
 import { TREASURY_BASE_PATH, type TreasuryAccount } from "@shared/contracts/treasury";
+import type { FinanceReceivablesAgingResponse } from "@shared/contracts/finance-receivables-aging";
 
 /** `GET /api/supplier-invoices/statistics` : seuls les totaux globaux sont lus ici. */
 type SupplierInvoiceStatistics = { totalInvoices: number; totalBalance: string };
-/** `GET /api/finance/receivables-aging` : totaux des factures client en attente de paiement. */
-type ReceivablesAging = { totals: { count: number; netPayable: number } };
 
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
 
@@ -28,7 +27,8 @@ export default function AccountantDashboard() {
   const { user } = useAuth();
 
   const pendingQuery = useQuery<PendingInvoice[]>({ queryKey: ["/api/billing/pending-invoices"] });
-  const agingQuery = useQuery<ReceivablesAging>({ queryKey: ["/api/finance/receivables-aging"] });
+  // Contrat partagé : les totaux sont par tranche, le cumul est dans `totals.total`.
+  const agingQuery = useQuery<FinanceReceivablesAgingResponse>({ queryKey: ["/api/finance/receivables-aging"] });
   const supplierStatsQuery = useQuery<SupplierInvoiceStatistics>({ queryKey: ["/api/supplier-invoices/statistics"] });
   const accountsQuery = useQuery<TreasuryAccount[]>({ queryKey: [`${TREASURY_BASE_PATH}/accounts`] });
 
@@ -72,11 +72,11 @@ export default function AccountantDashboard() {
             data-testid="accountant-kpi-receivables"
             label="À encaisser (clients)"
             featured
-            value={tileValue(aging, aging.kind === "ready" ? formatPrice(aging.data.totals.netPayable) : null)}
+            value={tileValue(aging, aging.kind === "ready" ? formatPrice(aging.data.totals.total.netPayable) : null)}
             subValue={tileSub(
               aging,
               "Les factures en attente de paiement sont momentanément indisponibles.",
-              aging.kind === "ready" ? `${aging.data.totals.count} facture${aging.data.totals.count > 1 ? "s" : ""} déposée${aging.data.totals.count > 1 ? "s" : ""}, net à recevoir` : "Net à recevoir",
+              aging.kind === "ready" ? `${aging.data.totals.total.count} facture${aging.data.totals.total.count > 1 ? "s" : ""} en attente, net à recevoir` : "Net à recevoir",
             )}
             icon={<Banknote className="h-4 w-4" />}
             iconWrapperClassName="bg-primary/10 text-primary-text"
