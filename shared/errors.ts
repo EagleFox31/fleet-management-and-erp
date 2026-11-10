@@ -17,7 +17,7 @@ export type ApiErrorCode =
   | "VEHICLE_RETIRED"
   /** 409 d'une écriture rejouable dont la même clé d'idempotence est encore en cours : le client réessaie plus tard, avec la même clé. */
   | "IDEMPOTENCY_IN_PROGRESS"
-  /** 503 d'une déclaration de panne dont l'écriture a échoué avant d'être validée : rien n'est enregistré, la même clé peut réessayer. */
+  /** 503 d'une déclaration de panne dont l'écriture a échoué avant d'être validée : rien n'est enregistré, la même clé peut réessayer. Jamais vu du client (toute 5xx est normalisée en INTERNAL) : il ne sert qu'à libérer la clé d'idempotence. */
   | "INCIDENT_WRITE_FAILED"
   /** 404 d'une déclaration de panne sur un véhicule inexistant : refus prononcé avant toute écriture. */
   | "INCIDENT_VEHICLE_NOT_FOUND"

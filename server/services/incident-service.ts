@@ -18,6 +18,7 @@ import type { CreateIncidentRequest, Incident, IncidentStatus } from "@shared/co
 import { ACTIVE_ASSIGNMENT_STATUSES } from "@shared/constants/assignments";
 import { STATUS_MESSAGES } from "@shared/errors";
 import { AppError } from "../lib/app-error";
+import { isForeignKeyViolation, isTransactionConflict, pgConstraintOf } from "../lib/pg-errors";
 import { moduleLogger } from "../lib/logger";
 import { workOrderCostScope } from "../lib/work-order-realtime-scope";
 
@@ -131,15 +132,18 @@ export interface CreateIncidentOptions {
 
 const WORK_ORDER_PRIORITY = { low: "low", medium: "medium", high: "high" } as const;
 
+/** Contraintes de clé étrangère vers le véhicule (incident, OT). */
+const VEHICLE_FK_CONSTRAINT = /^(incidents|work_orders)_vehicle_id_/;
+
 /**
- * Échec d'une étape antérieure à toute écriture validée (lecture du périmètre, transaction) :
- * 404 si la clé étrangère du véhicule saute (course avec une suppression), sinon 503 lisible.
- * Les deux codes figurent dans `PRE_WRITE_REFUSAL_CODES` : la clé d'idempotence est libérée, le
- * réessai avec la même clé peut écrire. Une `AppError` déjà prononcée passe telle quelle.
+ * Échec d'une étape antérieure à toute écriture validée (lecture du périmètre, corps de la
+ * transaction) : 404 si la clé étrangère du véhicule saute (course avec une suppression), sinon 503
+ * lisible. Les deux codes figurent dans `PRE_WRITE_REFUSAL_CODES` : la clé d'idempotence est
+ * libérée, le réessai avec la même clé peut écrire. Une `AppError` déjà prononcée passe telle quelle.
  */
 function preWriteFailure(err: unknown): never {
   if (err instanceof AppError) throw err;
-  if ((err as { code?: unknown } | null)?.code === "23503") {
+  if (isForeignKeyViolation(err) && VEHICLE_FK_CONSTRAINT.test(pgConstraintOf(err) ?? "")) {
     throw new AppError(404, "Véhicule introuvable.", { cause: err, code: "INCIDENT_VEHICLE_NOT_FOUND" });
   }
   throw new AppError(503, STATUS_MESSAGES.INCIDENT_WRITE_FAILED, { cause: err, code: "INCIDENT_WRITE_FAILED" });
@@ -159,6 +163,10 @@ export async function createIncident(
 
   const now = (d.now ?? (() => new Date()))();
   let workOrder: WorkOrder | null = null;
+  // Une transaction rejetée n'est pas une transaction annulée : le pilote enchaîne begin, corps et
+  // COMMIT dans le même `try`. `bodyDone` distingue l'échec du corps (rien de validé) de celui du
+  // COMMIT (validé ou non, inconnu) : dans ce cas l'erreur brute remonte et la clé reste gardée.
+  let bodyDone = false;
   const row = await d.db.transaction(async (tx: any) => {
     const [vehicle] = await tx
       .select({
@@ -209,8 +217,14 @@ export async function createIncident(
         updatedAt: now,
       })
       .returning();
+    bodyDone = true;
     return created as typeof incidents.$inferSelect;
-  }).catch(preWriteFailure);
+  }).catch((err: unknown) => {
+    if (err instanceof AppError) throw err;
+    // Corps échoué, ou COMMIT refusé avec certitude (conflit de sérialisation) : rien n'est validé.
+    if (!bodyDone || isTransactionConflict(err)) preWriteFailure(err);
+    throw err;
+  });
 
   // Après validation de la transaction : l'alerte ne peut pas annoncer un incident absent.
   await d

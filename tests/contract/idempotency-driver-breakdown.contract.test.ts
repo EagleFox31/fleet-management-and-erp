@@ -214,6 +214,29 @@ describe("V5b-1b : la clé d'une panne n'est gardée que si l'écriture a pu avo
     expect(await counts(vehicle.id)).toEqual({ incidents: 1, workOrders: 1 });
   });
 
+  it("COMMIT validé mais accusé perdu : 5xx, clé conservée, le rejeu reçoit 409 sans seconde panne", async () => {
+    const { vehicle } = await assignedMission("in_progress");
+    const key = uniqueTestToken("pan");
+    // Une transaction rejetée n'est pas une transaction annulée : le corps et le COMMIT ont eu lieu.
+    const real = db.transaction.bind(db) as (...args: any[]) => Promise<unknown>;
+    vi.spyOn(db, "transaction").mockImplementationOnce((async (...args: any[]) => {
+      await real(...args);
+      throw new Error("Connection terminated");
+    }) as any);
+
+    const lost = await send("POST", "/api/driver/breakdowns", declaration(vehicle.id), key);
+    expect(lost.status, JSON.stringify(lost.body)).toBeGreaterThanOrEqual(500);
+    expect(await counts(vehicle.id)).toEqual({ incidents: 1, workOrders: 1 });
+    const rows = await keyRows("driverA", key);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].state).toBe("in_progress");
+
+    const retry = await send("POST", "/api/driver/breakdowns", declaration(vehicle.id), key);
+    expect(retry.status, JSON.stringify(retry.body)).toBe(409);
+    expect(retry.body.code).toBe("IDEMPOTENCY_IN_PROGRESS");
+    expect(await counts(vehicle.id)).toEqual({ incidents: 1, workOrders: 1 });
+  });
+
   it("véhicule inexistant (retard, sans OT) : 404 lisible et non 500, clé libérée", async () => {
     const [{ maxId }] = await db.select({ maxId: sql<number>`coalesce(max(${vehicles.id}), 0)::int` }).from(vehicles);
     const key = uniqueTestToken("pan");
