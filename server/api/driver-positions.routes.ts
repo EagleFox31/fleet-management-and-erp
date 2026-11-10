@@ -50,8 +50,19 @@ const positive = (raw: string | undefined, fallback: number) => {
 
 const RATE_MESSAGE = "Positions envoyées trop souvent. Elles restent sur le téléphone et repartiront automatiquement.";
 
-const batchRateLimit = createKeyedRateLimiter({
-  keyOf: (req) => `${req.user!.id}:${req.params.id}`,
+/**
+ * Mission de l'URL validée AVANT le limiteur (400 sinon) : la clé ne reçoit qu'un identifiant
+ * normalisé. Sans cela, un id brut (16 Ko × 10 000 clés) gonflait la mémoire, un flot d'id distincts
+ * évinçait la vraie clé du chauffeur (quota remis à zéro), et `07` contournait le quota de `7`.
+ */
+const missionIdParam: RequestHandler = (req, _res, next) => {
+  const parsed = routeIdSchema.safeParse(req.params.id);
+  next(parsed.success ? undefined : parsed.error);
+};
+
+export const batchRateLimit = createKeyedRateLimiter({
+  // Constante de repli : inatteignable derrière missionIdParam, garde la clé bornée si l'ordre change.
+  keyOf: (req) => `${req.user!.id}:${routeIdSchema.safeParse(req.params.id).data ?? "invalide"}`,
   capacity: () => Math.max(1, Math.floor(positive(process.env.GPS_BATCH_BURST, GPS_RATE_DEFAULTS.batchBurst))),
   refillMs: () => positive(process.env.GPS_BATCH_REFILL_SECONDS, GPS_RATE_DEFAULTS.batchRefillSeconds) * 1000,
   code: "GPS_RATE_LIMITED",
@@ -111,7 +122,7 @@ const postOsmand: RequestHandler = async (req, res, next) => {
   }
 };
 
-router.post("/driver/missions/:id/positions", requireFeature("gps"), authorize(["driver"]), jsonOnly, ownerMatchesSession, batchRateLimit, postBatch);
+router.post("/driver/missions/:id/positions", requireFeature("gps"), authorize(["driver"]), jsonOnly, missionIdParam, ownerMatchesSession, batchRateLimit, postBatch);
 router.post("/driver/positions", requireFeature("gps"), authorize(["driver"]), jsonOnly, osmandRateLimit, postOsmand);
 
 export default router;
