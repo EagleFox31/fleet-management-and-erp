@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { idSchema } from "@shared/contracts/common";
+import { parseRouteId } from "../lib/route-id";
 import { MISSION_OPERATIONS_READ_ROLES, MISSION_OPERATIONS_WRITE_ROLES } from "@shared/constants/roles";
 import { missionOperationBodySchema } from "@shared/contracts/mission-operations";
 import { AppError } from "../lib/app-error";
@@ -41,11 +42,11 @@ router.put(
   authorize([...MISSION_OPERATIONS_WRITE_ROLES]),
   async (req, res, next) => {
     try {
-      const missionId = idSchema.safeParse(req.params.missionId);
+      const missionId = parseRouteId(req.params.missionId, "Données de suivi invalides.");
       const body = putBodySchema.safeParse(req.body);
-      if (!missionId.success || !body.success) throw new AppError(400, "Données de suivi invalides.");
+      if (!body.success) throw new AppError(400, "Données de suivi invalides.");
       const userId = (req as unknown as { user: { id: number } }).user.id;
-      res.json(await upsertMissionOperation(missionId.data, body.data, userId));
+      res.json(await upsertMissionOperation(missionId, body.data, userId));
     } catch (err) {
       next(err);
     }

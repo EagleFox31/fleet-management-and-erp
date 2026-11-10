@@ -24,12 +24,12 @@ export interface WorkOrderHistoryEntry {
  * un POST sur /awaiting-parts change le statut). Repli sur le verbe pour un chemin inconnu.
  */
 const PATH_ACTIONS: Array<[RegExp, string]> = [
-  [/\/awaiting-parts$/, "Statut : Attente pièces"],
-  [/\/quality-check$/, "Contrôle qualité"],
-  [/\/part-requirements\/\d+\/issue$/, "Sortie de pièce du stock"],
-  [/\/parts$/, "Ajout de pièce"],
-  [/\/items$/, "Ajout de ligne"],
-  [/\/technician\/work-orders\/\d+\/status$/i,"Changement de statut (technicien)"],
+  [/\/awaiting-parts$/i, "Statut : Attente pièces"],
+  [/\/quality-check$/i, "Contrôle qualité"],
+  [/\/part-requirements\/\d+\/issue$/i, "Sortie de pièce du stock"],
+  [/\/parts$/i, "Ajout de pièce"],
+  [/\/items$/i, "Ajout de ligne"],
+  [/\/technician\/work-orders\/\d+\/status$/i, "Changement de statut (technicien)"],
 ];
 
 function actionLabel(row: AuditLogRow): string {
