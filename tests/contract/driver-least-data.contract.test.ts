@@ -113,10 +113,19 @@ describe("GET /api/missions/:id, coordonnées du client", { timeout: 120000 }, (
     for (const value of Object.values(CONTACT)) expect(sent).not.toContain(value);
   });
 
-  it.each(["admin", "logistics", "secretary", "technician", "management"] as const)("%s reçoit toutes les coordonnées", async (actor) => {
+  it.each(["admin", "logistics", "secretary", "management"] as const)("%s reçoit toutes les coordonnées", async (actor) => {
     const res = await call("GET", `/api/missions/${missionId}`, { actor });
     expect(res.status).toBe(200);
     expect(res.body.client).toMatchObject(CONTACT);
+  });
+
+  it("le technicien est refusé sur la liste et la fiche (aucun écran mission)", async () => {
+    for (const path of ["/api/missions", `/api/missions/${missionId}`]) {
+      const res = await call("GET", path, { actor: "technician" });
+      expect(res.status, path).toBe(403);
+      const sent = JSON.stringify(res.body);
+      for (const value of [...Object.values(CONTACT), "TEST A", "TEST B"]) expect(sent, path).not.toContain(value);
+    }
   });
 });
 
@@ -126,6 +135,13 @@ describe("GET /api/operations/missions, coordonnées du client", { timeout: 1200
     expect(res.status).toBe(200);
     const mine = (res.body as any[]).find((m) => m.id === missionId || m.mission?.id === missionId);
     expect(mine).toBeTruthy();
+    const sent = JSON.stringify(res.body);
+    for (const value of Object.values(CONTACT)) expect(sent).not.toContain(value);
+  });
+
+  it("le technicien ne reçoit ni contact, ni e-mail, ni téléphone", async () => {
+    const res = await call("GET", "/api/operations/missions", { actor: "technician" });
+    expect(res.status).toBe(200);
     const sent = JSON.stringify(res.body);
     for (const value of Object.values(CONTACT)) expect(sent).not.toContain(value);
   });
@@ -162,25 +178,25 @@ describe("GET /api/fuel-card/balance, montants", { timeout: 120000 }, () => {
   });
 });
 
-const NO_DRIVER_NOTE = "le chauffeur n'a aucun écran sur ces routes";
+const NO_DRIVER_NOTE = "ni le chauffeur ni le technicien n'ont d'écran sur ces routes";
 
-describe("/api/clients : fiches client fermées au chauffeur", { timeout: 120000 }, () => {
-  it(`le chauffeur reçoit 403 sur la liste, la fiche et /all (${NO_DRIVER_NOTE})`, async () => {
+describe("/api/clients : fiches client fermées au chauffeur et au technicien", { timeout: 120000 }, () => {
+  it.each(["driver", "technician"] as const)(`%s reçoit 403 sur la liste, la fiche et /all (${NO_DRIVER_NOTE})`, async (actor) => {
     for (const path of ["/api/clients", `/api/clients/${clientId}`, "/api/clients/all"]) {
-      const res = await call("GET", path, { actor: "driver" });
+      const res = await call("GET", path, { actor });
       expect(res.status, path).toBe(403);
       const sent = JSON.stringify(res.body);
       for (const value of Object.values(CONTACT)) expect(sent).not.toContain(value);
     }
   });
 
-  it.each(["admin", "logistics", "secretary", "technician"] as const)("%s lit la fiche avec les coordonnées", async (actor) => {
+  it.each(["admin", "logistics", "secretary"] as const)("%s lit la fiche avec les coordonnées", async (actor) => {
     const res = await call("GET", `/api/clients/${clientId}`, { actor });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject(CONTACT);
   });
 
-  it("la trame client_created ne vise aucun chauffeur", async () => {
+  it("la trame client_created ne vise ni chauffeur ni technicien", async () => {
     frames.length = 0;
     const res = await call("POST", "/api/clients", {
       actor: "admin",
@@ -192,6 +208,7 @@ describe("/api/clients : fiches client fermées au chauffeur", { timeout: 120000
     expect(sent.length).toBeGreaterThan(0);
     for (const frame of sent) {
       expect(reachesRole(frame, "driver")).toBe(false);
+      expect(reachesRole(frame, "technician")).toBe(false);
       expect(reachesRole(frame, "logistics")).toBe(true);
     }
   });
@@ -249,7 +266,6 @@ describe("pleins de mission : solde courant de la carte", { timeout: 120000 }, (
   });
 
   it.each(["technician", "warehouse"] as const)("GET /api/missions/:id/fuel-records : %s refusé (aucun écran)", async (actor) => {
-    if (!(actor in ACTORS)) return;
     const res = await call("GET", `/api/missions/${missionId}/fuel-records`, { actor });
     expect(res.status).toBe(403);
     for (const s of ["73519481", "88142"]) expect(JSON.stringify(res.body)).not.toContain(s);
@@ -286,7 +302,7 @@ describe("pleins de mission : solde courant de la carte", { timeout: 120000 }, (
     }
     // Hors lecteurs de la carte : identifiants seulement, ni prix, ni débit, ni crédit.
     const others = (MISSION_EVENT_ROLES as readonly string[]).filter((r) => !(TREASURY_FUEL_CARD_READ_ROLES as readonly string[]).includes(r));
-    expect(others.length).toBeGreaterThanOrEqual(0);
+    expect(others.length).toBeGreaterThan(0);
     for (const role of others) {
       const forRole = sent.filter((f) => reachesRole(f, role));
       expect(forRole, role).toHaveLength(1);

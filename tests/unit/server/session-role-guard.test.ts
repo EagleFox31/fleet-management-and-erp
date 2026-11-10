@@ -25,7 +25,6 @@ type Kind = "audit" | "write";
 const FROZEN_EXCEPTIONS: Record<string, Kind[]> = {
   "api/drivers.routes.ts": ["audit"],
   "api/fuel-card.routes.ts": ["audit"],
-  "api/operations.routes.ts": ["audit"],
   "api/vehicles.routes.ts": ["audit"],
   "api/pin-auth.routes.ts": ["write"],
   // Fichier gelé (AGENTS.md §9) : écritures au login et étiquettes d'acteur d'événements.

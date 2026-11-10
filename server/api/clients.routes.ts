@@ -9,7 +9,7 @@ import { AppError } from "../lib/app-error";
 import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { withLogContext } from "../lib/error-log-context";
-import { STAFF_EXCEPT_DRIVER_ROLES, canReadFinanceReceivable } from "@shared/constants/roles";
+import { CLIENT_DIRECTORY_READ_ROLES, canReadFinanceReceivable } from "@shared/constants/roles";
 import { withoutClientFinanceFields } from "../lib/client-public-columns";
 
 const log = moduleLogger("clients");
@@ -82,7 +82,7 @@ function broadcastClientUpdate(
     // Diffusé à tout le personnel : sans les taux de retenue.
     payload: { client: withoutClientFinanceFields(client) },
     // Fiche d'un client de flotte (coordonnées, créateur) : le personnel hors chauffeur, jamais un compte client (§11).
-    scope: { type: "roles", roles: [...STAFF_EXCEPT_DRIVER_ROLES] },
+    scope: { type: "roles", roles: [...CLIENT_DIRECTORY_READ_ROLES] },
   });
 }
 

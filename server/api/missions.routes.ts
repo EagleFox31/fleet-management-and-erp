@@ -54,6 +54,7 @@ import {
   DOCUMENT_RENEWAL_VIEWER_ROLES,
   MISSION_EVENT_ROLES,
   MISSION_MANAGER_ROLES,
+  MISSION_READ_ROLES,
   MISSION_STATUS_ROLES,
   TREASURY_FUEL_CARD_READ_ROLES,
   canRoleSetMissionStatus,
@@ -178,7 +179,7 @@ type VehicleDocumentRequirementType = "carte_grise" | "assurance" | "visite_tech
 
 /**
  * Diffusion temps réel d'une mission. Le prix convenu et son tarif d'origine ne voyagent jamais dans
- * l'événement : il part vers tout le personnel hors chauffeur (techniciens compris), qui n'a pas droit au prix.
+ * l'événement : il part vers MISSION_EVENT_ROLES (ni chauffeur ni technicien), qui n'a pas droit au prix.
  * L'écran qui le lit rafraîchit sa requête sur l'événement.
  */
 export async function broadcastMissionUpdate(
@@ -200,7 +201,7 @@ export async function broadcastMissionUpdate(
       entity: "mission",
       entityId: missionId,
       payload: {
-        // Trame diffusée à tout le personnel (technicien compris) : ni prix convenu, ni montant du budget (Q19).
+        // Trame diffusée à MISSION_EVENT_ROLES (ni chauffeur ni technicien) : ni prix convenu, ni montant du budget (Q19).
         mission: omitMissionBudget(redactMissionPrice(null, mission)),
         missionId,
         ...extraPayload,
@@ -774,7 +775,8 @@ export function broadcastDocumentRenewalCreatedFromMission(
 }
 
 // GET /api/missions - Liste toutes les missions
-router.get("/", async (req, res) => {
+// Technicien refusé (MISSION_READ_ROLES) : adresses, client et chauffeurs, sans écran qui les lise.
+router.get("/", authorize([...MISSION_READ_ROLES]), async (req, res) => {
   try {
     // Chauffeur : seulement les missions où il est affecté (DRV2-3).
     const driverScope = await driverScopeOf(req.user);
@@ -903,7 +905,7 @@ router.get("/", async (req, res) => {
 });
 
 // GET /api/missions/:id - Détails d'une mission
-router.get("/:id", async (req, res, next) => {
+router.get("/:id", authorize([...MISSION_READ_ROLES]), async (req, res, next) => {
   try {
     const missionId = parseMissionId(req.params.id);
 
