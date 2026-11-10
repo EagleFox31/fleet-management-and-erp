@@ -86,6 +86,8 @@ export default function NewMission() {
 
   // Remorques attelables (vehicleType remorque / semi_remorque), même règle que le serveur.
   const trailers = ((vehicles as any[]) || []).filter((v: any) => isTrailerVehicleType(v.vehicleType));
+  // Une remorque ne roule pas seule : elle n'est proposée que dans la liste des remorques.
+  const trucks = ((vehicles as any[]) || []).filter((v: any) => !isTrailerVehicleType(v.vehicleType));
 
   // Fetch active drivers
   const { data: drivers, isLoading: driversLoading } = useQuery<any>({
@@ -510,7 +512,7 @@ export default function NewMission() {
                       <SelectValue placeholder="Sélectionner un véhicule" />
                     </SelectTrigger>
                     <SelectContent>
-                      {vehicles?.map((vehicle: any) => (
+                      {trucks.map((vehicle: any) => (
                         <SelectItem
                           key={vehicle.id}
                           value={vehicle.id.toString()}

@@ -3443,7 +3443,9 @@ export default function MissionDetailsPage() {
                 data-testid="select-edit-vehicle"
               >
                 <option value="">Non assigné</option>
-                {(availableVehicles || []).map((vehicle: any) => (
+                {(availableVehicles || [])
+                  .filter((vehicle: any) => !isTrailerVehicleType(vehicle.vehicleType))
+                  .map((vehicle: any) => (
                   <option key={vehicle.id} value={vehicle.id}>
                     {vehicle.registrationNumber} - {vehicle.brand} {vehicle.model}
                   </option>

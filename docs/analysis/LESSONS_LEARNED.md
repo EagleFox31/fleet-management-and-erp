@@ -3556,3 +3556,17 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/integration/fuel-record-cancel-mission.test.ts`, cas de course solde / annulation : échoue (`deadlock detected`) si le verrou de la mission est retiré ;
   - revue des autres chemins : tous ceux de `mission-budgets-service.ts` (mise à jour, transitions, solde, dépenses) verrouillent la mission (`lockMission`) avant le budget ; aucun chemin inverse trouvé.
 - **Leçon généralisée** : tout service qui touche mission et budget prend les verrous dans le même ordre, mission puis budget, y compris les verrous implicites des triggers. Un verrou conditionnel (requête filtrée) ne verrouille rien quand le filtre est faux : verrouiller d'abord, tester ensuite.
+
+## 2026-11-10 — Remorque d'affectation : trois oublis du même lot, trouvés en revue et en CI (#635)
+
+- **Contexte** : ajout de `assignments.trailer_id` (lot remorque). Trois défauts trouvés avant la fusion, aucune donnée touchée.
+  1. `POST /api/missions` lisait `assignment.trailerId` sans que l'objet imbriqué `assignment` soit déclaré dans le schéma Zod : `"abc"` ou `1.5` atteignaient la base et finissaient en 500.
+  2. La création de mission prenait le verrou de la remorque avant ceux du camion et du chauffeur, à l'inverse de l'ajout d'affectation : création et ajout simultanés pouvaient s'interbloquer.
+  3. La nouvelle clé étrangère vers `vehicles.id` n'était pas classée dans `VEHICLE_ACTIVITY_SOURCES` : CI unitaire rouge, et un véhicule attelé aurait été supprimé physiquement.
+- **Cause racine** : une colonne ajoutée sur une table existante, sans relire tout ce qui la touche : validation d'entrée de chaque route, ordre de verrous partagé, critère d'action du véhicule.
+- **Classification** : contrat d'entrée incomplet, ordre de verrous incohérent, référence non classée ; near miss.
+- **Résolution** : `assignment` déclaré dans `createMissionSchema` (ids passés par `idSchema`, `true` refusé) ; verrous dans un seul ordre, véhicule (1), chauffeur (2), remorque (3), via `lockPlanningResources` puis `assertTrailerAssignable` ; `assignments.trailer_id` classé.
+- **Prévention vérifiée** :
+  - `tests/contract/mission-trailer-assignment.contract.test.ts`, cas « trailerId "abc", 1.5, 2147483648, true : 400, jamais 500 » et « création et ajout simultanés : un 201, un 409, jamais d'interblocage » ;
+  - `tests/unit/server/vehicle-activity-sources.test.ts` échoue sur toute clé étrangère vers `vehicles.id` non classée.
+- **Leçon généralisée** : un objet imbriqué lu par une route est toujours déclaré dans son schéma Zod, sinon il n'est pas validé du tout. L'ordre des verrous consultatifs est fixé en un seul endroit et chaque route l'emprunte. Toute clé étrangère vers `vehicles.id` est classée dans `vehicle-lifecycle-sources.ts` dans la même PR.

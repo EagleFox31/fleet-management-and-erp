@@ -256,6 +256,12 @@ describe("couche 3 : table des écrans satellites", () => {
     expect(satelliteTargetsOf("mission_budget_updated", {}).keys.some((k) => k.includes("launch-readiness"))).toBe(false);
   });
 
+  it("suivi O1 (remorque préremplie) : rafraîchi par création, modification, changement de statut et clôture de mission", () => {
+    for (const event of ["mission_created", "mission_updated", "mission_status_changed", "mission_completed"]) {
+      expect(satelliteTargetsOf(event, { missionId: 3 }).keys, event).toContain("/api/mission-operations");
+    }
+  });
+
   it("dépôt de POD : la liste des POD de la seule mission touchée et les factures à émettre", () => {
     const { keys } = satelliteTargetsOf("mission_pod_uploaded", { missionId: 9 });
     expect(keys).toEqual(expect.arrayContaining(["/api/missions/9/pod-files", "/api/billing/pending-invoices"]));

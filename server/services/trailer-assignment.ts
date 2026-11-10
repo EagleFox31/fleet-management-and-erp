@@ -1,7 +1,10 @@
-import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { assignments, vehicles } from "@shared/schema";
 import { ACTIVE_ASSIGNMENT_STATUSES, isTrailerVehicleType } from "@shared/constants/assignments";
+import { formatEligibilityRefusal, getMissionEligibility } from "@shared/constants/vehicle-eligibility";
 import { AppError } from "../lib/app-error";
+import { loadOpenRenewalReceipts } from "../lib/renewal-receipts";
+import type { DbExecutor } from "../lib/fuel-card-lock";
 import { isUniqueViolation, pgConstraintOf } from "../lib/pg-errors";
 import type { db } from "../db";
 
@@ -11,6 +14,12 @@ export const TRAILER_ACTIVE_INDEX = "uq_assignments_trailer_active";
 export const TRAILER_ALREADY_HITCHED_MESSAGE = "Cette remorque est déjà attelée à un autre camion sur une affectation en cours.";
 export const TRAILER_WRONG_TYPE_MESSAGE = "Le véhicule choisi comme remorque doit être de type remorque ou semi-remorque.";
 export const TRAILER_IS_TRUCK_MESSAGE = "La remorque ne peut pas être le camion de l'affectation.";
+export const TRUCK_IS_TRAILER_MESSAGE = "Ce véhicule est une remorque : choisissez un camion pour l'affectation.";
+
+/** Décision 0a (2026-11-10) : une remorque n'est jamais le camion d'une affectation, sur les trois routes. */
+export function assertTruckIsNotTrailer(vehicleType: string | null | undefined): void {
+  if (isTrailerVehicleType(vehicleType)) throw new AppError(400, TRUCK_IS_TRAILER_MESSAGE);
+}
 
 export type TrailerCheck = {
   trailerId: number;
@@ -31,15 +40,30 @@ export async function assertTrailerAssignable(tx: Executor, check: TrailerCheck)
   const { trailerId, vehicleId, excludeAssignmentId } = check;
   if (trailerId === vehicleId) throw new AppError(400, TRAILER_IS_TRUCK_MESSAGE);
   const [trailer] = await tx
-    .select({ id: vehicles.id, vehicleType: vehicles.vehicleType })
+    .select({
+      id: vehicles.id,
+      vehicleType: vehicles.vehicleType,
+      registrationNumber: vehicles.registrationNumber,
+      status: vehicles.status,
+      insuranceExpiry: vehicles.insuranceExpiry,
+      technicalInspectionDate: vehicles.technicalInspectionDate,
+      licensePlateExpiry: vehicles.licensePlateExpiry,
+    })
     .from(vehicles)
     .where(and(eq(vehicles.id, trailerId), isNull(vehicles.deletedAt)))
     .limit(1);
   if (!trailer) throw new AppError(400, "Remorque introuvable.");
   if (!isTrailerVehicleType(trailer.vehicleType)) throw new AppError(400, TRAILER_WRONG_TYPE_MESSAGE);
+  // Même éligibilité que le camion (décision 0a) : atelier, hors service, papiers expirés sans récépissé.
+  const eligibility = getMissionEligibility({ ...trailer, receipts: await loadOpenRenewalReceipts(trailer.id, tx as unknown as DbExecutor) });
+  if (!eligibility.eligible) throw new AppError(400, formatEligibilityRefusal(trailer.registrationNumber, eligibility.blockers));
 
   await tx.execute(sql`SELECT pg_advisory_xact_lock(3, ${trailerId})`);
-  const conditions = [eq(assignments.trailerId, trailerId), inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES])];
+  // Conflit : attelée ailleurs, ou (affectation ancienne) prise comme camion d'une affectation active.
+  const conditions = [
+    or(eq(assignments.trailerId, trailerId), eq(assignments.vehicleId, trailerId))!,
+    inArray(assignments.status, [...ACTIVE_ASSIGNMENT_STATUSES]),
+  ];
   if (excludeAssignmentId) conditions.push(ne(assignments.id, excludeAssignmentId));
   const [hitched] = await tx.select({ id: assignments.id }).from(assignments).where(and(...conditions)).limit(1);
   if (hitched) throw new AppError(409, TRAILER_ALREADY_HITCHED_MESSAGE);
