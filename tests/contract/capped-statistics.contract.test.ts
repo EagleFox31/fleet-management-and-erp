@@ -23,7 +23,6 @@ const workOrderIds: number[] = [];
 const partIds: number[] = [];
 const cookies: Partial<Record<TestUserRole, string>> = {};
 let vehicleId = 0;
-let minQuantityWasNotNull = false;
 
 async function login(role: TestUserRole) {
   const user = await createTestUser({ role });
@@ -76,6 +75,37 @@ async function countOf(table: "work_orders" | "parts", where = sql`true`) {
   return Number((result.rows[0] as { n: number }).n);
 }
 
+/**
+ * Rétablit NOT NULL sur parts.min_quantity. Les lignes NULL laissées par ce fichier passent à 0
+ * (sens identique : un seuil absent compte comme 0). Sans effet si la contrainte est déjà posée.
+ */
+async function restoreMinQuantityNotNull() {
+  const nullable = await db.execute(
+    sql`select is_nullable from information_schema.columns where table_name = 'parts' and column_name = 'min_quantity'`,
+  );
+  if ((nullable.rows[0] as { is_nullable: string }).is_nullable !== "YES") return;
+  await db.execute(sql`update parts set min_quantity = 0 where min_quantity is null and name like 'TEST-CAPSTAT %'`);
+  if ((await countOf("parts", sql`min_quantity is null`)) === 0) {
+    await db.execute(sql`alter table parts alter column min_quantity set not null`);
+  }
+}
+
+/**
+ * Une pièce sans seuil (min_quantity NULL) doit compter comme un seuil à 0. La colonne est NOT NULL
+ * dans le schéma : la contrainte n'est levée que le temps du cas, et rétablie dans le finally, donc
+ * immédiatement, même si le cas échoue. Une transaction annulée n'est pas utilisable ici : la route lit
+ * par une autre connexion, qui ne voit pas une insertion non validée (et DROP NOT NULL bloque les lectures
+ * de `parts` des autres sessions tant que la transaction dure).
+ */
+async function withNullableMinQuantity(run: () => Promise<void>) {
+  await db.execute(sql`alter table parts alter column min_quantity drop not null`);
+  try {
+    await run();
+  } finally {
+    await restoreMinQuantityNotNull();
+  }
+}
+
 async function purge() {
   // Les suppressions passent par des lots : jamais plus de quelques milliers d'identifiants dans un IN.
   for (let i = 0; i < partIds.length; i += 1000) {
@@ -102,22 +132,12 @@ beforeAll(async () => {
   ids.vehicleIds.push(vehicle.id);
   vehicleId = vehicle.id;
 
-  // Une pièce sans seuil (min_quantity NULL) doit compter comme un seuil à 0. La colonne est NOT NULL
-  // dans le schéma : la contrainte est levée le temps du test, puis rétablie (afterAll).
-  const nullable = await db.execute(
-    sql`select is_nullable from information_schema.columns where table_name = 'parts' and column_name = 'min_quantity'`,
-  );
-  minQuantityWasNotNull = (nullable.rows[0] as { is_nullable: string }).is_nullable === "NO";
-  if (minQuantityWasNotNull) await db.execute(sql`alter table parts alter column min_quantity drop not null`);
 }, 120000);
 
 afterAll(async () => {
   await purge();
-  if (minQuantityWasNotNull) {
-    await db.execute(sql`update parts set min_quantity = 0 where min_quantity is null and reference like 'TEST-CAPSTAT-%'`);
-    const leftovers = await countOf("parts", sql`min_quantity is null`);
-    if (leftovers === 0) await db.execute(sql`alter table parts alter column min_quantity set not null`);
-  }
+  // Filet : si un cas a été interrompu avant son finally, la contrainte est rétablie ici.
+  await restoreMinQuantityNotNull();
   await cleanupCreated(ids);
   await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
 }, 120000);
@@ -151,7 +171,7 @@ describe("GET /api/statistics/work-orders : comptes sur tous les OT", { timeout:
 describe("GET /api/reports/inventory : statistiques sur toutes les pièces", { timeout: 300000 }, () => {
   const STAT_KEYS = ["lowStockCount", "totalMovements", "totalParts", "totalValue"];
 
-  it("témoin (moins de 50 lignes) : forme et valeurs inchangées", async () => {
+  it("témoin (moins de 50 lignes) : forme et valeurs inchangées", () => withNullableMinQuantity(async () => {
     const baseParts = await countOf("parts");
     expect(baseParts).toBeLessThan(50);
     await insertParts([
@@ -198,7 +218,7 @@ describe("GET /api/reports/inventory : statistiques sur toutes les pièces", { t
     const untouched = body.parts.find((part: { id: number }) => part.id === partIds[2]);
     expect(untouched.movementsCount).toBe(0);
     expect(untouched.movements).toEqual([]);
-  });
+  }));
 
   it("période explicite : les mouvements anciens reviennent par le filtre SQL", async () => {
     const from = new Date(Date.now() - 500 * 24 * 3600 * 1000).toISOString();
@@ -207,7 +227,7 @@ describe("GET /api/reports/inventory : statistiques sur toutes les pièces", { t
     expect((await res.json()).statistics.totalMovements).toBe(3);
   });
 
-  it("plus de 50 pièces : totalParts, totalValue et lowStockCount exacts", async () => {
+  it("plus de 50 pièces : totalParts, totalValue et lowStockCount exacts", () => withNullableMinQuantity(async () => {
     const before = await (await get("/api/reports/inventory", "warehouse")).json();
     const rows: { quantity: number; minQuantity: number | null; unitPrice: string }[] = [];
     for (let i = 0; i < 20; i++) rows.push({ quantity: 2, minQuantity: 5, unitPrice: "2.50" }); // bas
@@ -224,7 +244,7 @@ describe("GET /api/reports/inventory : statistiques sur toutes les pièces", { t
     expect(after.lowStockCount - before.statistics.lowStockCount).toBe(46);
     expect(after.totalValue - before.statistics.totalValue).toBeCloseTo((2 * 20 + 5 * 20 + 10 * 12 + 0 + 3 * 3) * 2.5, 2);
     expect(after.totalParts).toBe(await countOf("parts"));
-  });
+  }));
 
   it(`au-delà de ${INVENTORY_REPORT_MAX_PARTS} pièces : 422 explicite, sans tronquer`, async () => {
     const present = await countOf("parts");
