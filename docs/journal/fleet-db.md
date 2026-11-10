@@ -93,3 +93,20 @@ Règles : `docs/journal/README.md`.
 - **Pourquoi** : #462 n'était plus fusionnable après #461 et #465.
 - **Preuves** : tsc 0 erreur ; unitaires 252 fichiers, 2796 verts ; Postgres local jetable (ports 57320/57433, supprimé ensuite), schéma par drizzle-kit push --force : intégration cleanup-users-fk-coverage + cdc-schema-idempotence 16/16, contrat qhse-inspections 6/6 ; nouvelle assertion rouge si l'on attend 200, verte à 403.
 - **Reste / risques** : aucun effet en base partagée ; aucune migration nouvelle.
+
+## 2026-11-10T16:20:31+01:00 — GPS-DB — Positions téléphone, points A/B des missions, purge
+
+- **Agent** : fleet-db · **Branche** : `feat/gps-phone-db` · **Commit** : voir `git log`
+- **Statut** : fait (partie base ; routes, purge planifiée et écrans restent aux lots GPS-API et GPS-FE ; drapeau `gps` coupé)
+- **Quoi** : table `vehicle_positions` commune aux sources `phone` / `tracker` (identifiant de point client unique par auteur, bornes lat/lng, mesures positives, cap < 360, `suspect`), deux index (mission + temps, véhicule + temps) ; six colonnes facultatives `missions.pickup_*` / `delivery_*` (lat, lng, code de hub) avec deux CHECK ; fonction `purge_vehicle_positions(jours)` et `server/lib/gps-retention.ts` (`GPS_POSITION_RETENTION_DAYS`, 30 par défaut) ; `vehicle_positions` classée source d'action véhicule. Pas de `location_consents` (décision utilisatrice du jour).
+- **Comment** : `VEHICLE_POSITIONS_GPS_SQL` dans `server/init-database.ts`, jumelle de `server/db/migrations/20261110_vehicle_positions_gps.sql` ; verrou consultatif + `lock_timeout` 5 s ; colonnes ajoutées seulement si absentes ; contraintes `NOT VALID` puis validées (patron #124), relues par `CDC_RECONCILED_CONSTRAINTS` ; fonction recréée seulement si son corps diffère. Détail : `docs/analysis/GPS_V1_POSITIONS_BASE.md`.
+- **Pourquoi** : cadrage `docs/plans/carte-chauffeur-gps-telephone.md` §5 ; invariants tenus quel que soit l'appelant, rejeu hors ligne sans doublon même sous course.
+- **Comment tester (QA)** :
+  - Prérequis : base locale dédiée dans le conteneur Postgres de test, schéma poussé.
+  - Étapes : 1. démarrer deux fois ; 2. insérer un point lat 91 ; 3. rejouer un point de même identifiant ; 4. `SELECT purge_vehicle_positions(30)` deux fois.
+  - Attendu : refus `23514` nommé, rejeu sans ligne de plus, second démarrage et seconde purge sans écriture.
+  - Preuve automatisée : `tests/unit/server/vehicle-positions-gps-schema.test.ts`, `tests/integration/vehicle-positions-gps.test.ts`.
+- **RAIDER** : Idempotent (second init sans identifiant de transaction, mutant « fonction toujours recréée » tué) ; Retroactive (missions existantes à NULL, aucune reprise ; base poussée par Drizzle réconciliée) ; Durable (insertion de mission inchangée, suites unitaires et intégration vertes). Ne s'applique pas : seed.
+- **Écarts au plan §5** : `mission_id` en CASCADE (SET NULL violerait `vehicle_positions_phone_check`) ; pas de `geo_source` (déduit du code de hub) ; `device_id` sans FK (`telemetry_devices` absente) ; `suspect` ajouté (§6).
+- **Incident évité** : l'insertion scriptée de la constante dans `init-database.ts` par `String.replace` avait changé `$$` en `$` ; le test des jumelles l'a détecté avant tout commit (remplacement par fonction depuis).
+- **Reste / risques** : le serveur doit refuser un point plus vieux que la rétention (sinon un rejeu après purge le réinsère) et planifier la purge quotidienne.
