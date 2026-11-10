@@ -136,16 +136,18 @@ describe("fiche chauffeur : données personnelles", () => {
     const own = await session.call("GET", `/api/drivers/${ownId}`, { actor: "driver" });
     expect(own.status).toBe(200);
     expect(own.body.cniNumber).toBe(PII.cniNumber);
+    // Moindre donnée : la fiche d'un autre chauffeur est refusée, pas seulement masquée.
     const other = await session.call("GET", `/api/drivers/${otherId}`, { actor: "driver" });
-    expect(other.status).toBe(200);
+    expect(other.status).toBe(403);
     expect(hasPii(other.body)).toEqual([]);
-    expect(other.body.firstName).toBe("Test");
   });
 
-  it("détail : un autre personnel (technicien) ne voit aucune donnée personnelle", async () => {
-    const res = await session.call("GET", `/api/drivers/${ownId}`, { actor: "technician" });
+  it("détail : un autre personnel (magasinier) ne voit aucune donnée personnelle, le technicien est refusé", async () => {
+    const res = await session.call("GET", `/api/drivers/${ownId}`, { actor: "warehouse" });
     expect(res.status).toBe(200);
     expect(hasPii(res.body)).toEqual([]);
+    const tech = await session.call("GET", `/api/drivers/${ownId}`, { actor: "technician" });
+    expect(tech.status).toBe(403);
   });
 
   it("listes : mêmes règles sur /api/drivers et /api/drivers/cpc-status", async () => {
@@ -154,14 +156,15 @@ describe("fiche chauffeur : données personnelles", () => {
       const mine = asLogistics.body.find((d: any) => d.id === otherId);
       expect(mine.cniNumber).toBe(PII.cniNumber);
 
-      const asDriver = await session.call("GET", path, { actor: "driver" });
-      const own = asDriver.body.find((d: any) => d.id === ownId);
-      const other = asDriver.body.find((d: any) => d.id === otherId);
-      expect(own.licenseNumber).toBe(PII.licenseNumber);
-      expect(hasPii(other)).toEqual([]);
+      const asWarehouse = await session.call("GET", path, { actor: "warehouse" });
+      expect(asWarehouse.status, path).toBe(200);
+      expect(asWarehouse.body.every((d: any) => hasPii(d).length === 0)).toBe(true);
 
-      const asTech = await session.call("GET", path, { actor: "technician" });
-      expect(asTech.body.every((d: any) => hasPii(d).length === 0)).toBe(true);
+      // Annuaire : ni le chauffeur (il lit sa fiche par /api/drivers/me) ni le technicien.
+      for (const actor of ["driver", "technician"] as const) {
+        const res = await session.call("GET", path, { actor });
+        expect(res.status, `${actor} ${path}`).toBe(403);
+      }
     }
   });
 
@@ -178,7 +181,7 @@ describe("fiche chauffeur : données personnelles", () => {
     missionIds.push(mission.id);
     await db.insert(assignments).values({ missionId: mission.id, driverId: otherId, status: "accepted" } as any);
 
-    for (const actor of ["technician", "admin"] as const) {
+    for (const actor of ["warehouse", "admin"] as const) {
       const res = await session.call("GET", `/api/missions/${mission.id}`, { actor });
       expect(res.status, actor).toBe(200);
       expect(res.body.assignment.driver.id).toBe(otherId);
@@ -187,10 +190,12 @@ describe("fiche chauffeur : données personnelles", () => {
     }
   });
 
-  it("GET /:id/cpc-status masque pour le technicien, pas pour l'admin", async () => {
+  it("GET /:id/cpc-status masque pour le magasinier, refusé au technicien, complet pour l'admin", async () => {
+    const warehouse = await session.call("GET", `/api/drivers/${otherId}/cpc-status`, { actor: "warehouse" });
+    expect(warehouse.status).toBe(200);
+    expect(hasPii(warehouse.body)).toEqual([]);
     const tech = await session.call("GET", `/api/drivers/${otherId}/cpc-status`, { actor: "technician" });
-    expect(tech.status).toBe(200);
-    expect(hasPii(tech.body)).toEqual([]);
+    expect(tech.status).toBe(403);
     const admin = await session.call("GET", `/api/drivers/${otherId}/cpc-status`, { actor: "admin" });
     expect(admin.body.cniNumber).toBe(PII.cniNumber);
   });

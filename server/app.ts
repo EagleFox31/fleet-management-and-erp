@@ -8,6 +8,7 @@ import apiRouter from "./api";
 import { initializeDatabase } from "./init-database";
 import { moduleLogger } from "./lib/logger";
 import { isApiPath } from "./lib/routed-path";
+import { requireJsonContentType } from "./middleware/require-json-content-type";
 import { migrateLoginIdentifiers, pendingLoginIdentifiers } from "./services/login-identifier-migration";
 import { createIpFailureLimiter } from "./middleware/auth-ip-limit";
 import { trustProxyFromEnv } from "./lib/trust-proxy";
@@ -94,6 +95,8 @@ export async function createApp(
     next();
   });
 
+  // Avant tout analyseur de corps : une écriture /api en urlencoded ou text/plain est refusée en 415.
+  app.use(requireJsonContentType);
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
 

@@ -20,7 +20,7 @@ const ids = createIdBag();
 const runIds: number[] = [];
 
 async function call(method: string, path: string, cookie?: string) {
-  const response = await fetch(baseUrl + path, { method, headers: cookie ? { Cookie: cookie } : {} });
+  const response = await fetch(baseUrl + path, { method, headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) } });
   return { status: response.status, body: await response.json().catch(() => null) };
 }
 

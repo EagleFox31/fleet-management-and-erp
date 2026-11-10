@@ -4,7 +4,7 @@ import { startContractActors } from "../support/contract-actors";
 import { createTestClient, createTestClientInvoice, createTestVehicle } from "../support/factories";
 import { uniqueTestToken } from "../support/ids";
 import { resolveRecipients, normalizeScope } from "../../server/lib/realtime-scope";
-import { STAFF_EXCEPT_DRIVER_ROLES } from "../../shared/constants/roles";
+import { CLIENT_DIRECTORY_READ_ROLES } from "../../shared/constants/roles";
 
 /**
  * Cloison temps réel (AGENTS.md §11, lot 3) : un événement sur le véhicule, la facture ou la
@@ -12,7 +12,7 @@ import { STAFF_EXCEPT_DRIVER_ROLES } from "../../shared/constants/roles";
  * personnel : l'événement de A atteint le personnel et A, jamais B. Les destinataires sont
  * calculés par `resolveRecipients`, le même module que le serveur WebSocket.
  */
-const ACTORS = { admin: "admin", secretary: "secretary", logistics: "logistics", staff: "workshop_manager", driver: "driver", clientA: "client", clientB: "client" } as const;
+const ACTORS = { admin: "admin", secretary: "secretary", logistics: "logistics", staff: "workshop_manager", technician: "technician", driver: "driver", clientA: "client", clientB: "client" } as const;
 type Actor = keyof typeof ACTORS;
 const ids = createIdBag();
 const token = uniqueTestToken("l3bs");
@@ -90,14 +90,15 @@ describe("portée des événements : ni broadcast, ni client hors périmètre", 
     });
   });
 
-  it("client_created : personnel hors chauffeur, aucun compte client", async () => {
+  it("client_created : personnel hors chauffeur et technicien, aucun compte client", async () => {
     const res = await session.call("POST", "/api/clients", { actor: "admin", body: { name: token, email: `${token}@client.test` } });
     expect(res.status).toBe(201);
     ids.clientIds.push(res.body.id);
     const flat = receivers("client_created").actors.flat();
-    const expected = (Object.keys(ACTORS) as Actor[]).filter((actor) => STAFF_EXCEPT_DRIVER_ROLES.includes(ACTORS[actor]));
+    const expected = (Object.keys(ACTORS) as Actor[]).filter((actor) => CLIENT_DIRECTORY_READ_ROLES.includes(ACTORS[actor]));
     expect([...flat].sort()).toEqual([...expected].sort());
     expect(flat).not.toContain("driver");
+    expect(flat).not.toContain("technician");
     expect(flat).not.toContain("clientA");
     expect(flat).not.toContain("clientB");
   });

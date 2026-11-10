@@ -5,6 +5,7 @@ import { isApiError, userMessageOf } from "@/lib/api-error";
 import { clientLogger } from "@/lib/logger";
 import {
   appendBounded,
+  foreignBufferKeys,
   gpsBufferKey,
   gpsPurgeEpoch,
   GPS_FLUSH_INTERVAL_MS,
@@ -58,7 +59,7 @@ export interface SendResult {
   /** Points restant à envoyer (réseau, 5xx, 401, 408, 429) : à garder au tampon. */
   remaining: GpsPoint[];
   sentAny: boolean;
-  /** Message lisible si le serveur a refusé un paquet (dont 429 : plafond de points par mission). */
+  /** Message lisible si le serveur a refusé un paquet (dont 409 : plafond de points par mission). */
   error: string | null;
 }
 
@@ -72,7 +73,10 @@ export async function sendBuffered(missionId: number, buffer: readonly GpsPoint[
   let remaining = [...buffer];
   let sentAny = false;
   let error: string | null = null;
+  const epoch = gpsPurgeEpoch();
   while (remaining.length > 0) {
+    // Déconnexion pendant l'envoi : plus rien ne part sous le compte suivant (cloison #56).
+    if (epoch !== gpsPurgeEpoch()) break;
     const batch = nextBatch(remaining);
     try {
       const response = await apiRequest("POST", driverMissionPositionsPath(missionId), { points: batch });
@@ -104,9 +108,26 @@ function refreshTrack(missionId: number): void {
 let replaying = false;
 
 /**
+ * Verrou par clé de tampon (mémoire) : l'envoi final d'une session et le rejeu des orphelins ne lisent pas
+ * la même clé en parallèle (les mêmes points partiraient deux fois). Le second arrivé passe son tour ;
+ * ce qui reste au tampon repart au prochain déclencheur.
+ */
+const lockedKeys = new Set<string>();
+
+async function withKeyLock(key: string, task: () => Promise<void>): Promise<void> {
+  if (lockedKeys.has(key)) return;
+  lockedKeys.add(key);
+  try {
+    await task();
+  } finally {
+    lockedKeys.delete(key);
+  }
+}
+
+/**
  * Rejoue les tampons restés au navigateur pour d'autres missions de `userId` (livrées, terminées ou
  * annulées entre-temps : le serveur les accepte encore). Une clé est retirée une fois ses points réglés,
- * ou si le tampon a plus de 7 jours. `exceptMissionId` est la mission suivie en direct, gérée par son hook.
+ * ou si le tampon a plus de 7 jours (y compris ceux des autres comptes, retirés sans envoi). `exceptMissionId` est la mission suivie en direct, gérée par son hook.
  */
 export async function replayOrphanBuffers(userId: number, exceptMissionId?: number): Promise<void> {
   if (replaying) return;
@@ -119,17 +140,28 @@ export async function replayOrphanBuffers(userId: number, exceptMissionId?: numb
     } catch {
       return;
     }
+    // Session expirée sans déconnexion : les tampons d'un autre compte de ce navigateur ne sont jamais
+    // envoyés, mais ils ne restent pas indéfiniment sur un téléphone partagé.
+    try {
+      for (const key of foreignBufferKeys(window.localStorage, userId)) {
+        if (isBufferExpired(readBuffer(key), Date.now())) writeBuffer(key, [], epoch);
+      }
+    } catch {
+      // Stockage inaccessible : rien à nettoyer.
+    }
     for (const { key, missionId } of entries) {
       if (missionId === exceptMissionId) continue;
       if (epoch !== gpsPurgeEpoch()) return;
-      const buffer = readBuffer(key);
-      if (isBufferExpired(buffer, Date.now())) {
-        writeBuffer(key, [], epoch);
-        continue;
-      }
-      const result = await sendBuffered(missionId, buffer);
-      writeBuffer(key, result.remaining, epoch);
-      if (result.sentAny) refreshTrack(missionId);
+      await withKeyLock(key, async () => {
+        const buffer = readBuffer(key);
+        if (isBufferExpired(buffer, Date.now())) {
+          writeBuffer(key, [], epoch);
+          return;
+        }
+        const result = await sendBuffered(missionId, buffer);
+        writeBuffer(key, result.remaining, epoch);
+        if (result.sentAny) refreshTrack(missionId);
+      });
     }
   } finally {
     replaying = false;
@@ -169,13 +201,39 @@ export interface GpsTracking {
   sendError: string | null;
 }
 
-interface TrackingSession {
+export interface TrackingSession {
   key: string;
   missionId: number;
   epoch: number;
   buffer: GpsPoint[];
   flushing: boolean;
   closed: boolean;
+}
+
+/**
+ * Envoie le tampon d'une session. Ne fait rien si une purge (déconnexion) a eu lieu depuis le montage
+ * de la session, ni si la clé est déjà en cours d'envoi ailleurs. `onResult` n'est appelé que tant que
+ * la session est ouverte.
+ */
+export async function flushTrackingSession(session: TrackingSession, onResult?: (result: SendResult) => void): Promise<void> {
+  if (session.flushing) return;
+  if (session.epoch !== gpsPurgeEpoch()) return;
+  session.flushing = true;
+  try {
+    await withKeyLock(session.key, async () => {
+      const snapshot = session.buffer;
+      const result = await sendBuffered(session.missionId, snapshot);
+      // Les points relevés pendant l'envoi sont ajoutés au tampon, pas écrasés.
+      const sentIds = new Set(snapshot.map((p) => p.clientPointId));
+      const remainingIds = new Set(result.remaining.map((p) => p.clientPointId));
+      session.buffer = session.buffer.filter((p) => !sentIds.has(p.clientPointId) || remainingIds.has(p.clientPointId));
+      writeBuffer(session.key, session.buffer, session.epoch);
+      if (!session.closed) onResult?.(result);
+      if (result.sentAny) refreshTrack(session.missionId);
+    });
+  } finally {
+    session.flushing = false;
+  }
 }
 
 /**
@@ -217,28 +275,13 @@ export function useGpsTracking(opts: { userId: number | undefined; missionId: nu
     // « Position partagée » seulement après une position reçue, jamais avant ni sur une erreur passagère.
     setState("waiting");
 
-    const flush = async (): Promise<void> => {
-      if (session.flushing) return;
-      session.flushing = true;
-      try {
-        const snapshot = session.buffer;
-        const result = await sendBuffered(session.missionId, snapshot);
-        // Les points relevés pendant l'envoi sont ajoutés au tampon, pas écrasés.
-        const sentIds = new Set(snapshot.map((p) => p.clientPointId));
-        const remainingIds = new Set(result.remaining.map((p) => p.clientPointId));
-        session.buffer = session.buffer.filter((p) => !sentIds.has(p.clientPointId) || remainingIds.has(p.clientPointId));
-        writeBuffer(session.key, session.buffer, session.epoch);
-        if (!session.closed) {
-          setPending(session.buffer);
-          if (result.sentAny) setLastSentAt(Date.now());
-          if (result.error) setSendError(result.error);
-          else if (result.sentAny) setSendError(null);
-        }
-        if (result.sentAny) refreshTrack(session.missionId);
-      } finally {
-        session.flushing = false;
-      }
-    };
+    const flush = (): Promise<void> =>
+      flushTrackingSession(session, (result) => {
+        setPending(session.buffer);
+        if (result.sentAny) setLastSentAt(Date.now());
+        if (result.error) setSendError(result.error);
+        else if (result.sentAny) setSendError(null);
+      });
 
     const watchId = navigator.geolocation.watchPosition(
       (position) => {

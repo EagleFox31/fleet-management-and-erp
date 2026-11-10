@@ -92,8 +92,10 @@ describe("CLI1 : création", { timeout: 60000 }, () => {
 describe("CLI1 : lecture et modification", { timeout: 60000 }, () => {
   it("détail, id inconnu (404), id non numérique (400)", async () => {
     const created = await createClient();
-    const found = await call("GET", `/api/clients/${created.body.id}`, { actor: "technician" });
+    const found = await call("GET", `/api/clients/${created.body.id}`, { actor: "warehouse" });
     expect(found.status).toBe(200);
+    // Technicien : aucun écran client (moindre donnée, CLIENT_DIRECTORY_READ_ROLES).
+    expect((await call("GET", `/api/clients/${created.body.id}`, { actor: "technician" })).status).toBe(403);
     expect(found.body.name).toBe(created.body.name);
     expect((await call("GET", "/api/clients/2147483000", { actor: "admin" })).status).toBe(404);
     expect((await call("GET", "/api/clients/abc", { actor: "admin" })).status).toBe(400);
