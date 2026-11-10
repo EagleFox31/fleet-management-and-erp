@@ -4,7 +4,7 @@ const { apiRequest, invalidateQueries } = vi.hoisted(() => ({ apiRequest: vi.fn(
 vi.mock("@/lib/queryClient", () => ({ apiRequest, queryClient: { invalidateQueries } }));
 
 import { ApiError } from "@/lib/api-error";
-import { replayOrphanBuffers, sendBuffered } from "@/hooks/use-gps-tracking";
+import { flushTrackingSession, replayOrphanBuffers, sendBuffered } from "@/hooks/use-gps-tracking";
 import { purgeBrowserUserState } from "@/lib/form-draft-storage";
 import {
   GPS_ACCURACY_MAX_M,
@@ -144,6 +144,64 @@ describe("rejeu des tampons orphelins", () => {
     await replayOrphanBuffers(7);
     expect(apiRequest).not.toHaveBeenCalled();
     expect(storage.map.has(gpsBufferKey(7, 11))).toBe(false);
+  });
+});
+
+describe("hygiène des tampons (suite de #668)", () => {
+  const OLD = NOW - 8 * 24 * 60 * 60 * 1000;
+
+  it("retire sans l'envoyer le tampon d'un autre compte vieux de 8 jours, garde celui qui est récent", async () => {
+    apiRequest.mockImplementation(async (_m: string, _u: string, body: { points: GpsPoint[] }) => ok(body.points.length));
+    storage.setItem(gpsBufferKey(8, 3), JSON.stringify([point(1, OLD)]));
+    storage.setItem(gpsBufferKey(9, 4), JSON.stringify([point(2)]));
+    await replayOrphanBuffers(5);
+    expect(storage.map.has(gpsBufferKey(8, 3))).toBe(false);
+    expect(storage.map.has(gpsBufferKey(9, 4))).toBe(true);
+    expect(apiRequest).not.toHaveBeenCalled();
+  });
+
+  it("sendBuffered s'arrête entre deux paquets si une purge a eu lieu", async () => {
+    apiRequest.mockImplementation(async (_m: string, _u: string, body: { points: GpsPoint[] }) => {
+      purgeBrowserUserState(storage);
+      return ok(body.points.length);
+    });
+    const result = await sendBuffered(11, Array.from({ length: 120 }, (_, i) => point(i)));
+    expect(apiRequest).toHaveBeenCalledTimes(1);
+    expect(result.remaining).toHaveLength(70);
+  });
+
+  it("le dernier envoi au démontage n'envoie rien si une purge a eu lieu depuis le montage", async () => {
+    const session = { key: gpsBufferKey(7, 11), missionId: 11, epoch: gpsPurgeEpoch(), buffer: [point(1)], flushing: false, closed: false };
+    purgeBrowserUserState(storage);
+    await flushTrackingSession(session);
+    expect(apiRequest).not.toHaveBeenCalled();
+  });
+
+  it("l'envoi final et le rejeu ne lisent pas la même clé en parallèle", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    apiRequest.mockImplementation(async (_m: string, _u: string, body: { points: GpsPoint[] }) => {
+      await gate;
+      return ok(body.points.length);
+    });
+    const key = gpsBufferKey(7, 11);
+    storage.setItem(key, JSON.stringify([point(1)]));
+    const session = { key, missionId: 11, epoch: gpsPurgeEpoch(), buffer: [point(1)], flushing: false, closed: true };
+    const final = flushTrackingSession(session);
+    await Promise.resolve();
+    await replayOrphanBuffers(7);
+    release();
+    await final;
+    expect(apiRequest).toHaveBeenCalledTimes(1);
+    expect(storage.map.has(key)).toBe(false);
+  });
+
+  it("le plafond par mission (409 GPS_MISSION_CAP_REACHED) retire le paquet", async () => {
+    apiRequest.mockRejectedValue(new ApiError(409, "Trop de positions enregistrées pour cette mission. Contactez la logistique.", null, { code: "GPS_MISSION_CAP_REACHED" }));
+    const result = await sendBuffered(11, [point(1), point(2)]);
+    expect(result.remaining).toEqual([]);
+    expect(result.error).toMatch(/Trop de positions/);
+    expect(apiRequest).toHaveBeenCalledTimes(1);
   });
 });
 
