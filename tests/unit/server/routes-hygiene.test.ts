@@ -105,15 +105,22 @@ const SHADOWED_LEGACY_ROUTES_FROZEN: string[] = [];
  * (`money-reads.routes.ts`).
  * `GET /api/parts/statistics` et `GET /api/invoices/:id/parts` : `stock-valuation-guard.routes.ts` réserve la valeur
  * du stock et le prix des pièces (`STOCK_VALUATION_READ_ROLES`).
+ * `POST /api/fuel-records` et `PATCH /api/fuel-records/:id` : `fuel-records.routes.ts` retire le solde de
+ * la carte de la réponse hors trésorerie (`withoutFuelCardBalance`), `routes.ts` écrit.
+ * `GET /api/fuel-records/statistics` : `fuel-records.routes.ts` réserve les agrégats au pilotage et au
+ * client (`FUEL_READ_ROLES`), `routes.ts` les calcule, cloisonnés par `ownerScopeOf`.
  */
 const CHAINED_GUARD_ROUTES: string[] = [
   "DELETE /api/admin/users/:p",
   "DELETE /api/users/:p",
+  "GET /api/fuel-records/statistics",
   "GET /api/invoices/:p/parts",
   "GET /api/parts/statistics",
   "GET /api/statistics/fleet-kpi",
   "PATCH /api/admin/users/:p/toggle",
+  "PATCH /api/fuel-records/:p",
   "PATCH /api/users/:p",
+  "POST /api/fuel-records",
 ];
 
 const serverDir = fileURLToPath(new URL("../../../server", import.meta.url));
@@ -197,6 +204,26 @@ describe("garde de cloison des lectures : le scan ne se laisse pas tromper", () 
   it("authorize avec le rôle client : refusé ; sans lui : accepté", () => {
     expect(verdictOf('router.get("/x", authorize(["client", "admin"]), async (req, res) => { res.json(1); });')).toBe(false);
     expect(verdictOf('router.get("/x", authorize(["admin", "warehouse"]), async (req, res) => { res.json(1); });')).toBe(true);
+  });
+
+  it("garde chaînée en relais pur : n'envoie rien, la déclaration qui envoie est jugée seule", () => {
+    expect(verdictOf('router.get("/x", authorize(["client", "admin"]), (_req, _res, next) => next());')).toBe(true);
+    expect(verdictOf('router.get("/x", isAnyUser, (req, res, next) => { return next(); });')).toBe(true);
+  });
+
+  it("un relais qui envoie, transmet une erreur ou appelle autre chose n'est pas un relais pur", () => {
+    expect(verdictOf('router.get("/x", isAnyUser, (req, res, next) => { res.json(1); next(); });')).toBe(false);
+    expect(verdictOf('router.get("/x", isAnyUser, (req, res, next) => next(res.json(1)));')).toBe(false);
+    expect(verdictOf('router.get("/x", isAnyUser, (req, res, next) => send(res, next));')).toBe(false);
+    expect(verdictOf('router.get("/x", isAnyUser, async (req, res, next) => { await read(); next(); });')).toBe(false);
+  });
+
+  it("un relais pur placé après une poignée nommée inconnue n'exempte pas la route", () => {
+    expect(verdictOf('router.get("/x", isAnyUser, listAll, (_q, _s, n) => n());')).toBe(false);
+  });
+
+  it("un relais pur placé après une poignée en ligne qui envoie n'exempte pas la route", () => {
+    expect(verdictOf('router.get("/x", isAnyUser, async (req, res, next) => { res.json(await readAll()); }, (_q, _s, n) => n());')).toBe(false);
   });
 
   it("une garde nommée isAnyUserX n'est pas exemptée par son préfixe", () => {
