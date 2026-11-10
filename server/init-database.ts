@@ -2268,6 +2268,8 @@ export async function initializeDatabase() {
     // Suppression douce des pleins qui ont mouvementé la carte — jumelle de server/db/migrations/20261103_fuel_records_soft_delete.sql.
     await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS deleted_at timestamp`);
     await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS deleted_by integer REFERENCES users(id)`);
+    // Motif d'annulation d'un plein validé — jumelle de server/db/migrations/20261110_fuel_cancellation_reason.sql.
+    await db.execute(sql`ALTER TABLE fuel_records ADD COLUMN IF NOT EXISTS cancellation_reason text`);
     // Le RAISE WARNING n'atteint pas les logs applicatifs : relire pg_indexes.
     const { rows: requestKeyIndex } = await pool.query(
       `SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = 'ux_fuel_records_request_key'`,

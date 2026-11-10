@@ -5,6 +5,10 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { canDeleteFuelRecord } from "@shared/constants/fuel-record-delete";
+import { canCancelFuelRecord, isFuelRecordValidated } from "@shared/constants/fuel-record-cancel";
+import { FuelRecordCancelDialog } from "@/components/fuel/fuel-record-cancel-dialog";
+import { fuelValidationLabel } from "@/lib/fuel-record-status";
+import { Ban } from "lucide-react";
 import { formatDate, formatPrice, formatDistance } from "@/lib/utils";
 import {
   Dialog,
@@ -42,6 +46,7 @@ export function FuelRecordDetailModal({
   const [, setLocation] = useLocation();
   const [isEditMode, setIsEditMode] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
   
   // Récupérer l'utilisateur connecté
   const { data: currentUser } = useQuery<any>({
@@ -211,6 +216,11 @@ export function FuelRecordDetailModal({
                     </div>
                     
                     <div>
+                      <div className="text-xs text-muted-foreground">Validation</div>
+                      <div className="font-medium">{fuelValidationLabel(fuelRecord)}</div>
+                    </div>
+
+                    <div>
                       <div className="text-xs text-muted-foreground">Type de plein</div>
                       <Badge className={fuelRecord.fullTank ? "bg-green-700 text-white hover:bg-green-800" : "bg-slate-700 text-white hover:bg-slate-800"}>
                         {fuelRecord.fullTank ? "Complet" : "Partiel"}
@@ -266,8 +276,9 @@ export function FuelRecordDetailModal({
               <Separator className="my-4" />
               
               <DialogFooter>
-                {canEdit && (
+                {(canEdit || (isFuelRecordValidated(fuelRecord) && canCancelFuelRecord(currentUser?.role, fuelRecord))) && (
                   <div className="flex space-x-2 flex-1 justify-start">
+                    {canEdit && !isFuelRecordValidated(fuelRecord) && (
                     <Button 
                       variant="outline" 
                       onClick={() => setIsEditMode(true)}
@@ -275,8 +286,16 @@ export function FuelRecordDetailModal({
                       <i className="fas fa-edit mr-2"></i>
                       Modifier
                     </Button>
+                    )}
+
+                    {isFuelRecordValidated(fuelRecord) && canCancelFuelRecord(currentUser?.role, fuelRecord) && (
+                      <Button variant="destructive" onClick={() => setIsCancelDialogOpen(true)}>
+                        <Ban className="h-4 w-4 mr-2" />
+                        Annuler ce plein
+                      </Button>
+                    )}
                     
-                    {canDeleteFuelRecord(currentUser?.role, fuelRecord) && (
+                    {canEdit && !isFuelRecordValidated(fuelRecord) && canDeleteFuelRecord(currentUser?.role, fuelRecord) && (
                       <Button 
                         variant="destructive" 
                         onClick={() => setIsDeleteDialogOpen(true)}
@@ -300,6 +319,15 @@ export function FuelRecordDetailModal({
         </DialogContent>
       </Dialog>
       
+      <FuelRecordCancelDialog
+        record={isCancelDialogOpen ? fuelRecord : null}
+        onClose={() => setIsCancelDialogOpen(false)}
+        onCancelled={() => {
+          setIsCancelDialogOpen(false);
+          onClose();
+        }}
+      />
+
       {/* Dialog de confirmation de suppression */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <DialogContent>

@@ -3545,3 +3545,14 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - même fichier, cas « véhicule réformé (out_of_service) échu : aucun OT » ;
   - `tests/unit/server/preventive-date-check.test.ts` : table des états d'OT de `isDateBasedDueAlreadyHandled`.
 - **Leçon généralisée** : tout contrôle d'idempotence est revu état par état quand son appelant devient périodique ; une garde se teste sur chaque état possible de l'objet qu'elle protège, pas sur le cas qui l'a motivée.
+
+## 2026-11-10 — Interblocage annulation de plein / solde du budget : verrous pris dans l'ordre inverse (V1)
+
+- **Contexte** : V1, pleins validés immuables. Le test de course « solde du budget et annulation d'un plein en parallèle » a échoué avec `deadlock detected`. Trouvé avant la fusion, aucune donnée touchée.
+- **Cause racine** : deux services prenaient les mêmes verrous dans l'ordre inverse. Le solde tient la mission `FOR SHARE` puis veut le budget `FOR UPDATE`. L'annulation tenait le budget `FOR SHARE` (requête filtrée sur `settled_at IS NOT NULL`, donc verrou pris seulement si une ligne remontait), puis le trigger de `fuel_records` voulait mettre la mission à jour. Chacun attendait l'autre.
+- **Classification** : concurrence, ordre de verrous incohérent entre deux services d'un même agrégat (mission, budget).
+- **Résolution** : l'annulation verrouille la mission (`FOR UPDATE`), puis le budget (`FOR SHARE`) sans condition, et teste `settled_at` en code (`isMissionBudgetSettled`).
+- **Prévention vérifiée** :
+  - `tests/integration/fuel-record-cancel-mission.test.ts`, cas de course solde / annulation : échoue (`deadlock detected`) si le verrou de la mission est retiré ;
+  - revue des autres chemins : tous ceux de `mission-budgets-service.ts` (mise à jour, transitions, solde, dépenses) verrouillent la mission (`lockMission`) avant le budget ; aucun chemin inverse trouvé.
+- **Leçon généralisée** : tout service qui touche mission et budget prend les verrous dans le même ordre, mission puis budget, y compris les verrous implicites des triggers. Un verrou conditionnel (requête filtrée) ne verrouille rien quand le filtre est faux : verrouiller d'abord, tester ensuite.

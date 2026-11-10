@@ -2,6 +2,9 @@ import { inArray, type SQL } from "drizzle-orm";
 import { db } from "../../server/db";
 import { clientInvoices, fuelRecords } from "../../shared/schema";
 import { withMoneyOverride } from "../../server/lib/money-override";
+import { moduleLogger } from "../../server/lib/logger";
+
+const log = moduleLogger("tests-money-override");
 
 /**
  * Suppression de pleins et de factures par les tests. Les triggers de verrou d'argent
@@ -12,14 +15,14 @@ import { withMoneyOverride } from "../../server/lib/money-override";
  */
 const REASON = "nettoyage de données de test";
 
-export async function deleteFuelRecordsWhere(where: SQL | undefined): Promise<void> {
+export async function deleteFuelRecordsWhere(where: SQL): Promise<void> {
   await db.transaction(async (tx) => {
     await withMoneyOverride(tx, REASON);
     await tx.delete(fuelRecords).where(where);
   });
 }
 
-export async function deleteClientInvoicesWhere(where: SQL | undefined): Promise<void> {
+export async function deleteClientInvoicesWhere(where: SQL): Promise<void> {
   await db.transaction(async (tx) => {
     await withMoneyOverride(tx, REASON);
     await tx.delete(clientInvoices).where(where);
@@ -48,7 +51,12 @@ export async function deleteFuelRecordsByVehiclesRaw(
     await client.query(`DELETE FROM fuel_records WHERE vehicle_id = ANY($1)`, [vehicleIds]);
     await client.query("COMMIT");
   } catch (error) {
-    await client.query("ROLLBACK");
+    // Un ROLLBACK qui échoue ne doit pas masquer l'erreur d'origine : on le journalise et on relance celle-ci.
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      log.error({ err: rollbackError }, "ROLLBACK en échec après une erreur de nettoyage");
+    }
     throw error;
   } finally {
     client.release();
