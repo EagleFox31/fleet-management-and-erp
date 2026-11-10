@@ -3,10 +3,10 @@
  * Un refus exige un motif. Événement : `work_order_updated` (existant).
  */
 import { z } from "zod";
-import { idSchema, isoDateTimeSchema } from "./common";
+import { routeIdSchema, isoDateTimeSchema } from "./common";
 
 export const qualityCheckPath = (id: number) => `/api/work-orders/${id}/quality-check`;
-export const qualityCheckParamsSchema = z.object({ id: idSchema });
+export const qualityCheckParamsSchema = z.object({ id: routeIdSchema });
 
 export const QC_RESULTS = ["passed", "failed"] as const;
 export type QcResult = (typeof QC_RESULTS)[number];
