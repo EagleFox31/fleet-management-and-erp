@@ -14,3 +14,10 @@
 **Pourquoi.** La restauration de 3b était invisible : `useAuth` restait en `isLoading` sans utilisateur. Un chauffeur sans réseau doit relire sa mission, sans pouvoir écrire au nom d'un compte que le serveur n'a pas confirmé.
 
 **Tester.** `tests/unit/client/auth-bootstrap.test.ts` (grant sans voile, /me, 401, échéance), `session-resume-offline.test.ts` (grant seulement si restauré), `offline-resume-storage.test.ts` (propriétaire du cache), `driver-dashboard-read-only.test.ts` (parcours générique des boutons actifs), `offline-resume-banner.test.ts`. e2e : `e2e/21-driver-offline-resume.spec.ts` (voir l'entrée suivante).
+
+## Risque d'horloge assumé (reliquat 4 de #671)
+
+- Quoi : la borne de 72 h de la reprise hors ligne se mesure en heure de l'appareil. Reculer l'horloge, ou la ramener à chaque démarrage à moins de 5 minutes de `maxSeenAt`, prolonge la lecture au-delà de 72 h réelles.
+- Pourquoi : hors ligne il n'existe aucune heure de confiance. Risque assumé : la lecture ne donne que la copie locale du compte, et `/api/auth/me` (cookie) revalide au retour du réseau.
+- Comment : commentaire de `CLOCK_SKEW_MS` dans `client/src/lib/offline-resume.ts` corrigé ; le comportement est figé par un test.
+- Tester : `node node_modules/vitest/vitest.mjs run tests/unit/client/offline-resume.test.ts` (cas « risque assumé »).

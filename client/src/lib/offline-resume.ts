@@ -30,10 +30,13 @@ export const RESUME_REVOKED_KEY = "fleetos-offline-resume-revoked";
 /** Même durée que la copie de lecture du chauffeur (`DRIVER_CACHE_MAX_AGE_MS`). */
 export const RESUME_TTL_MS = 72 * 60 * 60 * 1000;
 /**
- * Recul d'horloge toléré. `maxSeenAt` ne fait que monter (dernier contact réseau ou dernière lecture
+ * Recul d'horloge toléré. La borne de 72 h se mesure en HEURE DE L'APPAREIL : hors ligne il n'existe
+ * aucune heure de confiance. `maxSeenAt` ne fait que monter (dernier contact réseau ou dernière lecture
  * hors ligne) : une heure plus de 5 minutes en arrière de cette valeur trahit une horloge reculée,
- * marqueur refusé. Risque résiduel : aucune heure de confiance hors ligne, donc un recul avant la
- * première lecture hors ligne qui suit le dernier contact reste invisible (borné par les 72 h).
+ * marqueur refusé. Risque ASSUMÉ : une horloge reculée avant la première lecture hors ligne, ou figée /
+ * ramenée à chaque démarrage à moins de 5 minutes de `maxSeenAt`, reste invisible et prolonge la lecture
+ * au-delà de 72 h réelles. Le cookie et `/api/auth/me` restent la seule preuve au retour du réseau, et la
+ * lecture ne donne que la copie locale du compte (jamais d'écriture). Voir docs/journal/fe-v5b-3c.md.
  */
 const CLOCK_SKEW_MS = 5 * 60 * 1000;
 
