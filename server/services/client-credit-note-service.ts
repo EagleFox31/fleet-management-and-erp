@@ -2,7 +2,12 @@ import { and, asc, eq } from "drizzle-orm";
 import { db } from "../db";
 import { clientCreditNotes, clientInvoices, type ClientCreditNote } from "@shared/schema";
 import { statusAfterBalanceChange } from "@shared/constants/client-invoices";
-import type { CreateClientCreditNoteInput, CreateClientCreditNoteResult } from "@shared/contracts/client-credit-notes";
+import {
+  CREDIT_NOTE_KEY_CONFLICT_MESSAGE,
+  CREDIT_NOTE_KEY_OTHER_INVOICE_MESSAGE,
+  type CreateClientCreditNoteInput,
+  type CreateClientCreditNoteResult,
+} from "@shared/contracts/client-credit-notes";
 import { AppError } from "../lib/app-error";
 import { moduleLogger } from "../lib/logger";
 import { pgConstraintOf } from "../lib/pg-errors";
@@ -77,12 +82,12 @@ async function createCreditNoteOnce(
       .limit(1);
     if (same) {
       if (same.invoiceId !== invoiceId) {
-        throw new AppError(409, "Cette clé de requête est déjà utilisée pour un avoir sur une autre facture.");
+        throw new AppError(409, CREDIT_NOTE_KEY_OTHER_INVOICE_MESSAGE);
       }
       // Rejeu identique seulement : même montant HT et même motif. Sinon la clé est déjà prise par un autre avoir.
       const sameAmount = toCents(same.amountHT) === toCents(input.amountHt);
       if (!sameAmount || same.reason !== input.reason) {
-        throw new AppError(409, "Cette clé de requête est déjà utilisée pour un avoir de montant ou de motif différent.");
+        throw new AppError(409, CREDIT_NOTE_KEY_CONFLICT_MESSAGE);
       }
       return {
         creditNote: toDto(same),
