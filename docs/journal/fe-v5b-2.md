@@ -14,3 +14,13 @@
 - Comment : summarizeQueued dans offline-user-scope.ts, utilisé par purgeAll et purgeOthers.
 - Pourquoi : la cloison prime, mais une perte d envois ne doit être ni silencieuse ni exposer de contenu.
 - Tester : offline-storage-scope.test.ts, test changement de compte (règle S1) : file détruite, trace avec nombre et types, ni charge utile, ni e-mail, ni identifiant.
+
+## 2026-11-10 17:30 - V5b-2b : propriétaire par envoi et routes protégées
+
+**Quoi.** En-tête `X-Offline-Owner` à chaque envoi, garde serveur 409 `OFFLINE_OWNER_MISMATCH`, `session-changed` entre onglets, routes protégées en source partagée, refus de rejeu hors motif, mineurs de la revue (plafond 409, rétention, clé, délai, `/api/`, compteur, purge des bases).
+
+**Comment.** Voir `docs/qa/journal/2026-11-10T1730-v5b-2b-proprietaire-et-routes.md`.
+
+**Pourquoi.** Réserves de la revue sécurité de #645 : cookie partagé entre onglets, registre qui rejouait des routes non protégées.
+
+**Tester.** Tests unitaires `tests/unit/client/offline-*.test.ts` ; contrat `tests/contract/offline-owner-guard.contract.test.ts` sous verrou.

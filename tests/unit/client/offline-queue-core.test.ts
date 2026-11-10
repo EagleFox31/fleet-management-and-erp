@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   backoffDelay,
+  MAX_ENTRY_AGE_MS,
+  MAX_IN_PROGRESS_HITS,
   classifyOutcome,
   createOfflineQueue,
   discardSendsLabel,
@@ -13,7 +15,7 @@ import {
 } from "@/lib/offline-queue-core";
 import { LEASE_KEY_PREFIX, createLockProvider, type LockManagerLike } from "@/lib/offline-locks";
 
-const DEFINITION = { type: "fuel_entry", label: "Plein", method: "POST" as const, endpoint: () => "/api/x" };
+const DEFINITION = { type: "fuel_entry", label: "Plein", method: "POST" as const, endpoint: () => "/api/x", routeExample: "/api/x" };
 
 function harness(options: { active?: number | null; owner?: OwnerCheck; initial?: unknown[] } = {}) {
   let active: number | null = options.active === undefined ? 7 : options.active;
@@ -22,7 +24,7 @@ function harness(options: { active?: number | null; owner?: OwnerCheck; initial?
   const epochs = new Map<number, number>();
   const sent: Array<{ id: string; key: string }> = [];
   const script: SendOutcome[] = [];
-  const hooks: { beforeSend?: () => void } = {};
+  const hooks: { beforeSend?: () => void; replayable?: (e: QueueEntry) => boolean } = {};
   let uuidCounter = 0;
   let clock = 1_000_000;
   const onDrained = vi.fn();
@@ -57,6 +59,7 @@ function harness(options: { active?: number | null; owner?: OwnerCheck; initial?
       }
     },
     getDefinition: (type) => (type === "fuel_entry" ? DEFINITION : undefined),
+    isAutoReplayable: (entry) => hooks.replayable?.(entry) ?? true,
     invalidateFor,
     onDrained,
     onAuthStopped,
@@ -99,6 +102,7 @@ describe("classifyOutcome", () => {
     [fail(400), "rejected"],
     [fail(403), "rejected"],
     [fail(409, "OTHER"), "rejected"],
+    [fail(409, "OFFLINE_OWNER_MISMATCH"), "auth"],
     [fail(422), "rejected"],
   ];
   it.each(cases)("classe %j en %s", (outcome, expected) => {
@@ -157,6 +161,85 @@ describe("file d'écritures différées", () => {
     h.script.push(fail(409, "IDEMPOTENCY_IN_PROGRESS", "En cours"));
     expect(await h.queue.replay()).toMatchObject({ status: "stopped", reason: "retry" });
     expect(entries(h)[0].state).toBe("pending");
+  });
+
+  it("409 en cours sans fin : plafonné, puis À revoir avec un message lisible", async () => {
+    const h = harness();
+    await h.queue.enqueue({ type: "fuel_entry", payload: {} });
+    for (let i = 0; i < MAX_IN_PROGRESS_HITS - 1; i++) {
+      h.script.push(fail(409, "IDEMPOTENCY_IN_PROGRESS", "En cours"));
+      expect(await h.queue.replay({ ignoreBackoff: true })).toMatchObject({ status: "stopped", reason: "retry" });
+    }
+    expect(entries(h)[0]).toMatchObject({ state: "pending", inProgressHits: MAX_IN_PROGRESS_HITS - 1 });
+    h.script.push(fail(409, "IDEMPOTENCY_IN_PROGRESS", "En cours"));
+    const last = await h.queue.replay({ ignoreBackoff: true });
+    expect(last).toMatchObject({ rejected: 1 });
+    expect(entries(h)[0]).toMatchObject({ state: "rejected" });
+    expect(entries(h)[0].lastError).toMatch(/Vérifiez/);
+    expect(entries(h)[0].lastError).not.toMatch(/409|IDEMPOTENCY/);
+  });
+
+  it("route non protégée : jamais envoyée, À revoir, la file continue", async () => {
+    const h = harness();
+    const a = await h.queue.enqueue({ type: "fuel_entry", payload: {} });
+    await h.queue.enqueue({ type: "fuel_entry", payload: {} });
+    h.hooks.replayable = (e) => e.id !== a.id;
+    const result = await h.queue.replay();
+    expect(result).toMatchObject({ status: "drained", sent: 1, rejected: 1 });
+    expect(h.sent.map((x) => x.id)).not.toContain(a.id);
+    expect(entries(h)[0]).toMatchObject({ id: a.id, state: "rejected" });
+    expect(entries(h)[0].lastError).toMatch(/doublon/);
+  });
+
+  it("envoi plus vieux que la rétention serveur moins une marge : À revoir sans envoi", async () => {
+    const h = harness();
+    const old = await h.queue.enqueue({ type: "fuel_entry", payload: {} });
+    h.disk.set(7, [{ ...old, createdAt: old.createdAt - MAX_ENTRY_AGE_MS - 1_000 }]);
+    const result = await h.queue.replay();
+    expect(result).toMatchObject({ rejected: 1, sent: 0 });
+    expect(h.sent).toHaveLength(0);
+    expect(entries(h)[0]).toMatchObject({ state: "rejected" });
+    expect(entries(h)[0].lastError).toMatch(/trop longtemps/);
+  });
+
+  it("clé et route invalides refusées à la mise en file", async () => {
+    const h = harness();
+    await expect(h.queue.enqueue({ type: "fuel_entry", payload: {}, idempotencyKey: "a b" })).rejects.toMatchObject({ reason: "invalid" });
+    await expect(h.queue.enqueue({ type: "fuel_entry", payload: {}, idempotencyKey: "é".repeat(3) })).rejects.toMatchObject({ reason: "invalid" });
+    await expect(h.queue.enqueue({ type: "fuel_entry", payload: {}, idempotencyKey: "x".repeat(256) })).rejects.toMatchObject({ reason: "invalid" });
+    await expect(h.queue.enqueue({ type: "fuel_entry", payload: {}, endpoint: "https://autre.example/api/x" })).rejects.toMatchObject({ reason: "invalid" });
+    await expect(h.queue.enqueue({ type: "fuel_entry", payload: {}, endpoint: "/autre" })).rejects.toMatchObject({ reason: "invalid" });
+    expect(entries(h)).toHaveLength(0);
+    await h.queue.enqueue({ type: "fuel_entry", payload: {}, idempotencyKey: "req-0001_ok" });
+    expect(entries(h)).toHaveLength(1);
+  });
+
+  it("bascule de compte pendant la boucle : aucun envoi après le changement", async () => {
+    const h = harness();
+    await h.queue.enqueue({ type: "fuel_entry", payload: { n: 1 } });
+    await h.queue.enqueue({ type: "fuel_entry", payload: { n: 2 } });
+    await h.queue.enqueue({ type: "fuel_entry", payload: { n: 3 } });
+    // Le premier envoi part sous le compte 7 ; pendant qu'il vole, un autre onglet connecte le compte 9
+    // (message session-changed : cet onglet adopte le compte 9).
+    h.hooks.beforeSend = () => h.setActive(9);
+    const result = await h.queue.replay();
+    expect(result).toMatchObject({ status: "stopped", reason: "session-changed" });
+    expect(h.sent).toHaveLength(1);
+    // Aucun envoi ne suit : 0 après le changement, et les autres restent dans la file du compte 7.
+    h.hooks.beforeSend = undefined;
+    expect(await h.queue.replay()).toMatchObject({ status: "skipped" });
+    expect(h.sent).toHaveLength(1);
+    expect(entries(h).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("409 propriétaire : arrête, garde toute la file, aucun À revoir", async () => {
+    const h = harness();
+    await h.queue.enqueue({ type: "fuel_entry", payload: {} });
+    await h.queue.enqueue({ type: "fuel_entry", payload: {} });
+    h.script.push(fail(409, "OFFLINE_OWNER_MISMATCH", "Autre compte"));
+    expect(await h.queue.replay()).toMatchObject({ status: "stopped", reason: "auth", rejected: 0, remaining: 2 });
+    expect(entries(h).map((e) => e.state)).toEqual(["pending", "pending"]);
+    expect(h.onAuthStopped).toHaveBeenCalledWith(2);
   });
 
   it("Idempotent-Replayed compte comme un envoi abouti", async () => {
