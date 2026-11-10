@@ -3581,3 +3581,20 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
   - `tests/integration/fuel-record-cancel-mission.test.ts`, cas de course solde / annulation : échoue (`deadlock detected`) si le verrou de la mission est retiré ;
   - revue des autres chemins : tous ceux de `mission-budgets-service.ts` (mise à jour, transitions, solde, dépenses) verrouillent la mission (`lockMission`) avant le budget ; aucun chemin inverse trouvé.
 - **Leçon généralisée** : tout service qui touche mission et budget prend les verrous dans le même ordre, mission puis budget, y compris les verrous implicites des triggers. Un verrou conditionnel (requête filtrée) ne verrouille rien quand le filtre est faux : verrouiller d'abord, tester ensuite.
+
+
+## 2026-11-10 — Barre oblique inverse : gardes de `server/api/` sautées, route de `routes.ts` exécutée (suite de #631)
+
+- **Contexte** : la revue sécurité de #631 envoie, en socket brut, `PATCH /api\users/62#x`, `PATCH http://h/api\users/62`, `/api/users\62#` et `/api/users/62\#`. Toutes répondent 200 sans entrée d'audit. En reproduisant, on trouve pire : pour `/api\users/62#x`, la garde du dernier administrateur (`last-admin-guard.routes.ts`) ne s'exécute pas, et `POST /api\maintenance-schedules#` crée un plan d'entretien sur un véhicule retiré (201), alors que `retiredVehicleWriteGuard` répond 409 sur la même requête canonique.
+- **Cause racine** : chaque couche normalise le chemin à sa façon. `parseurl` (Express) convertit `\` en `/` quand la cible porte un `#` ou une forme absolue, et l'app lit `/api/users/62`. Mais un montage (`app.use("/api", apiRouter)`) retire son préfixe de la cible **brute** : apiRouter reçoit `\users/62#x` et lit `//users/62`, où aucune de ses routes ne correspond. Les gardes déclarées dans `server/api/` sont sautées, et la route déclarée sur l'app dans `server/routes.ts` s'exécute. De son côté, l'audit et l'idempotence lisaient `req.originalUrl` brut, une troisième lecture.
+- **Classification** : sécurité, contournement de contrôle d'accès et de traçabilité (dernier admin, véhicule retiré, audit, idempotence). Exploitable par tout compte qui a déjà le droit d'appeler la route.
+- **Résolution** :
+  - `rejectNonCanonicalTarget` (`server/middleware/reject-non-canonical-target.ts`) est monté en tête de `server/app.ts`, avant tout routeur et avant les fichiers statiques. Il répond 400 `NON_CANONICAL_TARGET` si la partie chemin de la cible brute (avant `?`) contient `\`, ou si la cible est en forme absolue. Restent acceptés : `\` dans la query et `%5C`, que `parseurl` ne convertit pas.
+  - En défense en profondeur, l'audit et l'idempotence lisent `routedPath(req)` (`server/lib/routed-path.ts`, soit `req.baseUrl + req.path`, le chemin du routeur) au lieu de `req.originalUrl`. `auditedPath` et `ABSOLUTE_FORM` sont supprimés.
+  - Le cliquet `route-id-parse-hygiene` signale aussi `z.coerce.number()` sur `req.params`, et plus seulement `idSchema`.
+- **Prévention vérifiable** :
+  - `tests/contract/non-canonical-target.contract.test.ts` : vraie app, socket brut, garde dernier admin, véhicule retiré, anonyme et cibles légitimes. 7 cas rouges sans le middleware, dont le 201 sur véhicule retiré.
+  - `tests/unit/server/reject-non-canonical-target.test.ts` couvre le constat de contournement, le refus, les cas légitimes et l'ordre de montage dans `server/app.ts`.
+  - `audit-writes-router.test.ts` et `idempotency-guard.test.ts` jouent les cibles avec barre inverse en socket brut contre une route déclarée sur l'app.
+  - Helper commun : `tests/support/raw-request.ts`.
+- **Leçon généralisée** : la normalisation de chemin diffère entre couches (app, routeur monté, middleware qui lit `originalUrl`). Il faut normaliser ou rejeter **une seule fois, à l'entrée**, avant tout routage. Un contrôle transversal dérive ensuite son chemin du parseur du routeur (`req.baseUrl + req.path`), jamais d'`originalUrl` brut. Une garde déclarée en routeur ne protège une route déclarée ailleurs que si les deux lisent la même cible.
