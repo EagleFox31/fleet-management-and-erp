@@ -47,6 +47,7 @@ const TYPE_BY_CODE: Record<ApiError['code'], ErrorType> = {
   VEHICLE_RETIRED: ErrorType.CONFLICT,
   IDEMPOTENCY_IN_PROGRESS: ErrorType.CONFLICT,
   RATE_LIMITED: ErrorType.CONFLICT,
+  NON_CANONICAL_TARGET: ErrorType.VALIDATION,
   INTERNAL: ErrorType.SERVER,
 };
 

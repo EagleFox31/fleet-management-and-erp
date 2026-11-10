@@ -18,6 +18,8 @@ export type ApiErrorCode =
   /** 409 d'une écriture rejouable dont la même clé d'idempotence est encore en cours : le client réessaie plus tard, avec la même clé. */
   | "IDEMPOTENCY_IN_PROGRESS"
   | "RATE_LIMITED"
+  /** 400 : cible de requête que l'app et un routeur monté liraient différemment (`\` dans le chemin, forme absolue). */
+  | "NON_CANONICAL_TARGET"
   | "INTERNAL";
 
 export type ApiFieldError = { field: string; message: string };
@@ -38,6 +40,7 @@ export const STATUS_MESSAGES: Record<ApiErrorCode, string> = {
   VEHICLE_RETIRED: "Véhicule retiré : le restaurer avant de le modifier.",
   IDEMPOTENCY_IN_PROGRESS: "Cet envoi est déjà en cours de traitement. Réessayez dans un instant.",
   RATE_LIMITED: "Trop de tentatives. Patientez un instant avant de réessayer.",
+  NON_CANONICAL_TARGET: "Adresse de requête invalide.",
   INTERNAL: "Une erreur technique est survenue. Réessayez dans un instant.",
 };
 
