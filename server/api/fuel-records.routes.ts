@@ -8,6 +8,7 @@ import { idParam } from "../lib/route-helpers";
 import { withoutFuelCardBalance } from "../lib/fuel-balance-scope";
 import { presentFuelRecords } from "../lib/fuel-record-scope";
 import { ownerScopeOf } from "../lib/client-scope";
+import { driverMissionIdsOf } from "../lib/driver-scope";
 import { parseQueryId, parseRouteId } from "../lib/route-id";
 import { assertVehicleSubresourcesReadable } from "../lib/vehicle-subresource-guard";
 import { FUEL_CARD_MANAGER_ROLES, FUEL_READ_ROLES } from "@shared/constants/roles";
@@ -65,6 +66,7 @@ router.get("/fuel-records/vehicle/:vehicleId", isAnyUser, async (req, res, next)
           pricePerLiter: record.quantity > 0 ? Number(record.cost) / record.quantity : 0,
           totalCost: Number(record.cost),
         })),
+        await driverMissionIdsOf(req.user),
       ),
     );
   } catch (err) {
@@ -107,7 +109,7 @@ router.get("/fuel-records", isAnyUser, async (req, res, next) => {
       }
       records.sort((a, b) => (b.date ? new Date(b.date).getTime() : 0) - (a.date ? new Date(a.date).getTime() : 0));
     }
-    return res.status(200).json(presentFuelRecords(req.user, records.map(withPrice)));
+    return res.status(200).json(presentFuelRecords(req.user, records.map(withPrice), await driverMissionIdsOf(req.user)));
   } catch (err) {
     if (err instanceof AppError) return next(err);
     return next(withLogContext(new AppError(500, "Erreur serveur", { cause: err }), { event: "lecture des pleins en échec" }));
