@@ -1,4 +1,4 @@
-# Landing : vidéos de démonstration au format cas d'utilisation
+## Landing : vidéos de démonstration au format cas d'utilisation
 
 **Quoi.** Les 7 vidéos de `client/public/demos/` sont remplacées par la version « cas d'utilisation » :
 titre verbe + groupe nominal, acteur, précondition, connexion montrée, tableau de bord décrit point par point,
