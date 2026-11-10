@@ -1,4 +1,4 @@
-import type { Request, RequestHandler, Response } from "express";
+import { Router, type Request, type RequestHandler, type Response } from "express";
 import { eq } from "drizzle-orm";
 import { BOOKING_ACTIVE_STATUSES } from "@shared/contracts/work-order-booking";
 import { workOrders } from "@shared/schema";
@@ -10,6 +10,8 @@ import { isTechnician, isWorkshopManager } from "./auth";
  * Double affectation (P-08, T-23b) : refus 409 avant l'écriture d'un OT dont le technicien ou le
  * véhicule est déjà pris sur le même créneau. Monté sur `/work-orders`, il ne regarde que
  * `POST /` et `PATCH /:id` ; sans session il passe la main (la route répond 401 elle-même).
+ * La correspondance passe par un `Router` Express (`POST /`, `PATCH /:id`), jamais par une regex sur
+ * `req.path` : casse, `%xx` et barre finale sont lus comme par les routes servies (`/%36%32` = `/62`).
  * Le corps est fusionné avec la ligne existante ; un PATCH qui ne change ni ressource, ni créneau,
  * ni statut ne déclenche aucune vérification. Le rôle est contrôlé avant la première lecture en base. Pas d'événement temps réel : un refus n'est pas une transition.
  */
@@ -46,10 +48,10 @@ function passesRoleGuard(guard: RequestHandler, req: Request, res: Response): Pr
   });
 }
 
-export const workOrderBookingGuard: RequestHandler = async (req, res, next) => {
+const guardWrite = (isCreate: boolean): RequestHandler => async (req, res, next) => {
   try {
-    const isCreate = req.method === "POST" && (req.path === "/" || req.path === "");
-    const patchId = req.method === "PATCH" ? /^\/(\d+)\/?$/.exec(req.path)?.[1] : undefined;
+    // Id décodé par Express ; un id non entier est laissé à la route (400 ou 404).
+    const patchId = isCreate ? undefined : /^\d+$/.test(req.params.id ?? "") ? req.params.id : undefined;
     if ((!isCreate && !patchId) || !req.session?.userId) return next();
     // Mêmes rôles que les routes d'écriture (POST : atelier ; PATCH : technicien compris), avant toute lecture.
     if (!(await passesRoleGuard(isCreate ? isWorkshopManager : isTechnician, req, res))) return;
@@ -87,3 +89,10 @@ export const workOrderBookingGuard: RequestHandler = async (req, res, next) => {
     next(error);
   }
 };
+
+const matcher = Router();
+matcher.post("/", guardWrite(true));
+matcher.patch("/:id", guardWrite(false));
+
+// Enveloppé dans une fonction : ces couches ne servent aucune réponse (elles appellent `next()`).
+export const workOrderBookingGuard: RequestHandler = (req, res, next) => matcher(req, res, next);
