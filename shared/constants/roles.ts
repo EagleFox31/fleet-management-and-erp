@@ -111,7 +111,9 @@ export function canManagePartsPurchaseOrders(role: string | null | undefined): b
  * d'atelier qui lit les fiches sans rien écrire (création, modification,
  * évaluation et désactivation restent à PROCUREMENT_ROLES).
  */
-export const SUPPLIER_READ_ROLES = [...PROCUREMENT_ROLES, "workshop_manager"] as const;
+// Le comptable consulte les fournisseurs et les bons de commande (rapprochement facture / BC), sans écrire.
+export const SUPPLIER_READ_ROLES = [...PROCUREMENT_ROLES, "workshop_manager", "accountant"] as const;
+export const PURCHASE_ORDER_READ_ROLES = [...PROCUREMENT_ROLES, "accountant"] as const;
 
 /**
  * Factures fournisseur (`/api/supplier-invoices`, écrans `/procurement/invoices*`) : les profils
@@ -121,6 +123,14 @@ export const SUPPLIER_READ_ROLES = [...PROCUREMENT_ROLES, "workshop_manager"] as
 export const SUPPLIER_INVOICE_READ_ROLES = [...PROCUREMENT_ROLES, "accountant"] as const satisfies readonly AppRole[];
 /** Approbation et règlement d'une facture fournisseur : qui tient la caisse. Additif : la secrétaire garde ses droits. */
 export const SUPPLIER_INVOICE_PAYMENT_ROLES = ["admin", "secretary", "accountant"] as const satisfies readonly AppRole[];
+// Création / import d'une facture fournisseur : mêmes rôles que le règlement (pas de séparation des tâches, voir backlog).
+export const SUPPLIER_INVOICE_CREATE_ROLES = SUPPLIER_INVOICE_PAYMENT_ROLES;
+/** Validation selon le périmètre de la facture : pièces (magasin), hors pièces (logistique), mixte. */
+export const SUPPLIER_INVOICE_VALIDATION_ROLES_BY_SCOPE = {
+  parts: ["admin", "warehouse"],
+  non_parts: ["admin", "secretary", "accountant", "logistics"],
+  mixed: ["admin", "secretary", "accountant"],
+} as const satisfies Record<string, readonly AppRole[]>;
 
 export function canAccessProcurement(role: string | null | undefined): boolean {
   return PROCUREMENT_ROLES.includes(String(role ?? "") as ProcurementRole);
@@ -205,8 +215,8 @@ export const PENDING_INVOICE_ROLES = ["admin", "management", "secretary", "accou
 export const MISSION_BUDGET_WRITE_ROLES = ["admin", "logistics"] as const satisfies readonly AppRole[];
 export const MISSION_BUDGET_APPROVE_ROLES = ["admin", "management"] as const satisfies readonly AppRole[];
 /**
- * Décaissement et choix du compte source (L1c) : alignés sur FUEL_RECHARGE_SOURCE_ROLES, mais déclarés
- * à part pour qu'un changement côté carburant ne les déplace pas. Qui approuve ne décaisse pas.
+ * Décaissement et choix du compte source (L1c) : le comptable décaisse sans recharger la carte carburant
+ * (FUEL_RECHARGE_SOURCE_ROLES ne l'inclut pas) ; les deux groupes sont déclarés à part. Qui approuve ne décaisse pas.
  */
 export const MISSION_BUDGET_DISBURSE_ROLES = ["admin", "secretary", "accountant", "logistics"] as const satisfies readonly AppRole[];
 /** Lecture (liste, détail, besoin du jour, destinations) : qui saisit, approuve ou décaisse lit le budget. */
@@ -279,6 +289,8 @@ export const VEHICLE_RESTRICTED_PATCH_FIELDS: Readonly<Record<string, readonly s
  * mouvementé la carte : le service de suppression relit cette liste sous verrou.
  */
 export const FUEL_CARD_MANAGER_ROLES = ["admin", "logistics", "secretary"] as const satisfies readonly AppRole[];
+// Solde et historique de la carte en consultation : les gestionnaires plus le comptable, qui ne recharge pas.
+export const FUEL_CARD_VIEWER_ROLES = [...FUEL_CARD_MANAGER_ROLES, "accountant"] as const satisfies readonly AppRole[];
 
 /** Saisie de la capacité des réservoirs : tous les rôles du PATCH véhicule. */
 export function canEditTankCapacity(role: string | null | undefined): boolean {
@@ -342,6 +354,12 @@ export function canReadTechnicianReport(role: string | null | undefined): boolea
  * Lu par `isStaff` (server/middleware/auth.ts) et par les écrans qui en dépendent.
  */
 export const STAFF_ROLES: readonly AppRole[] = ALL_APP_ROLES.filter((role) => role !== "client");
+/**
+ * Saisie d'exploitation sur un véhicule (kilométrage, position de maintenance, incident) : le
+ * personnel moins le comptable, qui consulte sans saisir. `isStaff` ne suffit pas : il s'ouvre
+ * à tout nouveau rôle du personnel sans que le diff le montre.
+ */
+export const VEHICLE_OPERATION_WRITE_ROLES: readonly AppRole[] = STAFF_ROLES.filter((role) => role !== "accountant");
 
 /**
  * Coût d'un OT (taux horaire servi par `GET /api/work-orders/:id/labor-rate`) : le personnel

@@ -218,7 +218,7 @@ const userProfiles = [
     color: "text-success",
     bgColor: "bg-success/10",
     description: "Règlements, trésorerie et suivi des encaissements",
-    permissions: ["Factures fournisseurs", "Facturation client", "Trésorerie & traites", "Suivi carte carburant"],
+    permissions: ["Factures fournisseurs", "Facturation client", "Trésorerie & traites", "Carte carburant (consultation)"],
   },
   {
     id: "client",

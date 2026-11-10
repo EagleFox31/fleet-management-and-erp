@@ -8,7 +8,7 @@ import { startContractSession } from "../support/contract-session";
  * retire rien.
  */
 
-process.env.FEATURE_FLAGS = "finance=on,pending-invoices=on";
+process.env.FEATURE_FLAGS = "finance=on,pending-invoices=on,incidents=on";
 
 type Actor = "accountant" | "secretary";
 let session: Awaited<ReturnType<typeof startContractSession<Actor>>>;
@@ -29,6 +29,11 @@ const WRITE_ROUTES: Array<[string, string, Record<string, unknown>]> = [
   ["POST", "/api/vehicles", { plate: "CPT-0001", type: "camion" }],
   ["POST", "/api/drivers", { firstName: "A", lastName: "B" }],
   ["POST", "/api/fuel-card/recharge", { amount: 1000, unitPrice: 800, date: "2037-01-01", paymentMode: "virement" }],
+  // isStaff ouvrait ces saisies d'exploitation au comptable : garde isVehicleOperationWriter.
+  ["PUT", "/api/vehicles/1/mileage", { mileage: 1 }],
+  ["PUT", "/api/vehicles/1/maintenance-position", { maintenancePosition: "atelier" }],
+  ["POST", "/api/vehicles/1/mileage/sync", {}],
+  ["POST", "/api/incidents", { vehicleId: 1, type: "panne", description: "Incident comptable" }],
 ];
 
 describe("comptable : écritures opérationnelles refusées", { timeout: 120000 }, () => {

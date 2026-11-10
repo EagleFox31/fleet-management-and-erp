@@ -225,7 +225,15 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
     ),
     suppliersRoutes,
   );
-  apiRouter.use("/purchase-orders", gardeApprovisionnement, purchaseOrdersRoutes);
+  // Bons de commande : le comptable consulte (GET), il n'en crée ni n'en modifie.
+  const gardeLectureBonsCommande = authorize([...PURCHASE_ORDER_READ_ROLES]);
+  apiRouter.use(
+    "/purchase-orders",
+    sessionGuard((req: Request, res: Response, next: NextFunction) =>
+      (req.method === "GET" || req.method === "HEAD" ? gardeLectureBonsCommande : gardeApprovisionnement)(req, res, next),
+    ),
+    purchaseOrdersRoutes,
+  );
   // Factures fournisseur : les profils d'approvisionnement plus le comptable (règlements).
   apiRouter.use("/supplier-invoices", authorize([...SUPPLIER_INVOICE_READ_ROLES]), supplierInvoicesRoutes);
   // Double affectation (T-23b) : avant tout routeur /work-orders, y compris les historiques.
@@ -364,7 +372,7 @@ export function createApiRouter(sessionMiddleware: RequestHandler): Router {
 import { sessionMiddleware } from "../middleware/session";
 import { authenticate, authorize, isAdmin, sessionGuard, isStaff, isTechnician, isWorkshopManager } from "../middleware/auth";
 import { exportsGuard } from "../middleware/exports-guard";
-import {
+import { PURCHASE_ORDER_READ_ROLES,
   GPS_VIEW_ROLES,
   IMPORT_INTERVENTION_ROLES,
   MAINTENANCE_REPORT_ROLES,

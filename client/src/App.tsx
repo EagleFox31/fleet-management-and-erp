@@ -73,7 +73,7 @@ import UsersIndex from "@/pages/users/index";
 import AdminUsersPage from "@/pages/admin/users";
 import RetiredVehiclesPage from "@/pages/admin/retired-vehicles";
 import DocumentationPage from "@/pages/admin/documentation";
-import {
+import { SUPPLIER_READ_ROLES,
   DRIVER_MANAGER_ROLES,
   FUEL_READ_ROLES,
   MISSION_MANAGER_ROLES,
@@ -598,7 +598,7 @@ function App() {
             {/* Procurement routes */}
             <Route path="/procurement/suppliers">
               <AppLayout>
-                <RoleRoute component={SuppliersListPage} allowedRoles={PROCUREMENT_ROLES} />
+                <RoleRoute component={SuppliersListPage} allowedRoles={SUPPLIER_READ_ROLES} />
               </AppLayout>
             </Route>
             
@@ -619,7 +619,7 @@ function App() {
             <Route path="/procurement/suppliers/:id">
               {(params) => (
                 <AppLayout>
-                  <RoleRoute component={SupplierDetailsPage} params={params} allowedRoles={PROCUREMENT_ROLES} />
+                  <RoleRoute component={SupplierDetailsPage} params={params} allowedRoles={SUPPLIER_READ_ROLES} />
                 </AppLayout>
               )}
             </Route>

@@ -10,12 +10,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { formatPrice } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import { SUPPLIER_INVOICE_CREATE_ROLES } from "@shared/constants/roles";
 import { useFormDraft } from "@/hooks/use-form-draft";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { FormDraftBadge, FormDraftDiscardButton } from "@/components/form-draft/form-draft-indicator";
@@ -51,7 +53,7 @@ export default function NewSupplierInvoicePage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const { user } = useAuth();
-  const canCreateInvoice = ["admin", "secretary", "accountant"].includes(user?.role || "");
+  const canCreateInvoice = (SUPPLIER_INVOICE_CREATE_ROLES as readonly string[]).includes(user?.role || "");
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -69,13 +71,13 @@ export default function NewSupplierInvoicePage() {
   });
 
   // Charger les fournisseurs actifs
-  const { data: suppliers = [], isLoading: suppliersLoading } = useQuery<Supplier[]>({
+  const { data: suppliers = [], isLoading: suppliersLoading, error: suppliersError, refetch: refetchSuppliers, isFetching: suppliersFetching } = useQuery<Supplier[]>({
     queryKey: ["/api/suppliers", { isActive: true }],
   });
 
   // Charger les commandes d'achat du fournisseur sélectionné
   const selectedSupplierId = form.watch("supplierId");
-  const { data: purchaseOrders = [] } = useQuery<PurchaseOrder[]>({
+  const { data: purchaseOrders = [], error: purchaseOrdersError, refetch: refetchPurchaseOrders, isFetching: purchaseOrdersFetching } = useQuery<PurchaseOrder[]>({
     queryKey: ["/api/purchase-orders", { supplierId: selectedSupplierId }],
     enabled: !!selectedSupplierId,
   });
@@ -257,6 +259,15 @@ export default function NewSupplierInvoicePage() {
                           form.setValue("purchaseOrderId", undefined);
                         }}
                       >
+                        {suppliersError ? (
+                          <InlineQueryError
+                            error={suppliersError}
+                            fallback="La liste des fournisseurs est momentanément indisponible."
+                            onRetry={() => void refetchSuppliers()}
+                            isRetrying={suppliersFetching}
+                            data-testid="suppliers-error"
+                          />
+                        ) : null}
                         <FormControl>
                           <SelectTrigger data-testid="select-supplier">
                             <SelectValue placeholder="Sélectionner un fournisseur" />
@@ -287,6 +298,15 @@ export default function NewSupplierInvoicePage() {
                         onValueChange={(value) => field.onChange(value === "none" ? undefined : parseInt(value))}
                         disabled={!selectedSupplierId}
                       >
+                        {purchaseOrdersError ? (
+                          <InlineQueryError
+                            error={purchaseOrdersError}
+                            fallback="Les commandes de ce fournisseur sont momentanément indisponibles."
+                            onRetry={() => void refetchPurchaseOrders()}
+                            isRetrying={purchaseOrdersFetching}
+                            data-testid="purchase-orders-error"
+                          />
+                        ) : null}
                         <FormControl>
                           <SelectTrigger data-testid="select-purchase-order">
                             <SelectValue placeholder="Sélectionner une commande" />

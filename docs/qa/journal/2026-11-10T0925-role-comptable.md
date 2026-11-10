@@ -6,6 +6,6 @@
 
 **Pourquoi** : séparer la tenue des comptes de l'exploitation. Le comptable ne crée ni ordre de travail, ni mission, ni commande, ni véhicule, ni recharge de la carte carburant.
 
-**Preuve** : `npm run check` et `check:tests` à 0 erreur ; tests unitaires `accountant-role` ; contrat `accountant-role-guards` (403 sur sept écritures opérationnelles, 200 sur les lectures finance) ; contrat `billing-revenue-by-client` mis à jour.
+**Preuve** : `npm run check` et `check:tests` à 0 erreur ; tests unitaires `accountant-role` ; contrat `accountant-role-guards` (403 sur onze écritures opérationnelles dont kilométrage, position de maintenance, synchro km et incident, 200 sur les lectures finance) ; contrat `billing-revenue-by-client` mis à jour.
 
-**Non appliqué (options)** : séparation stricte des tâches (retirer le règlement au secrétariat) ; recharge de la carte carburant par le comptable. Aucun compte comptable dans le seed. Aucune vidéo de démo.
+**Non appliqué (options)** : séparation stricte des tâches (retirer le règlement au secrétariat) ; séparation des tâches sur la facture fournisseur (le même comptable crée, valide, approuve et règle une facture sans bon de commande, comme le secrétariat aujourd'hui) — backlog métier 0a ; recharge de la carte carburant par le comptable. Aucun compte comptable dans le seed. Aucune vidéo de démo.

@@ -8,7 +8,7 @@ import { AppError } from "../lib/app-error";
 import { withLogContext } from "../lib/error-log-context";
 import { storage } from "../storage";
 import { supplierManagementService } from "../services/supplier-management-service";
-import { SUPPLIER_INVOICE_PAYMENT_ROLES, SUPPLIER_INVOICE_READ_ROLES } from "@shared/constants/roles";
+import { SUPPLIER_INVOICE_VALIDATION_ROLES_BY_SCOPE, SUPPLIER_INVOICE_CREATE_ROLES, SUPPLIER_INVOICE_PAYMENT_ROLES, SUPPLIER_INVOICE_READ_ROLES } from "@shared/constants/roles";
 import multer from "multer";
 import * as XLSX from "xlsx";
 import fs from "fs";
@@ -44,7 +44,7 @@ type UserRole = "admin" | "secretary" | "warehouse" | "logistics" | "workshop_ma
 
 // Aligné sur la garde de montage (SUPPLIER_INVOICE_READ_ROLES) : le chef d'atelier ne voit pas les factures fournisseur.
 const INVOICE_READ_ROLES: readonly UserRole[] = SUPPLIER_INVOICE_READ_ROLES;
-const INVOICE_CREATE_ROLES: readonly UserRole[] = ["admin", "secretary", "accountant"];
+const INVOICE_CREATE_ROLES: readonly UserRole[] = SUPPLIER_INVOICE_CREATE_ROLES;
 const INVOICE_APPROVAL_ROLES: readonly UserRole[] = SUPPLIER_INVOICE_PAYMENT_ROLES;
 const INVOICE_PAYMENT_ROLES: readonly UserRole[] = SUPPLIER_INVOICE_PAYMENT_ROLES;
 const INVOICE_AUTO_APPROVE_ROLES: readonly UserRole[] = ["admin"];
@@ -125,9 +125,9 @@ const checkRolePermission = (
 
 const getValidationRolesByScope = (scope: InvoiceWorkflowScope): readonly UserRole[] => {
   // Pas de chef d'atelier : la garde de montage (SUPPLIER_INVOICE_READ_ROLES) le refuse avant.
-  if (scope === "parts") return ["admin", "warehouse"];
-  if (scope === "non_parts") return ["admin", "secretary", "accountant", "logistics"];
-  return ["admin", "secretary", "accountant"];
+  if (scope === "parts") return SUPPLIER_INVOICE_VALIDATION_ROLES_BY_SCOPE.parts;
+  if (scope === "non_parts") return SUPPLIER_INVOICE_VALIDATION_ROLES_BY_SCOPE.non_parts;
+  return SUPPLIER_INVOICE_VALIDATION_ROLES_BY_SCOPE.mixed;
 };
 
 /**

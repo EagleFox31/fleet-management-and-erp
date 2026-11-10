@@ -22,6 +22,7 @@ import { ImportExcelDialog } from "@/components/procurement/import-excel-dialog"
 import { ProcurementTutorialModal } from "@/components/procurement/procurement-tutorial-modal";
 import { formatPrice } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import { SUPPLIER_INVOICE_CREATE_ROLES } from "@shared/constants/roles";
 import { userMessageOf } from "@/lib/api-error";
 import { UNAVAILABLE } from "@/components/dashboard/kpi-tiles";
 
@@ -91,7 +92,7 @@ export default function SupplierInvoicesListPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
-  const canCreateOrImport = ["admin", "secretary", "accountant"].includes(user?.role || "");
+  const canCreateOrImport = (SUPPLIER_INVOICE_CREATE_ROLES as readonly string[]).includes(user?.role || "");
 
   const { data: rawInvoicesData, isLoading, error: listError } = useQuery<SupplierInvoice[]>({
     queryKey: ["/api/supplier-invoices", { status: statusFilter }],

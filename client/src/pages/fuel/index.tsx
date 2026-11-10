@@ -16,7 +16,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { ALL_VEHICLES_UNREADABLE, useAllVehicles } from "@/hooks/use-all-vehicles";
 import { InlineQueryError } from "@/components/ui/inline-query-error";
 import { canDeleteFuelRecord } from "@shared/constants/fuel-record-delete";
-import { FUEL_CARD_MANAGER_ROLES, FUEL_RECHARGE_SOURCE_ROLES } from "@shared/constants/roles";
+import { FUEL_CARD_MANAGER_ROLES, FUEL_CARD_VIEWER_ROLES, FUEL_RECHARGE_SOURCE_ROLES } from "@shared/constants/roles";
 import type { FuelRechargeSourceAccount } from "@shared/contracts/treasury";
 import { useSingleFlightMutate } from "@/hooks/use-single-flight";
 import { useToast } from "@/hooks/use-toast";
@@ -105,6 +105,8 @@ export default function FuelPage() {
     sourceAccountId: NO_SOURCE_ACCOUNT,
   });
   const canManageFuelCard = (FUEL_CARD_MANAGER_ROLES as readonly string[]).includes(String(user?.role || ""));
+  // Solde et historique : les gestionnaires plus le comptable ; la recharge reste à canManageFuelCard.
+  const canViewFuelCard = (FUEL_CARD_VIEWER_ROLES as readonly string[]).includes(String(user?.role || ""));
   // Prix manuel : retiré seulement si le drapeau fuel-prices impose le prix du jour (hors admin et logistique).
   const fuelPricesEnabled = useFeature("fuel-prices");
   const canEditFuelPrice = !isFuelPriceImposed(user?.role, fuelPricesEnabled);
@@ -137,14 +139,14 @@ export default function FuelPage() {
 
   const { data: fuelCardBalance, error: fuelCardBalanceError } = useQuery<any>({
     queryKey: ["/api/fuel-card/balance"],
-    enabled: canManageFuelCard,
+    enabled: canViewFuelCard,
     retry: false,
   });
   const fuelCardFailed = fuelCardBalance === undefined && !!fuelCardBalanceError;
 
   const { data: fuelCardRechargeHistoryData, isLoading: isLoadingRechargeHistory } = useQuery<FuelCardHistoryRecord[]>({
     queryKey: ["/api/fuel-card/history", { type: "credit" }],
-    enabled: canManageFuelCard,
+    enabled: canViewFuelCard,
     retry: false,
   });
   const fuelCardRechargeHistory = fuelCardRechargeHistoryData || [];
@@ -649,7 +651,7 @@ export default function FuelPage() {
         testId: "tab-fuel-consumption",
       },
     ];
-    if (canManageFuelCard) {
+    if (canViewFuelCard) {
       tabs.push({
         value: "recharges",
         label: "Historique carte",
@@ -658,7 +660,7 @@ export default function FuelPage() {
       });
     }
     return tabs;
-  }, [canManageFuelCard]);
+  }, [canViewFuelCard]);
 
   const fuelSearchPlaceholder =
     activeTab === "recharges"
@@ -702,7 +704,7 @@ export default function FuelPage() {
           }
         >
           <KpiGrid columns={4}>
-            {canManageFuelCard && (
+            {canViewFuelCard && (
               <KpiTile
                 label="Solde carte carburant"
                 value={fuelCardFailed ? UNAVAILABLE : formatCurrency(Number(fuelCardBalance?.balance || 0))}
@@ -746,7 +748,7 @@ export default function FuelPage() {
               icon={<Wallet className="h-4 w-4" />}
               iconWrapperClassName="bg-amber-50 text-amber-600"
             />
-            {!canManageFuelCard && (
+            {!canViewFuelCard && (
               <KpiTile
                 label="Véhicules suivis"
                 value={fuelRecordsFailed ? UNAVAILABLE : vehiclesCovered}
@@ -855,7 +857,7 @@ export default function FuelPage() {
                 />
               </TabsContent>
 
-              {canManageFuelCard && (
+              {canViewFuelCard && (
                 <TabsContent value="recharges" className="mt-0">
                   <PremiumDataTable
                     columns={rechargeColumns}
