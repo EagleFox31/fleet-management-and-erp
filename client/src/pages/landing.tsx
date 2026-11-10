@@ -253,7 +253,7 @@ const userProfiles = [
 // Matrice des permissions granulaire par profil
 const permissionsMatrix: Record<string, Record<string, boolean>> = {
   "Gestion véhicules & flotte": { admin: true, workshop_manager: true, technician: false, secretary: true, accountant: false, logistics: true, warehouse: false, viewer: true, management: true, client: false, driver: false },
-  "Maintenance & Ordres de Travail": { admin: true, workshop_manager: true, technician: true, secretary: false, accountant: false, logistics: false, warehouse: false, viewer: false, management: true, client: false, driver: false },
+  "Maintenance & Ordres de Travail": { admin: true, workshop_manager: true, technician: true, secretary: false, accountant: false, logistics: false, warehouse: false, viewer: true, management: true, client: false, driver: false },
   "Stock & Pièces détachées": { admin: true, workshop_manager: true, technician: true, secretary: true, accountant: false, logistics: false, warehouse: true, viewer: false, management: false, client: false, driver: false },
   "Pneumatiques (Stock & Montage)": { admin: true, workshop_manager: true, technician: true, secretary: false, accountant: false, logistics: false, warehouse: true, viewer: false, management: false, client: false, driver: false },
   "Commandes & Fournisseurs": { admin: true, workshop_manager: true, technician: false, secretary: true, accountant: true, logistics: true, warehouse: true, viewer: false, management: false, client: false, driver: false },
@@ -1312,7 +1312,7 @@ export default function LandingPage() {
               </span>
             </h2>
             <p className="text-slate-400 text-base md:text-lg mb-4 leading-relaxed">
-              Des accès sur mesure et une séparation rigoureuse des responsabilités pour les 9 rôles clés de votre organisation.
+              Des accès sur mesure et une séparation rigoureuse des responsabilités pour les 11 rôles clés de votre organisation.
             </p>
             <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-xs text-slate-300">
               <Info className="h-3.5 w-3.5 text-emerald-400" />
@@ -1503,7 +1503,7 @@ export default function LandingPage() {
                 </Button>
               </Link>
               <Button size="lg" variant="outline" className="rounded-full h-12 sm:h-13 px-7 text-sm sm:text-base font-medium text-white border-white/20 bg-white/5 hover:bg-white/10 hover:border-white/30 backdrop-blur-md transition-all duration-200 active:scale-[0.98] min-w-[200px]" asChild>
-                <a href="#profiles">Explorer les 9 rôles</a>
+                <a href="#profiles">Explorer les 11 rôles</a>
               </Button>
             </div>
 

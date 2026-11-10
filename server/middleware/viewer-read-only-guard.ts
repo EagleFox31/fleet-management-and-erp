@@ -17,14 +17,16 @@ export const VIEWER_READ_ONLY_MESSAGE = "Accès refusé : ce profil est en lectu
  * Sans session, la route répond elle-même (401), comme avant. Une erreur de base remonte (500),
  * elle ne laisse pas passer l'écriture. Le rôle est normalisé (`normalizeRole`) : un rôle stocké
  * « Viewer » ou « lecteur » est staff pour `isStaff`, il doit l'être aussi pour cette garde.
- * `req.user` est réutilisé quand une garde amont l'a déjà chargé.
+ * Le rôle est toujours relu depuis la session (`findActiveSessionUser`), jamais depuis `req.user` :
+ * aucun middleware ne le pose avant cette garde, et un `req.user` posé ailleurs ne garantit pas
+ * qu'il corresponde à `req.session.userId`.
  */
 export const viewerReadOnlyGuard: RequestHandler = async (req, _res, next) => {
   try {
     if (SAFE_METHODS.has(req.method.toUpperCase())) return next();
     if (!req.session?.userId) return next();
     if (matchesAllowedWrite(req.method, req.path)) return next();
-    const role = req.user?.role ?? (await findActiveSessionUser(req.session.userId))?.role;
+    const role = (await findActiveSessionUser(req.session.userId))?.role;
     if (normalizeRole(role) !== "viewer") return next();
     return next(new AppError(403, VIEWER_READ_ONLY_MESSAGE));
   } catch (error) {

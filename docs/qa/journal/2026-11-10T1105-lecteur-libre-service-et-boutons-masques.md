@@ -6,15 +6,28 @@
   préférences de notification, lecture d'une alerte (`PATCH /alerts/:id/read`, filtrée par
   `userId` côté route). `matchesAllowedWrite` compare segment par segment (`:id`).
 - La garde normalise le rôle (`normalizeRole`) : un rôle stocké « Viewer » ou « lecteur » est
-  refusé comme `viewer`. Elle réutilise `req.user` quand une garde amont l'a chargé.
+  refusé comme `viewer`. Le rôle est toujours relu depuis la session : `req.user` n'est pas
+  réutilisé (aucun middleware ne le pose avant la garde, et il ne garantirait pas de correspondre à
+  `req.session.userId`). `normalizeRole` vit désormais dans `shared/constants/roles.ts`
+  (ré-exporté par `server/middleware/auth.ts`) ; `isReadOnlyRole` normalise de la même façon.
 - Client : `isReadOnlyRole(user)` (`client/src/lib/read-only-role.ts`, dérivé de
   `READ_ONLY_ROLES`) masque les exports de Rapports et « Ajouter un OT ». Le toast d'export
-  affiche `userMessageOf(error, …)`. Landing : 11 profils, matrice « Maintenance & OT » alignée
-  sur le menu (faux pour le lecteur).
+  affiche `userMessageOf(error, …)`. Centre d'alertes : « Tout marquer lu » et « Supprimer »
+  masqués au lecteur (refusés par la garde). Landing : 11 profils partout, matrice
+  « Maintenance & OT » à vrai pour le lecteur.
+
+**Décision métier (0a, 2026-11-10)** : le lecteur consulte les coûts des ordres de travail, la
+valorisation du stock et les coûts d'exploitation (consultation de direction). Il ne lit ni les
+données personnelles des chauffeurs (CNI, permis), ni la trésorerie, ni la facturation. Il n'écrit
+rien de métier ; seul le libre-service sur sa propre ligne lui reste ouvert.
 
 **Comment** : contrat sur la pile Express complète, décomptes figés en égalité
-(`EXPECTED = { apiRouter: 143, registerRoutes: 38, horsApi: 0, total: 177 }`), cinq contrats
-libre-service en 200, unitaire de la garde avec `findActiveSessionUser` bouchonné.
+(`EXPECTED = { apiRouter: 143, registerRoutes: 38, horsApi: 0, total: 177 }`), contrats
+libre-service en 200 (étape, mascotte et fin d'accueil, préférences, alerte lue, mot de passe,
+fermeture puis réouverture de session avec le nouveau mot de passe) ; `pin-login` passe la garde et
+c'est la route qui répond 401 (chauffeurs seulement). Unitaire de la garde avec
+`findActiveSessionUser` bouchonné ; unitaire `matchesAllowedWrite` sur les chemins piégés
+(casse, double barre, segment en plus, traversée, point-virgule, autre méthode).
 Rouge montré une fois en court-circuitant la garde localement (non commité) : les 177 routes
 d'écriture répondent 403 « Accès non autorisé » / 404 / 400 au lieu du message de lecture seule.
 

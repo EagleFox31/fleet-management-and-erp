@@ -50,8 +50,9 @@ export function canReadDriverPersonalData(role: string | null | undefined): bool
  */
 export const READ_ONLY_ROLES = ["viewer"] as const satisfies readonly AppRole[];
 
+/** Le rôle est normalisé comme sur le serveur : « Viewer », « lecteur » sont lus comme `viewer`. */
 export function isReadOnlyRole(role: string | null | undefined): boolean {
-  return (READ_ONLY_ROLES as readonly string[]).includes(String(role ?? ""));
+  return (READ_ONLY_ROLES as readonly string[]).includes(normalizeRole(role));
 }
 
 /**
@@ -82,6 +83,43 @@ export function matchesAllowedWrite(method: string, path: string): boolean {
     return pattern.length === target.length && pattern.every((seg, i) => (seg.startsWith(":") ? target[i].length > 0 : seg === target[i]));
   });
 }
+
+/** Alias de saisie ou de stockage d'un rôle (majuscules, français) ramenés au rôle canonique. */
+const ROLE_ALIASES: Record<string, AppRole> = {
+  admin: "admin",
+  administrateur: "admin",
+  workshop_manager: "workshop_manager",
+  gestionnaire_atelier: "workshop_manager",
+  "gestionnaire d'atelier": "workshop_manager",
+  technician: "technician",
+  technicien: "technician",
+  secretary: "secretary",
+  secretaire: "secretary",
+  "secrétaire": "secretary",
+  accountant: "accountant",
+  comptable: "accountant",
+  viewer: "viewer",
+  lecteur: "viewer",
+  logistics: "logistics",
+  logisticien: "logistics",
+  warehouse: "warehouse",
+  magasinier: "warehouse",
+  management: "management",
+  direction: "management",
+  directeur: "management",
+  dg: "management",
+  client: "client",
+  user: "user",
+};
+
+/** Rôle canonique d'une valeur stockée ou saisie ; inconnu → `user`. Partagé serveur / client. */
+export const normalizeRole = (role: string | null | undefined): AppRole => {
+  const normalized = (role || "").trim().toLowerCase();
+  const aliasRole = ROLE_ALIASES[normalized];
+  if (aliasRole) return aliasRole;
+  if ((ALL_APP_ROLES as readonly string[]).includes(normalized)) return normalized as AppRole;
+  return "user";
+};
 
 /**
  * Rôle applicatif — dérivé du schéma, jamais recopié.

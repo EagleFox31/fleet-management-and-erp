@@ -105,9 +105,19 @@ describe("lecteur (viewer) : lecture seule sur toute l'API", { timeout: 180000 }
   });
 
   describe("libre-service sur sa propre ligne", () => {
-    it("avance son parcours d'accueil", async () => {
+    it("avance son parcours d'accueil : étape, mascotte, fin", async () => {
+      const step = await session.call("PATCH", "/api/onboarding/step", { actor: "viewer", body: { currentStep: 1, stepsCompleted: ["welcome"] } });
+      expect(step.status, JSON.stringify(step.body)).toBe(200);
+      const mascot = await session.call("PATCH", "/api/onboarding/mascot", { actor: "viewer", body: { mascotHidden: true } });
+      expect(mascot.status, JSON.stringify(mascot.body)).toBe(200);
       const res = await session.call("PATCH", "/api/onboarding/complete", { actor: "viewer", body: {} });
       expect(res.status).toBe(200);
+    });
+
+    it("la connexion par PIN lui est ouverte par la garde, c'est la route qui la refuse (chauffeurs seulement)", async () => {
+      const res = await session.call("POST", "/api/auth/pin-login", { actor: "viewer", body: { userId: String(session.userId("viewer")), pin: "0000" } });
+      expect(res.status).toBe(401);
+      expect(res.body?.message).not.toBe(VIEWER_READ_ONLY_MESSAGE);
     });
 
     it("règle ses préférences de notification", async () => {
@@ -133,15 +143,17 @@ describe("lecteur (viewer) : lecture seule sur toute l'API", { timeout: 180000 }
     });
   });
 
-  // En dernier : une reconnexion régénère la session, le cookie du harnais devient obsolète.
-  it("rouvre une session sans être refusé alors qu'il est déjà connecté", async () => {
-    const [me] = await db.select({ username: users.username }).from(users).where(eq(users.id, session.userId("viewer")));
-    const res = await session.call("POST", "/api/auth/login", { actor: "viewer", body: { username: me.username, password: `${TEST_USER_PASSWORD}-lecteur-1` } });
-    expect(res.status).toBe(200);
-  });
-
+  // Les deux derniers, dans cet ordre : la fermeture puis la reconnexion rendent le cookie du harnais
+  // obsolète (session détruite, puis régénérée). La reconnexion utilise le mot de passe changé plus haut.
   it("la fermeture de session reste ouverte", async () => {
     const res = await session.call("POST", "/api/auth/logout", { actor: "viewer" });
-    expect(res.status).toBeLessThan(400);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect((await session.call("GET", "/api/vehicles", { actor: "viewer" })).status).toBe(401);
+  });
+
+  it("rouvre une session avec son nouveau mot de passe", async () => {
+    const [me] = await db.select({ username: users.username }).from(users).where(eq(users.id, session.userId("viewer")));
+    const res = await session.call("POST", "/api/auth/login", { actor: "viewer", body: { username: me.username, password: `${TEST_USER_PASSWORD}-lecteur-1` } });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
   });
 });

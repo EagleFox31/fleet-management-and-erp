@@ -63,11 +63,25 @@ describe("rôle lecteur (viewer)", () => {
     expect(roles.matchesAllowedWrite("DELETE", "/alerts/12")).toBe(false);
     expect(roles.matchesAllowedWrite("POST", "/alerts/read-all")).toBe(false);
     expect(roles.matchesAllowedWrite("post", "/auth/logout")).toBe(true);
+    // Cas piégés : casse, double barre, segment en plus, traversée, point-virgule, autre méthode.
+    for (const [method, path] of [
+      ["PATCH", "/Alerts/1/read"],
+      ["PATCH", "//alerts/1/read"],
+      ["PATCH", "/alerts/1/read/x"],
+      ["PATCH", "/alerts/1/read/../x"],
+      ["POST", "/auth/logout;x"],
+      ["PUT", "/alerts/1/read"],
+    ]) {
+      expect(roles.matchesAllowedWrite(method, path), `${method} ${path}`).toBe(false);
+    }
   });
 
   it("est le seul rôle en lecture seule", () => {
     expect(roles.READ_ONLY_ROLES).toEqual(["viewer"]);
     expect(roles.isReadOnlyRole("viewer")).toBe(true);
+    for (const stored of [" Viewer ", "LECTEUR", "lecteur"]) expect(roles.isReadOnlyRole(stored), stored).toBe(true);
+    expect(roles.isReadOnlyRole("Comptable")).toBe(false);
+    expect(roles.isReadOnlyRole(undefined)).toBe(false);
     for (const role of roles.ALL_APP_ROLES.filter((r) => r !== "viewer")) expect(roles.isReadOnlyRole(role)).toBe(false);
   });
 });

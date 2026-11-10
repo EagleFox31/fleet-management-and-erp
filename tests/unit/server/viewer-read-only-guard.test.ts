@@ -7,13 +7,15 @@ import { VIEWER_READ_ONLY_MESSAGE, viewerReadOnlyGuard } from "../../../server/m
 
 type Req = { method: string; path: string; session?: { userId?: number }; user?: { role: string } };
 
+const viewerStored = () => findActiveSessionUser.mockResolvedValueOnce({ role: "viewer" });
+
 async function run(req: Req): Promise<unknown> {
   return new Promise((resolve) => {
     void viewerReadOnlyGuard(req as never, {} as never, (error?: unknown) => resolve(error ?? null));
   });
 }
 
-describe("viewerReadOnlyGuard : rôle normalisé, allowlist, réutilisation de req.user", () => {
+describe("viewerReadOnlyGuard : rôle normalisé, allowlist, rôle relu depuis la session", () => {
   beforeEach(() => findActiveSessionUser.mockReset());
 
   it("laisse passer les lectures et les requêtes sans session, sans toucher la base", async () => {
@@ -30,17 +32,19 @@ describe("viewerReadOnlyGuard : rôle normalisé, allowlist, réutilisation de r
     }
   });
 
-  it("réutilise req.user quand une garde amont l'a chargé", async () => {
-    expect(await run({ method: "DELETE", path: "/vehicles/1", session: { userId: 1 }, user: { role: "viewer" } })).toMatchObject({ status: 403 });
-    expect(await run({ method: "DELETE", path: "/vehicles/1", session: { userId: 1 }, user: { role: "admin" } })).toBeNull();
-    expect(findActiveSessionUser).not.toHaveBeenCalled();
+  it("ignore req.user : le rôle vient de la session, même si un req.user admin est posé", async () => {
+    viewerStored();
+    expect(await run({ method: "DELETE", path: "/vehicles/1", session: { userId: 1 }, user: { role: "admin" } })).toMatchObject({ status: 403 });
+    expect(findActiveSessionUser).toHaveBeenCalledWith(1);
   });
 
   it("laisse le libre-service et la session au lecteur", async () => {
     for (const [method, path] of [["POST", "/auth/login"], ["POST", "/users/change-password"], ["PATCH", "/alerts/42/read"], ["PATCH", "/onboarding/complete/"]]) {
-      expect(await run({ method, path, session: { userId: 1 }, user: { role: "viewer" } })).toBeNull();
+      expect(await run({ method, path, session: { userId: 1 } })).toBeNull();
     }
-    expect(await run({ method: "POST", path: "/alerts/read-all", session: { userId: 1 }, user: { role: "viewer" } })).toMatchObject({ status: 403 });
+    expect(findActiveSessionUser).not.toHaveBeenCalled();
+    viewerStored();
+    expect(await run({ method: "POST", path: "/alerts/read-all", session: { userId: 1 } })).toMatchObject({ status: 403 });
   });
 
   it("ne bloque pas les autres rôles", async () => {
