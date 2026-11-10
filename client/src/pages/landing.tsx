@@ -146,6 +146,7 @@ const PROFILE_DEMO_VIDEOS: Partial<Record<string, string>> = {
   secretary: "/demos/secretary.mp4",
   management: "/demos/management.mp4",
   driver: "/demos/driver.mp4",
+  accountant: "/demos/accountant.mp4",
 };
 
 const userProfiles = [

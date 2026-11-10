@@ -390,7 +390,9 @@ export class ClientBillingService {
         );
       }
 
-      const newBalance = currentBalance - paymentData.amount;
+      // Arrondi au centime et borné à 0 : la tolérance de 0,005 ci-dessus laisserait un reste flottant négatif,
+      // que le trigger client_invoices_issued_locked refuse (solde jamais sous zéro).
+      const newBalance = Math.max(0, Math.round((currentBalance - paymentData.amount) * 100) / 100);
 
       // Déterminer le nouveau statut. Une facture en retard le reste tant
       // qu'elle n'est pas soldée (CINV2).
