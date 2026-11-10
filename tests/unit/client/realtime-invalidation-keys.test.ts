@@ -54,7 +54,6 @@ const declared = declaredQueryKeys();
 const AWAITING_SCREEN: Record<string, string> = {
   "/api/missions/:id/track": "GPS V1 : écran de trace d'une mission (clé par mission, invalidée par préfixe + identifiant)",
   "/api/part-sales": "CDC-4 : écran des ventes de pièces",
-  "/api/vehicle-positions": "CDC-6 : carte de la flotte",
 };
 
 describe("événements temps réel : clés d'invalidation", () => {
@@ -83,7 +82,6 @@ describe("événements temps réel : clés d'invalidation", () => {
     expect(Object.keys(AWAITING_SCREEN).sort()).toEqual([
       "/api/missions/:id/track",
       "/api/part-sales",
-      "/api/vehicle-positions",
     ]);
   });
 

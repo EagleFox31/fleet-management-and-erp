@@ -95,7 +95,7 @@ export const CDC_SCREENS: readonly CdcScreen[] = [
   // --- Lot #6 : suivi GPS
   {
     id: "fleet-map", path: "/fleet/map", title: "Carte de la flotte", task: "CDC-6",
-    description: "Dernière position connue des véhicules équipés d'un boîtier.",
+    description: "Dernière position connue des véhicules, relevée par le téléphone du chauffeur pendant sa mission.",
     feature: "gps", roles: GPS_VIEW_ROLES,
     apis: [{ method: "GET", path: "/api/vehicle-positions" }],
     menu: { group: "resources", label: "Carte de la flotte", icon: MapPin },
