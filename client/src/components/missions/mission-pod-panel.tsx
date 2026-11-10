@@ -109,7 +109,7 @@ export function PodDepositButton({
           data-testid={testId}
           className={className}
         >
-          {upload.isPending ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : <Camera className="h-5 w-5 text-primary" aria-hidden="true" />}
+          {upload.isPending ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" /> : <Camera className="h-5 w-5 text-primary-text" aria-hidden="true" />}
           {upload.isPending ? "Envoi..." : "Déposer le POD"}
         </button>
       ) : (
