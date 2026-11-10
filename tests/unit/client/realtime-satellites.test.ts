@@ -203,6 +203,13 @@ describe("couche 3 : table des écrans satellites", () => {
     expect(prefixes).toContain("/api/fuel-records/vehicle/");
   });
 
+  it("un plein annulé relit les soldes de trésorerie (liste des comptes et tout sous-chemin)", () => {
+    const { keys, prefixes } = satelliteTargetsOf("fuel_record_changed");
+    expect(keys).toEqual(expect.not.arrayContaining(["/api/treasury"]));
+    expect(prefixes).toContain("/api/treasury");
+    expect("/api/treasury/accounts".startsWith(prefixes.find((p) => p === "/api/treasury")!)).toBe(true);
+  });
+
   it("une clé de la liste gelée n'y reste pas une fois couverte", () => {
     const covered = coveredKeys();
     expect(UNCOVERED_SATELLITES.filter((key) => covered.has(key) || !clientKeys.has(key))).toEqual([]);
@@ -223,6 +230,8 @@ describe("couche 3 : table des écrans satellites", () => {
     expect(has("fuel_card_recharged", "fuel")).toBe(true);
     expect(has("fuel_record_changed", "fuel")).toBe(true);
     expect(has("fuel_record_changed", "missions")).toBe(true);
+    // Un plein annulé ou supprimé réécrit le solde des comptes : la trésorerie se relit (sinon 5 min de retard).
+    expect(has("fuel_record_changed", "treasury")).toBe(true);
     expect(has("client_invoice_created", "clientMoney")).toBe(true);
     expect(has("supplier_invoice_created", "supplierMoney")).toBe(true);
     expect(has("parts_delivered", "stock")).toBe(true);

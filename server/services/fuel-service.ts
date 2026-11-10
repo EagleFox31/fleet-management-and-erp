@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { fuelRecords, missionBudgets, missions, vehicles, type FuelRecord, type InsertFuelRecord } from "@shared/schema";
 import { eq, desc, count, sum, avg, and, isNull } from "drizzle-orm";
+import { isMissionBudgetSettled } from "@shared/contracts/mission-budgets";
 import { lockFuelCard } from "../lib/fuel-card-lock";
 import { reverseFuelLink } from "./treasury-links";
 import { AppError } from "../lib/app-error";
@@ -17,7 +18,6 @@ import {
   FUEL_RECORD_VALIDATED_EDIT_MESSAGE,
   FUEL_RECORD_CANCEL_REASON_MAX_LENGTH,
   FUEL_RECORD_CANCEL_REASON_MIN_LENGTH,
-  isMissionBudgetSettled,
   canCancelFuelRecord,
   isFuelRecordValidated,
 } from "@shared/constants/fuel-record-cancel";
