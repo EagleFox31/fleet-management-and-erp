@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useAllVehicles } from "@/hooks/use-all-vehicles";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
@@ -73,9 +74,7 @@ export function FuelRecordForm({
   const { error, showError, clearError, handleApiError } = useAnimatedError();
   
   // Fetch vehicles for dropdown
-  const { data: vehiclesData } = useQuery<any>({
-    queryKey: ["/api/vehicles"],
-  });
+  const { data: allVehicles } = useAllVehicles();
   
   // Vérifier si on a une immatriculation stockée dans sessionStorage
   const [savedRegistration, setSavedRegistration] = React.useState<string | null>(null);
@@ -118,7 +117,7 @@ export function FuelRecordForm({
   const typedVehicleDetails = combinedVehicleDetails as VehicleData | undefined;
   const effectiveRecordId = recordId ?? fuelRecordId;
   
-  const vehicles = (vehiclesData as any)?.vehicles || [];
+  const vehicles = allVehicles ?? [];
   const currentVehicleMileage = typedVehicleDetails?.mileage || 0;
   
   // Si nous avons récupéré un véhicule par immatriculation, utilisez son ID

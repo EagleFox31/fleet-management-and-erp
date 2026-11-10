@@ -39,12 +39,6 @@ const DEFAULT_LIMITS: Record<string, number> = {
 };
 
 const FROZEN: Record<string, number> = {
-  // Lot 2, sélecteurs de véhicule (10 premiers proposés) : formulaires plein, plan de maintenance, OT.
-  "client/src/components/fuel/fuel-record-form.tsx": 1,
-  "client/src/components/maintenance/maintenance-schedule-form.tsx": 1,
-  "client/src/components/maintenance/work-order-form.tsx": 1,
-  "client/src/pages/maintenance-schedules.tsx": 1,
-  "client/src/pages/maintenance-simple-new.tsx": 1,
   // Lot 2 : sélecteur de véhicule des rotations (sa requête écrit un tableau sous `["/api/vehicles"]`,
   // clé que d'autres écrans lisent comme `{ vehicles, total }`), inspections récentes et rotations.
   "client/src/pages/inventory/tires/index.tsx": 4,
@@ -73,9 +67,36 @@ function lastIndex(re: RegExp, text: string): number {
   return index;
 }
 
+/**
+ * Lectures par constante : `const KEY = ["<route>"]` (ou `= "<route>"`) puis `queryKey: KEY`,
+ * `queryKey: [KEY]`, `fetch(KEY)` ou `apiRequest("GET", KEY)`. Une clé de deux éléments ou plus
+ * (`["<route>", "all"]`) est paramétrée et n'est pas visée.
+ */
+function constantKeyReads(src: string): number {
+  let count = 0;
+  for (const route of Object.keys(DEFAULT_LIMITS)) {
+    const decl = new RegExp(
+      String.raw`\b(?:const|let|var)\s+(\w+)\s*(?::[^=]+)?=\s*\[?\s*(["'\`])${esc(route)}\2\s*\]?\s*(?:as\s+const)?\s*[;\n]`,
+      "g",
+    );
+    for (const m of src.matchAll(decl)) {
+      const name = m[1];
+      const use = new RegExp(
+        String.raw`queryKey\s*:\s*\[?\s*${name}\s*\]?\s*[,}]|\bfetch\(\s*${name}\s*[,)]|\bapiRequest\(\s*["']GET["']\s*,\s*${name}\s*[,)]`,
+        "g",
+      );
+      for (const u of src.matchAll(use)) {
+        const before = src.slice(Math.max(0, (u.index ?? 0) - 400), u.index);
+        if (!u[0].startsWith("queryKey") || lastIndex(READ_CALL, before) > lastIndex(CACHE_CALL, before)) count++;
+      }
+    }
+  }
+  return count;
+}
+
 /** Nombre de lectures sans `limit` des routes à défaut dans un source. */
 function defaultPaginatedReads(src: string): number {
-  let count = 0;
+  let count = constantKeyReads(src);
   for (const route of Object.keys(DEFAULT_LIMITS)) {
     const key = new RegExp(`queryKey\\s*:\\s*\\[\\s*(["'\`])${esc(route)}\\1\\s*\\]`, "g");
     for (const m of src.matchAll(key)) {
@@ -135,6 +156,21 @@ describe("lectures sans limit des routes paginées par défaut (client/src)", ()
       `useQuery({ queryKey: ["/api/vehicles/stats"] })`,
     ].join(";\n");
     expect(defaultPaginatedReads(sample)).toBe(4);
+  });
+
+  it("le repère voit aussi les lectures par constante, pas les invalidations ni les clés paramétrées", () => {
+    const sample = [
+      `const VEHICLES_KEY = ["/api/vehicles"];`,
+      `const PARTS = "/api/parts";`,
+      `const ALL = ["/api/vehicles", "all"] as const;`,
+      `useQuery({ queryKey: VEHICLES_KEY })`, // lu
+      `useQuery({ queryKey: [PARTS], enabled })`, // lu
+      `fetch(PARTS)`, // lu
+      `apiRequest("GET", PARTS)`, // lu
+      `queryClient.invalidateQueries({ queryKey: VEHICLES_KEY })`,
+      `useQuery({ queryKey: ALL, queryFn })`,
+    ].join(";\n");
+    expect(constantKeyReads(sample)).toBe(4);
   });
 });
 

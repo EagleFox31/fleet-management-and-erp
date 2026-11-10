@@ -1,6 +1,7 @@
 import { userMessageOf } from "@/lib/api-error";
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { findVehicleByRegistration, REGISTRATION_LOOKUP_LIMIT } from "@/lib/vehicle-registration-lookup";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
@@ -48,12 +49,11 @@ export default function VehicleDetailsByRegistration({ params }: { params: { reg
   // autre véhicule restait en chargement sans fin. Une immatriculation complète ne correspond qu'à
   // quelques lignes ; la correspondance exacte est choisie côté client.
   const lookupQuery = useQuery<{ vehicles: Array<{ id: number; registrationNumber: string }>; total: number }>({
-    queryKey: ["/api/vehicles", { search: registrationNumber, limit: 50 }],
+    queryKey: ["/api/vehicles", { search: registrationNumber, limit: REGISTRATION_LOOKUP_LIMIT }],
     staleTime: 0,
     refetchOnMount: "always",
   });
-  const vehicleId =
-    lookupQuery.data?.vehicles?.find((v) => v.registrationNumber === registrationNumber)?.id ?? null;
+  const vehicleId = findVehicleByRegistration(lookupQuery.data?.vehicles, registrationNumber)?.id ?? null;
   
   // Récupérer les détails du véhicule une fois que nous avons son ID
   const { data: vehicle, isLoading: isLoadingVehicle } = useQuery<any>({

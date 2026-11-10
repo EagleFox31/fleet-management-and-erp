@@ -368,6 +368,11 @@ export const VEHICLE_RESTRICTED_PATCH_FIELDS: Readonly<Record<string, readonly s
  */
 export const FUEL_CARD_MANAGER_ROLES = ["admin", "logistics", "secretary"] as const satisfies readonly AppRole[];
 // Solde et historique de la carte en consultation : les gestionnaires plus le comptable, qui ne recharge pas.
+/**
+ * Saisie d'un plein depuis l'écran carburant (`isFuelRecordWriter`, POST/PATCH /api/fuel-records).
+ * Le technicien n'en saisit pas ; le chauffeur passe par sa mission.
+ */
+export const FUEL_RECORD_WRITER_ROLES = ["admin", "workshop_manager", "secretary", "logistics"] as const satisfies readonly AppRole[];
 export const FUEL_CARD_VIEWER_ROLES = [...FUEL_CARD_MANAGER_ROLES, "accountant"] as const satisfies readonly AppRole[];
 
 /** Saisie de la capacité des réservoirs : tous les rôles du PATCH véhicule. */

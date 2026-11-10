@@ -1,6 +1,7 @@
 import { userMessageOf } from "@/lib/api-error";
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAllVehicles } from "@/hooks/use-all-vehicles";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -113,10 +114,7 @@ export default function MaintenanceSchedulesPage() {
   });
 
   // Charger les véhicules pour le filtrage
-  const { data: vehiclesData } = useQuery<any>({
-    queryKey: ['/api/vehicles'],
-    select: (data) => data as { vehicles: Vehicle[], total: number },
-  });
+  const { data: allVehicles } = useAllVehicles<Vehicle>();
 
   // Mutation pour supprimer une planification
   const deleteMutation = useMutation({
@@ -194,8 +192,8 @@ export default function MaintenanceSchedulesPage() {
 
   // Trouver le véhicule correspondant
   const findVehicle = (vehicleId: number) => {
-    if (!vehiclesData?.vehicles) return null;
-    return vehiclesData.vehicles.find((v) => v.id === vehicleId);
+    if (!allVehicles) return null;
+    return allVehicles.find((v) => v.id === vehicleId);
   };
 
   return (
@@ -241,7 +239,7 @@ export default function MaintenanceSchedulesPage() {
               onChange={(e) => setVehicleFilter(e.target.value)}
             >
               <option value="tous">Tous les véhicules</option>
-              {vehiclesData?.vehicles?.map((vehicle) => (
+              {allVehicles?.map((vehicle) => (
                 <option key={vehicle.id} value={vehicle.id.toString()}>
                   {vehicle.registrationNumber} - {vehicle.brand} {vehicle.model}
                 </option>
