@@ -16,7 +16,7 @@
   | `agent-hooks` « garde-commit-propre trailer » | ~0,15 s | 5 s | `node` en `spawnSync` | délai passé à 30 s |
 
   Ce que disent ces mesures :
-  - Les deux passes complètes de ce soir, avec 16 workers puis 8, sont vertes (387 fichiers sur 387).
+  - Les deux passes complètes de ce soir, avec les workers par défaut puis `--maxWorkers=50%`, sont vertes (387 fichiers sur 387).
   - Les échecs ne se reproduisent que quand d'autres passes de tests tournent en même temps sur le poste.
   - Augmenter encore les délais masquerait le symptôme sans rien régler.
 - **Comment tester (QA)** :
