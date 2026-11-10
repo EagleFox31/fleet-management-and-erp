@@ -73,3 +73,11 @@ describe("cibles legitimes inchangees", () => {
     expect(res.body).not.toContain("NON_CANONICAL_TARGET");
   });
 });
+
+describe("prefixe /api insensible a la casse, comme le montage", () => {
+  it("GET /API/vehicles : servi par l'API, avec no-store", async () => {
+    const res = await fetch(`http://127.0.0.1:${session.port}/API/vehicles`, asAdmin());
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toContain("no-store");
+  });
+});
