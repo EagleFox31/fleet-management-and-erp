@@ -99,7 +99,39 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     }));
     expect(widths.header).toBe(widths.viewport);
   });
+
+  test(`${viewport.width} px : la route sépare le haut de page des profils, sur toute la largeur`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+    const road = page.getByTestId("road-divider");
+    await road.waitFor({ state: "attached", timeout: 60_000 });
+    await expect(road).toHaveAttribute("aria-hidden", "true");
+    await expect(road.locator("svg")).toHaveCount(1);
+    expect(await road.locator("img, video").count()).toBe(0);
+    const layout = await road.evaluate((el) => ({
+      width: Math.round(el.getBoundingClientRect().width),
+      viewport: document.documentElement.clientWidth,
+      height: Math.round(el.getBoundingClientRect().height),
+      text: el.textContent?.trim() ?? "",
+      nextId: el.nextElementSibling?.id ?? "",
+    }));
+    expect(layout.width).toBe(layout.viewport);
+    expect(layout.text).toBe("");
+    expect(layout.nextId).toBe("profiles");
+    expect(layout.height).toBeGreaterThanOrEqual(viewport.width < 768 ? 24 : 40);
+    expect(layout.height).toBeLessThanOrEqual(viewport.width < 768 ? 32 : 56);
+  });
 }
+
+test("route : les pointillés défilent, et s'arrêtent sous prefers-reduced-motion", async ({ page }) => {
+  const dashAnimation = () =>
+    page.getByTestId("road-divider").locator(".landing-road-dash").evaluate((el) => getComputedStyle(el).animationName);
+  await page.goto("/");
+  await page.getByTestId("road-divider").waitFor({ state: "attached", timeout: 60_000 });
+  expect(await dashAnimation()).toBe("landing-road-dash");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(await dashAnimation()).toBe("none");
+});
 
 test("1440 px : les cartes d'une même ligne ont la même hauteur, d'une famille à l'autre", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });

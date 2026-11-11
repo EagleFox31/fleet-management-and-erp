@@ -1,4 +1,5 @@
 import { Link, useLocation } from "wouter";
+import { RoadDivider } from "@/components/landing/road-divider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -1440,10 +1441,11 @@ export default function LandingPage() {
         </div>
       </section>
 
+      <RoadDivider />
+
       {/* Section Profils Utilisateurs — Transition fluide & translucide */}
-      <section id="profiles" className="relative py-20 lg:py-28 bg-slate-950/70 backdrop-blur-sm text-white overflow-hidden border-t border-white/10">
-        {/* Ligne séparatrice lumineuse supérieure et halo */}
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent" />
+      <section id="profiles" className="relative py-20 lg:py-28 bg-slate-950/70 backdrop-blur-sm text-white overflow-hidden">
+        {/* Halo sous la route séparatrice */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-32 bg-emerald-500/5 blur-3xl -z-10 pointer-events-none" />
 
         <div className="container mx-auto px-4">
