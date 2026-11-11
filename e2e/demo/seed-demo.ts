@@ -95,7 +95,7 @@ export const DEMO_DOCUMENT_NAME = "Assurance DEMO-SEC-001";
 
 export { assertLocalDatabase };
 
-async function ensureUser(account: { username: string; password: string; name: string; role: string }): Promise<number> {
+export async function ensureUser(account: { username: string; password: string; name: string; role: string }): Promise<number> {
   await db
     .insert(users)
     .values({
@@ -116,7 +116,7 @@ async function ensureUser(account: { username: string; password: string; name: s
   return row.id;
 }
 
-async function ensureVehicle(
+export async function ensureVehicle(
   registration: string,
   model: string,
   ownerId: number | null,
@@ -148,7 +148,7 @@ async function ensureVehicle(
 }
 
 /** Jour calendaire LOCAL décalé de `days` (les rapports raisonnent en heure locale, pas en UTC). */
-function isoDayFromNow(days: number): string {
+export function isoDayFromNow(days: number): string {
   const date = new Date();
   date.setDate(date.getDate() + days);
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -335,7 +335,7 @@ async function seedFleetAudit(vehicleId: number): Promise<void> {
 }
 
 /** Carte grise, assurance et visite technique valides : le départ d'une mission n'est pas bloqué. */
-async function ensureValidPapers(vehicleId: number, registration: string): Promise<void> {
+export async function ensureValidPapers(vehicleId: number, registration: string): Promise<void> {
   const docs = await db.select({ id: vehicleDocuments.id, type: vehicleDocuments.type, expiryDate: vehicleDocuments.expiryDate }).from(vehicleDocuments).where(eq(vehicleDocuments.vehicleId, vehicleId));
   for (const type of ["carte_grise", "assurance", "visite_technique"] as const) {
     writeDemoPdf(`${registration}-${type}.pdf`);

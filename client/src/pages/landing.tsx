@@ -137,16 +137,22 @@ function VideoBackground({ opacity = 0.85 }: { opacity?: number }) {
 }
 
 // Types de profils utilisateurs (11 profils métier)
-/** Vidéo de démonstration par profil (client/public/demos), données de démonstration uniquement. */
-const PROFILE_DEMO_VIDEOS: Partial<Record<string, string>> = {
-  workshop_manager: "/demos/workshop_manager.mp4",
-  technician: "/demos/technician.mp4",
-  warehouse: "/demos/warehouse.mp4",
-  logistics: "/demos/logistics.mp4",
-  secretary: "/demos/secretary.mp4",
-  management: "/demos/management.mp4",
-  driver: "/demos/driver.mp4",
-  accountant: "/demos/accountant.mp4",
+/** Vidéo de démonstration : fichier (client/public/demos), et titre court quand le profil en a plusieurs. */
+type ProfileDemoVideo = { src: string; title?: string };
+
+/** Vidéos de démonstration par profil, dans l'ordre d'affichage. Données de démonstration uniquement. */
+const PROFILE_DEMO_VIDEOS: Partial<Record<string, ProfileDemoVideo[]>> = {
+  workshop_manager: [{ src: "/demos/workshop_manager.mp4" }],
+  technician: [{ src: "/demos/technician.mp4" }],
+  warehouse: [{ src: "/demos/warehouse.mp4" }],
+  logistics: [
+    { src: "/demos/logistics.mp4", title: "Organiser et facturer une mission" },
+    { src: "/demos/logistics-tracking.mp4", title: "Suivre ses camions en mission" },
+  ],
+  secretary: [{ src: "/demos/secretary.mp4" }],
+  management: [{ src: "/demos/management.mp4" }],
+  driver: [{ src: "/demos/driver.mp4" }],
+  accountant: [{ src: "/demos/accountant.mp4" }],
 };
 
 const userProfiles = [
@@ -1353,7 +1359,8 @@ export default function LandingPage() {
                         <span className="text-[11px] font-semibold text-slate-400 group-hover:text-emerald-300 flex items-center gap-1 transition-colors">
                           {PROFILE_DEMO_VIDEOS[profile.id] && (
                             <span className="flex items-center gap-1 mr-1.5 text-primary-text" data-testid={`badge-video-${profile.id}`}>
-                              <PlayCircle className="h-3.5 w-3.5" /> Vidéo
+                              <PlayCircle className="h-3.5 w-3.5" />
+                              {PROFILE_DEMO_VIDEOS[profile.id]!.length > 1 ? `${PROFILE_DEMO_VIDEOS[profile.id]!.length} vidéos` : "Vidéo"}
                             </span>
                           )}
                           Guide <ChevronRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
@@ -1568,17 +1575,27 @@ export default function LandingPage() {
                 {PROFILE_DEMO_VIDEOS[selectedProfile] && (
                   <div>
                     <h4 className="font-semibold text-lg mb-3 flex items-center gap-2">
-                      <PlayCircle className="h-5 w-5 text-primary-text" /> Vidéo de démonstration
+                      <PlayCircle className="h-5 w-5 text-primary-text" />
+                      {PROFILE_DEMO_VIDEOS[selectedProfile]!.length > 1 ? "Vidéos de démonstration" : "Vidéo de démonstration"}
                     </h4>
-                    <video
-                      key={selectedProfile}
-                      src={PROFILE_DEMO_VIDEOS[selectedProfile]}
-                      controls
-                      playsInline
-                      preload="metadata"
-                      className="w-full rounded-lg border border-white/10 bg-black aspect-video"
-                      data-testid={`video-demo-${selectedProfile}`}
-                    />
+                    <div className="space-y-5">
+                      {PROFILE_DEMO_VIDEOS[selectedProfile]!.map((video, index) => (
+                        <figure key={`${selectedProfile}-${video.src}`} className="space-y-2">
+                          {video.title && (
+                            <figcaption className="text-sm font-medium text-muted-foreground">{video.title}</figcaption>
+                          )}
+                          <video
+                            src={video.src}
+                            controls
+                            playsInline
+                            preload="metadata"
+                            aria-label={video.title}
+                            className="w-full rounded-lg border border-white/10 bg-black aspect-video"
+                            data-testid={index === 0 ? `video-demo-${selectedProfile}` : `video-demo-${selectedProfile}-${index + 1}`}
+                          />
+                        </figure>
+                      ))}
+                    </div>
                   </div>
                 )}
 
