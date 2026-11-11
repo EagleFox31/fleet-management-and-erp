@@ -403,7 +403,7 @@ const permissionsMatrix: Record<string, Record<string, boolean>> = {
   "Commandes & Fournisseurs": { admin: true, workshop_manager: true, technician: false, secretary: true, accountant: true, logistics: true, warehouse: true, viewer: false, management: false, client: false, driver: false },
   "Facturation & Finances": { admin: true, workshop_manager: false, technician: false, secretary: true, accountant: true, logistics: false, warehouse: false, viewer: false, management: true, client: true, driver: false },
   "Missions & Carburant": { admin: true, workshop_manager: false, technician: false, secretary: true, accountant: true, logistics: true, warehouse: false, viewer: false, management: true, client: true, driver: true },
-  "Rapports & Analytics": { admin: true, workshop_manager: true, technician: false, secretary: true, accountant: true, logistics: true, warehouse: true, viewer: true, management: true, client: false, driver: false },
+  "Rapports et indicateurs": { admin: true, workshop_manager: true, technician: false, secretary: true, accountant: true, logistics: true, warehouse: true, viewer: true, management: true, client: false, driver: false },
   "Utilisateurs & Sécurité": { admin: true, workshop_manager: false, technician: false, secretary: false, accountant: false, logistics: false, warehouse: false, viewer: false, management: false, client: false, driver: false },
 };
 
@@ -1200,7 +1200,7 @@ function StorytellingTransformationSection() {
                 <p className="text-slate-300 text-sm sm:text-base mt-3 leading-relaxed">
                   {tab === "before"
                     ? "Sans synchronisation en direct entre l'atelier, la route et la direction, chaque imprévu entraîne des retards coûteux, des litiges fournisseurs et une usure prématurée de la flotte."
-                    : `Grâce à la synchronisation WebSocket temps réel, les ${ROLE_COUNT} profils collaborent sur la même vérité. Les pannes sont anticipées, le carburant est maîtrisé et la rentabilité est visible en direct.`}
+                    : `Grâce à la mise à jour en direct sur tous les écrans, les ${ROLE_COUNT} profils travaillent sur les mêmes informations. Les pannes sont anticipées, le carburant est maîtrisé et la rentabilité est visible en direct.`}
                 </p>
               </div>
 
@@ -1471,13 +1471,15 @@ export default function LandingPage() {
                 key={family.id}
                 aria-labelledby={`profile-family-${family.id}`}
                 data-testid={`profile-family-${family.id}`}
-                className={FAMILY_LAYOUT[profilesOf(family.id).length]?.span}
+                // Chaque famille a sa grille : la section s'étire sur la ligne parente et sa grille
+                // prend la hauteur restante, pour que les cartes d'une même ligne visuelle s'alignent.
+                className={`flex flex-col ${FAMILY_LAYOUT[profilesOf(family.id).length]?.span ?? ""}`}
               >
                 <h3 id={`profile-family-${family.id}`} className="mb-5 flex items-center gap-4 text-xl font-bold text-white">
                   {family.title}
                   <span className="h-px flex-1 bg-white/15" aria-hidden="true" />
                 </h3>
-                <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 ${FAMILY_LAYOUT[profilesOf(family.id).length]?.cols ?? ""}`}>
+                <div className={`grid flex-1 grid-cols-1 md:grid-cols-2 gap-6 ${FAMILY_LAYOUT[profilesOf(family.id).length]?.cols ?? ""}`}>
                   {profilesOf(family.id).map((profile, idx) => {
                     const Icon = profile.icon;
                     const video = PROFILE_DEMO_VIDEOS[profile.id];

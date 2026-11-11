@@ -86,3 +86,32 @@ test("mobile 390 px : pas de défilement horizontal", async ({ page }) => {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBe(0);
 });
+
+test("1440 px : les cartes d'une même ligne ont la même hauteur, d'une famille à l'autre", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  const cards = page.locator("[data-testid^=card-profile-]");
+  await cards.first().scrollIntoViewIfNeeded({ timeout: 60_000 });
+  // Les cartes apparaissent au défilement (décalage vertical animé) : les faire toutes entrer, puis attendre la fin.
+  const count = await cards.count();
+  for (let i = 0; i < count; i++) await cards.nth(i).scrollIntoViewIfNeeded();
+  await page.waitForTimeout(800);
+
+  const boxes = await cards.evaluateAll((elements) =>
+    elements.map((el) => {
+      const rect = el.getBoundingClientRect();
+      return { id: el.getAttribute("data-testid"), top: Math.round(rect.top + window.scrollY), height: rect.height };
+    }),
+  );
+  const rows = new Map<number, typeof boxes>();
+  for (const box of boxes) {
+    const key = [...rows.keys()].find((top) => Math.abs(top - box.top) <= 1) ?? box.top;
+    rows.set(key, [...(rows.get(key) ?? []), box]);
+  }
+  // 1440 px : quatre colonnes, donc des lignes de plusieurs cartes issues de familles différentes.
+  expect([...rows.values()].some((row) => row.length >= 4)).toBe(true);
+  for (const row of rows.values()) {
+    const heights = row.map((box) => box.height);
+    expect(Math.max(...heights) - Math.min(...heights), JSON.stringify(row)).toBeLessThanOrEqual(1);
+  }
+});
