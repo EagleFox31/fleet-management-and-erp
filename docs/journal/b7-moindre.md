@@ -43,3 +43,23 @@ Modèle et règles : `docs/journal/README.md`.
   - couvert : R (groupe dérivé, aucune liste locale), D (campagne complète de contrats, écrans du personnel inchangés : `/api/operations` n'a aucun écran technicien), E (403 sans donnée), failure memory (inventaire avant fermeture) ;
   - ne s'applique pas : I et R (rétroactif), aucune donnée ni migration.
 - **Reste / risques** : `GET /api/fuel-records` et `/vehicle/:id` copient encore `orderNumber`, `clientName` et la destination de la mission pour tout le personnel. Le périmètre carburant relève de #675 : signalé à l'orchestrateur.
+
+## 2026-11-11T00:10:00+01:00 — Liaison d'une fiche chauffeur refusée hors lecteurs des missions
+
+- **Agent** : b7 · **Branche** : `fix/driver-link-role-b7`
+- **Statut** : fait, PR brouillon
+- **Quoi** : `POST` et `PATCH /api/drivers` refusent en 400 de lier une fiche à un compte technicien ou client (hors `MISSION_READ_ROLES`) ou à un compte inconnu. Les lectures de missions, d'exploitation et de fiches chauffeur doivent porter un garde de rôle propre.
+- **Comment** :
+  - `server/lib/driver-link.ts` : `assertDriverLinkableUser` (400 `AppError`), `driversLinkedOutsideMissionReaders` (lecture seule).
+  - `drivers-management.routes.ts` : contrôle appelé à la création et quand le `PATCH` porte `userId`.
+  - `scripts/audit-driver-links.ts` : recense les liaisons antérieures, n'écrit rien. Pas de script npm (le `.env` racine pointe la production).
+  - Garde-fou `tests/unit/server/mission-read-routes-guard.test.ts`, contrat `driver-link-role`, intégration `driver-link-audit`, `least-data-driver-technician` en un cas par chemin avec des sentinelles uniques.
+- **Pourquoi** : cause racine de la fuite de `/api/drivers/me` (#688) ; récidive « routes sœurs », d'où le garde-fou (leçon du 2026-11-11).
+- **Comment tester (QA)** :
+  - Prérequis : Postgres local (`npm run test:db:up`).
+  - Étapes : `npm run test:contract -- tests/contract/driver-link-role.contract.test.ts` puis `npm test -- tests/unit/server/mission-read-routes-guard.test.ts`.
+  - Attendu : 400 lisible pour technicien, client et compte inconnu ; chauffeur, magasinier et `userId` null acceptés.
+- **RAIDER** :
+  - couvert : R (règle dérivée de `MISSION_READ_ROLES`), D (contrats chauffeur existants rejoués), I et R rétroactif (liaisons existantes conservées, audit en lecture seule), E (400 lisible, aucune donnée dans le refus), failure memory (leçon et garde-fou).
+  - ne s'applique pas : aucune migration.
+- **Reste / risques** : lancer l'audit sur la production (lecture seule) seulement sur GO, puis décider du sort des liaisons trouvées.

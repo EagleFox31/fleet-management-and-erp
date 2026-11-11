@@ -19,6 +19,9 @@ let ownId = 0;
 let otherId = 0;
 let ownMissionId = 0;
 let otherMissionId = 0;
+// Sentinelles uniques : une adresse générique (« TEST B ») peut apparaître dans un refus pour une autre raison.
+const PICKUP = uniqueTestToken("ADR-ENLEV");
+const DELIVERY = uniqueTestToken("ADR-LIVR");
 
 async function newDriver(userId: number | null) {
   const [row] = await db
@@ -32,7 +35,7 @@ async function newDriver(userId: number | null) {
 async function newMission(driverId: number) {
   const [mission] = await db
     .insert(missions)
-    .values({ orderNumber: uniqueTestToken("MIS"), pickupAddress: "TEST A", deliveryAddress: "TEST B", status: "in_progress" } as any)
+    .values({ orderNumber: uniqueTestToken("MIS"), pickupAddress: PICKUP, deliveryAddress: DELIVERY, status: "in_progress" } as any)
     .returning({ id: missions.id });
   missionIds.push(mission.id);
   await db.insert(assignments).values({ missionId: mission.id, driverId, status: "accepted" } as any);
@@ -91,7 +94,7 @@ describe("GET /api/drivers/:id/missions", { timeout: 60000 }, () => {
   it("technicien refusé (adresses et clients d'un chauffeur), logistique ouverte", async () => {
     const tech = await session.call("GET", `/api/drivers/${otherId}/missions`, { actor: "technician" });
     expect(tech.status).toBe(403);
-    expect(JSON.stringify(tech.body)).not.toContain("TEST A");
+    expect(JSON.stringify(tech.body)).not.toContain(PICKUP);
     const logistics = await session.call("GET", `/api/drivers/${otherId}/missions`, { actor: "logistics" });
     expect(logistics.status).toBe(200);
     expect(logistics.body.map((m: any) => m.id)).toContain(otherMissionId);
@@ -117,24 +120,27 @@ describe("POD d'une mission en lecture", { timeout: 60000 }, () => {
 });
 
 describe("autres lectures de mission et d'exploitation", { timeout: 60000 }, () => {
-  const missionPaths = () => [
-    `/api/missions/${otherMissionId}/launch-readiness`,
-    `/api/missions/${otherMissionId}/document-renewal-requests`,
+  const MISSION_PATHS = [
+    "/api/missions/:id/launch-readiness",
+    "/api/missions/:id/document-renewal-requests",
     "/api/operations/missions",
     "/api/operations/missions/upcoming",
     "/api/operations/missions/active",
     "/api/operations/missions/by-client/TEST",
     "/api/operations/stats/by-client",
     "/api/operations/stats/by-destination",
-    `/api/operations/missions/${otherMissionId}/costs`,
+    "/api/operations/missions/:id/costs",
   ];
+  const resolve = (template: string) => template.replace(":id", String(otherMissionId));
+  const missionPaths = () => MISSION_PATHS.map(resolve);
 
-  it("technicien refusé partout, sans donnée de mission dans le refus", async () => {
-    for (const path of missionPaths()) {
-      const res = await session.call("GET", path, { actor: "technician" });
-      expect(res.status, path).toBe(403);
-      expect(JSON.stringify(res.body), path).not.toContain("TEST B");
-    }
+  // Un it par chemin : un échec nomme la route, et les suivantes sont quand même vérifiées.
+  it.each(MISSION_PATHS)("technicien refusé sur %s, sans donnée de mission dans le refus", async (template) => {
+    const path = resolve(template);
+    const res = await session.call("GET", path, { actor: "technician" });
+    expect(res.status, path).toBe(403);
+    const sent = JSON.stringify(res.body);
+    for (const value of [PICKUP, DELIVERY]) expect(sent, path).not.toContain(value);
   });
 
   it("logistique garde l'accès", async () => {
