@@ -91,6 +91,7 @@ const LOCAL_STORAGE_FILES = new Set([
   "lib/pending-logout.ts",
   "components/maintenance/work-order-form.tsx", // currentVehicleRegistration : clé globale, purgée à la déconnexion
   "pages/maintenance/work-orders/new.tsx", // idem
+  "lib/pwa-update.ts", // lecture seule des brouillons (DRAFT_KEY_PATTERN) : n'écrit aucune clé
 ]);
 
 let map: Map<string, string>;
