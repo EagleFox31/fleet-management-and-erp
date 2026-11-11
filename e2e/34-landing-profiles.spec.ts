@@ -1,8 +1,9 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * Landing, section « profils » : familles dans l'ordre métier, bouton « Voir la démo » qui ouvre
- * la fenêtre sur la vidéo, chapitres de la démo logistique, et aucun défilement horizontal sur mobile.
+ * Landing, section « profils » : familles dans l'ordre métier, vignette fixe (image, pas de vidéo
+ * lancée sur la carte) qui ouvre la fenêtre sur la vidéo, chapitres de la démo logistique, et aucun
+ * défilement horizontal sur mobile.
  * Page publique : aucune connexion.
  */
 
@@ -38,12 +39,17 @@ test("profils rangés par famille, dans l'ordre métier", async ({ page }) => {
   await expect(section.getByText("Au quotidien").first()).toBeVisible();
 });
 
-test("« Voir la démo » ouvre la fenêtre sur la vidéo, chapitre 2 à 1:48", async ({ page }) => {
+test("la vignette ouvre la fenêtre sur la vidéo, chapitre 2 à 1:48", async ({ page }) => {
   await page.goto("/");
   const demo = page.getByTestId("button-demo-logistics");
   await demo.scrollIntoViewIfNeeded({ timeout: 60_000 });
+  // Vignette = bouton portant une image fixe, aucune vidéo dans la carte.
   await expect(demo).toHaveAccessibleName(/^Voir la démo du profil Logisticien, \d+ min$/);
-  await expect(demo).toContainText(/Voir la démo · \d+ min/);
+  await expect(demo.locator("img")).toHaveAttribute("src", "/demos/posters/logistics.webp");
+  await expect(demo.locator("img")).toHaveAttribute("loading", "lazy");
+  await expect(page.getByTestId("badge-demo-duration-logistics")).toHaveText(/^\d+ min$/);
+  await expect(page.getByTestId("card-profile-logistics").locator("video")).toHaveCount(0);
+  await expect(page.locator("#profiles").getByText(/Voir la démo ·/)).toHaveCount(0);
   const box = await demo.boundingBox();
   expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
 
@@ -51,6 +57,7 @@ test("« Voir la démo » ouvre la fenêtre sur la vidéo, chapitre 2 à 1:48", 
   const video = page.getByTestId("video-demo-logistics");
   await expect(video).toBeVisible();
   await expect(video).toBeFocused();
+  await expect(video).toHaveAttribute("poster", "/demos/posters/logistics.webp");
   await video.evaluate((el: HTMLVideoElement) => {
     el.muted = true;
   });

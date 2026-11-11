@@ -30,6 +30,7 @@ import {
   KeyRound,
   Lightbulb,
   PlayCircle,
+  Play,
   BookOpen,
   Calculator,
   Eye,
@@ -144,25 +145,26 @@ type DemoVideoChapter = { title: string; start: number };
  * Vidéo de démonstration (client/public/demos), découpée en chapitres quand elle enchaîne plusieurs parcours.
  * `durationSeconds` : durée réelle du fichier (ffprobe), affichée sur le bouton « Voir la démo ».
  */
-type ProfileDemoVideo = { src: string; durationSeconds: number; chapters?: DemoVideoChapter[] };
+/** `poster` : image fixe 640x360 (WebP) tirée de l'écran titre de la vidéo, sert de vignette et d'affiche. */
+type ProfileDemoVideo = { src: string; poster: string; durationSeconds: number; chapters?: DemoVideoChapter[] };
 
 /** Vidéo de démonstration par profil. Données de démonstration uniquement. */
 const PROFILE_DEMO_VIDEOS: Partial<Record<string, ProfileDemoVideo>> = {
-  workshop_manager: { src: "/demos/workshop_manager.mp4", durationSeconds: 123 },
-  technician: { src: "/demos/technician.mp4", durationSeconds: 98 },
-  warehouse: { src: "/demos/warehouse.mp4", durationSeconds: 89 },
+  workshop_manager: { src: "/demos/workshop_manager.mp4", poster: "/demos/posters/workshop_manager.webp", durationSeconds: 123 },
+  technician: { src: "/demos/technician.mp4", poster: "/demos/posters/technician.webp", durationSeconds: 98 },
+  warehouse: { src: "/demos/warehouse.mp4", poster: "/demos/posters/warehouse.webp", durationSeconds: 89 },
   logistics: {
-    src: "/demos/logistics.mp4",
+    src: "/demos/logistics.mp4", poster: "/demos/posters/logistics.webp",
     durationSeconds: 215,
     chapters: [
       { title: "Organiser et facturer une mission", start: 0 },
       { title: "Suivre ses camions en mission", start: 108 },
     ],
   },
-  secretary: { src: "/demos/secretary.mp4", durationSeconds: 121 },
-  management: { src: "/demos/management.mp4", durationSeconds: 140 },
-  driver: { src: "/demos/driver.mp4", durationSeconds: 78 },
-  accountant: { src: "/demos/accountant.mp4", durationSeconds: 148 },
+  secretary: { src: "/demos/secretary.mp4", poster: "/demos/posters/secretary.webp", durationSeconds: 121 },
+  management: { src: "/demos/management.mp4", poster: "/demos/posters/management.webp", durationSeconds: 140 },
+  driver: { src: "/demos/driver.mp4", poster: "/demos/posters/driver.webp", durationSeconds: 78 },
+  accountant: { src: "/demos/accountant.mp4", poster: "/demos/posters/accountant.webp", durationSeconds: 148 },
 };
 
 /** Durée lisible d'une démo, arrondie à la minute (jamais « 0 min »). */
@@ -208,6 +210,7 @@ function ProfileDemoPlayer({ profileId, video, autoPlay = false }: { profileId: 
       <video
         ref={videoRef}
         src={video.src}
+        poster={video.poster}
         controls
         playsInline
         preload="metadata"
@@ -842,7 +845,7 @@ const profileTutorials: Record<string, { steps: string[]; tips: string[] }> = {
   },
   workshop_manager: {
     steps: [
-      "Accédez au dashboard Chef d'Atelier pour voir vos KPIs de maintenance",
+      "Ouvrez le tableau de bord du chef d'atelier pour voir vos indicateurs de maintenance",
       "Planifiez la maintenance préventive dans 'Maintenance > Planificateur'",
       "Créez et assignez des ordres de travail à votre équipe",
       "Suivez l'avancement des interventions en cours",
@@ -857,7 +860,7 @@ const profileTutorials: Record<string, { steps: string[]; tips: string[] }> = {
   },
   technician: {
     steps: [
-      "Consultez vos ordres de travail assignés sur le dashboard technicien",
+      "Consultez vos ordres de travail assignés sur le tableau de bord du technicien",
       "Ouvrez un ordre de travail pour voir les détails de l'intervention",
       "Enregistrez les pièces utilisées et le temps passé",
       "Ajoutez des photos et commentaires sur l'intervention",
@@ -887,7 +890,7 @@ const profileTutorials: Record<string, { steps: string[]; tips: string[] }> = {
   },
   logistics: {
     steps: [
-      "Consultez le planning des missions sur votre dashboard",
+      "Consultez le planning des missions sur votre tableau de bord",
       "Créez de nouvelles missions client avec détails complets",
       "Assignez les véhicules et chauffeurs disponibles",
       "Suivez l'état des missions en cours en temps réel",
@@ -902,7 +905,7 @@ const profileTutorials: Record<string, { steps: string[]; tips: string[] }> = {
   },
   warehouse: {
     steps: [
-      "Accédez au dashboard magasinier pour voir l'état des stocks",
+      "Ouvrez le tableau de bord du magasinier pour voir l'état des stocks",
       "Consultez l'inventaire des pièces dans 'Inventaire > Pièces'",
       "Traitez les demandes de pièces des techniciens",
       "Enregistrez les réceptions de commandes fournisseurs",
@@ -1489,10 +1492,45 @@ export default function LandingPage() {
                         className="h-full"
                       >
                         <Card
-                          className="h-full bg-slate-900/85 backdrop-blur-xl border-white/15 hover:border-emerald-400/50 transition-colors duration-300 cursor-pointer flex flex-col"
+                          className="h-full overflow-hidden bg-slate-900/85 backdrop-blur-xl border-white/15 hover:border-emerald-400/50 transition-colors duration-300 cursor-pointer flex flex-col"
                           data-testid={`card-profile-${profile.id}`}
                           onClick={() => openProfile(profile.id, false)}
                         >
+                          {video && (
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openProfile(profile.id, true);
+                              }}
+                              aria-label={`Voir la démo du profil ${profile.name}, ${duration}`}
+                              data-testid={`button-demo-${profile.id}`}
+                              className="group relative block aspect-video w-full overflow-hidden bg-slate-950 outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-white"
+                            >
+                              <img
+                                src={video.poster}
+                                alt=""
+                                loading="lazy"
+                                decoding="async"
+                                width={640}
+                                height={360}
+                                className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                              />
+                              {/* Rond de lecture centré horizontalement, sous le titre de l'affiche pour ne pas le masquer. */}
+                              <span className="absolute inset-0 bg-slate-950/10 transition-colors group-hover:bg-transparent" aria-hidden="true">
+                                <span className="absolute left-1/2 top-[72%] flex h-12 w-12 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-emerald-400 text-slate-950 shadow-lg ring-4 ring-slate-950/40 transition-transform group-hover:scale-110">
+                                  <Play className="ml-0.5 h-5 w-5 fill-current" />
+                                </span>
+                              </span>
+                              <span
+                                className="absolute bottom-2 right-2 rounded-md bg-slate-950/85 px-2 py-0.5 text-xs font-semibold text-white"
+                                aria-hidden="true"
+                                data-testid={`badge-demo-duration-${profile.id}`}
+                              >
+                                {duration}
+                              </span>
+                            </button>
+                          )}
                           <CardHeader className="pb-3">
                             <div className="flex items-center gap-3">
                               <div className={`h-11 w-11 shrink-0 rounded-xl ${profile.bgColor} border border-white/10 flex items-center justify-center`}>
@@ -1519,21 +1557,6 @@ export default function LandingPage() {
                             </div>
 
                             <div className="mt-auto flex flex-col gap-2">
-                              {video && (
-                                <Button
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    openProfile(profile.id, true);
-                                  }}
-                                  aria-label={`Voir la démo du profil ${profile.name}, ${duration}`}
-                                  data-testid={`button-demo-${profile.id}`}
-                                  className="min-h-[44px] w-full rounded-full bg-emerald-400 text-sm font-semibold text-slate-950 shadow-md hover:bg-emerald-300 focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
-                                >
-                                  <PlayCircle className="h-5 w-5" aria-hidden="true" />
-                                  Voir la démo · {duration}
-                                </Button>
-                              )}
                               <Button
                                 type="button"
                                 variant="ghost"
@@ -1562,8 +1585,8 @@ export default function LandingPage() {
           {/* Tableau comparatif des permissions façon cockpit */}
           <div className="max-w-6xl mx-auto">
             <div className="text-center mb-8">
-              <h3 className="text-2xl md:text-3xl font-bold text-white mb-2">Matrice des Permissions & Contrôle d'Accès</h3>
-              <p className="text-sm text-slate-400">Contrôle granulaire selon le principe du moindre privilège</p>
+              <h3 className="text-2xl md:text-3xl font-bold text-white mb-2">Qui peut faire quoi</h3>
+              <p className="text-sm text-slate-400">Chaque profil n'accède qu'à ce dont il a besoin</p>
             </div>
 
             <div className="overflow-x-auto rounded-2xl border border-white/15 bg-slate-900/60 backdrop-blur-xl shadow-2xl">
