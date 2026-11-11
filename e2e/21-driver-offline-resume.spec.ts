@@ -91,19 +91,16 @@ const problems: string[] = [];
 const WRITE_BUTTONS = ["Signaler un problème", "Enregistrer un plein"];
 
 /**
- * Attend que le service worker contrôle la page. Une page chargée avant son activation n'est contrôlée qu'après un
- * rechargement : trois essais, un rechargement entre chacun. Jamais de vert sans service worker.
+ * Attend que le service worker contrôle la page, SANS rechargement : depuis V5b-3d il précache toute la coquille à
+ * l'installation et prend le contrôle à l'activation (clients.claim). Jamais de vert sans service worker.
  */
 async function waitForServiceWorker(page: Page): Promise<void> {
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    const controlled = await expect
-      .poll(() => page.evaluate(() => navigator.serviceWorker.controller !== null), { timeout: 25_000 })
-      .toBe(true)
-      .then(() => true, () => false);
-    if (controlled) return;
-    await page.reload({ waitUntil: "domcontentloaded" });
-  }
-  throw new Error("le service worker ne contrôle pas la page (build sans service worker ?)");
+  await expect
+    .poll(() => page.evaluate(() => navigator.serviceWorker.controller !== null), {
+      timeout: 60_000,
+      message: "le service worker ne contrôle pas la page (build sans service worker ?)",
+    })
+    .toBe(true);
 }
 
 /** Session ouverte par l'API, tableau chargé, service worker aux commandes, copie hors ligne écrite. */
@@ -119,10 +116,6 @@ async function openOnline(browser: Browser, credentials: E2ECredentials, userId:
   await page.goto("/", { waitUntil: "domcontentloaded" });
   if (expectMission) await expect(page.getByText(`#${orderNumber}`)).toBeVisible({ timeout: 60_000 });
   await waitForServiceWorker(page);
-  // Les ressources chargées avant la prise de contrôle du service worker ne sont pas dans son cache : un second
-  // chargement en ligne (usage normal d'une PWA installée) les fait passer par lui avant la coupure.
-  await page.reload({ waitUntil: "domcontentloaded" });
-  if (expectMission) await expect(page.getByText(`#${orderNumber}`)).toBeVisible({ timeout: 60_000 });
   // Marqueur de reprise écrit après /api/auth/me, copie de lecture du compte écrite après les lectures.
   await expect
     .poll(
@@ -144,6 +137,13 @@ test.describe("V5b-3c : reprise hors ligne du tableau chauffeur", () => {
     const { context, page } = await openOnline(browser, driver, driver.id, true);
     try {
       await context.setOffline(true);
+      // Hors ligne, aucune requête d'écriture (POST, PUT, PATCH, DELETE) ne doit partir, en plus de l'absence de boutons.
+      const writes: string[] = [];
+      page.on("request", (request) => {
+        if (request.method() !== "GET" && request.method() !== "HEAD" && request.method() !== "OPTIONS") {
+          writes.push(`${request.method()} ${new URL(request.url()).pathname}`);
+        }
+      });
       await page.reload({ waitUntil: "domcontentloaded" });
 
       await expect(page.getByText(`#${orderNumber}`), `erreurs de page : ${problems.join(" | ")}`).toBeVisible({ timeout: 60_000 });
@@ -154,6 +154,7 @@ test.describe("V5b-3c : reprise hors ligne du tableau chauffeur", () => {
       await expect(page.getByTestId("session-unreachable")).toHaveCount(0);
       for (const name of WRITE_BUTTONS) await expect(page.getByRole("button", { name })).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Se déconnecter" })).toBeVisible();
+      expect(writes, "requêtes d'écriture parties hors ligne").toEqual([]);
       // Autre URL : renvoi vers l'accueil du profil (shell restreint).
       await page.evaluate(() => window.history.pushState({}, "", "/maintenance/work-orders"));
       await page.reload({ waitUntil: "domcontentloaded" });

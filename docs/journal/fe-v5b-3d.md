@@ -1,0 +1,90 @@
+# Journal fe-v5b-3d
+
+## 2026-11-10 - V5b-3d : précache de la coquille par le service worker
+
+**Quoi.** Le service worker (`client/public/sw.js`) télécharge toute la coquille de l'application à l'installation (index.html, manifeste, icônes et tous les fichiers à empreinte du build : JS, CSS, polices, images, soit 30 fichiers et environ 5,5 Mo). Dès la première visite, une coupure réseau ne donne plus de page blanche : toute navigation hors ligne vers une route de l'application sert l'`index.html` du cache. Prérequis pour activer le drapeau `driver-offline`.
+
+**Comment.**
+- `scripts/lib/sw-shell.ts` (`swShellPlugin`, branché dans `vite.config.ts`) : à `writeBundle`, remplace le marqueur `/*SHELL_MANIFEST*/ null` du `sw.js` copié dans `dist/public` par `{ build, assets }`. `build` est l'empreinte (10 caractères) des assets et de l'index.html. L'injection échoue si le marqueur manque.
+- `sw.js` : cache `fleetos-shell-<build>`. À l'installation, chaque URL est téléchargée avec `cache: 'reload'` (jamais une copie HTTP périmée) et l'installation échoue si une seule manque (pas de coquille partielle). `skipWaiting` puis `clients.claim` à l'activation : le contrôle est acquis sans rechargement.
+- Navigation : réseau d'abord avec délai de 4 s, puis `/index.html` du cache courant, puis erreur réseau. La réponse de navigation n'est jamais écrite : l'index.html du cache vient du précache, du même build que les assets en cache.
+- Activation : suppression des seuls caches de coquille d'une version précédente (`fleetos-shell-*` d'un autre build, anciens `fleetos-static-*` et `fleetos-tech-*`). Les autres caches ne sont jamais touchés.
+- Cloisonnement : aucune réponse `/api/*` dans Cache Storage (test dédié). La déconnexion purge IndexedDB (`offline-user-scope.ts`), jamais Cache Storage : elle ne dépend pas de ce cache, et la coquille ne contient rien d'un utilisateur.
+- Choix reuse-first : ni vite-plugin-pwa ni workbox dans le dépôt, un plugin de 60 lignes suffit. Alternative écartée : faire envoyer au service worker les ressources déjà chargées par la page à la prise de contrôle (course entre chargement et envoi, contenu non déterministe).
+- `e2e/21` : plus de rechargement en ligne avant la coupure, une seule attente du contrôle par le service worker.
+
+**Pourquoi.** Sans précache, les ressources chargées avant la prise de contrôle du service worker n'étaient pas en cache : le spec 21 devait recharger une fois en ligne, et un chauffeur qui perd le réseau juste après sa première visite voyait une page blanche.
+
+**Tester.**
+- Unitaires : `node node_modules/vitest/vitest.mjs run tests/unit/client/offline-sw-cache.test.ts tests/unit/scripts/sw-shell.test.ts`.
+- e2e de la coquille, sans base de données : `node node_modules/vite/bin/vite.js build`, puis `node scripts/e2e-static-shell.mjs 5051` (serveur statique, `/api/*` répond 401), puis `E2E_BASE_URL=http://127.0.0.1:5051 node node_modules/@playwright/test/cli.js test e2e/33-shell-precache-first-visit.spec.ts`.
+- e2e 21 (base locale et serveur complet requis) : voir l'entrée V5b-3c de `fe-v5b-3c.md`.
+
+**Limites.** Les polices Google (autre origine) ne sont pas en cache : repli sur la police système hors ligne. Le spec 21 modifié n'a pas pu être rejoué (aucune base locale disponible), il est seulement typé.
+
+## Bruit indexedDB des tests
+
+- Quoi : le faux indexedDB de `offline-resume-replay.test.ts` est factorisé dans `tests/support/fake-indexeddb.ts` et repris par `offline-session-subscription.test.ts` et `offline-storage-session.test.ts`. Le faux `createStore` d'idb-keyval renvoie une fonction, comme le vrai.
+- Pourquoi : « indexedDB is not defined » et « store is not a function » polluaient stderr. Il ne reste que les avertissements attendus du `clientLogger`.
+
+## e2e 21 : aucune requête d'écriture hors ligne (mineur 5 de la relecture de #682)
+
+- Quoi : dans le premier cas du spec 21, un écouteur `page.on('request')` posé après `setOffline(true)` relève toute requête dont la méthode n'est ni GET, ni HEAD, ni OPTIONS, et le cas exige une liste vide, en plus de l'absence de boutons d'écriture.
+- Pourquoi : l'absence de boutons ne prouve pas qu'aucune écriture ne part (rejeu de file, minuterie).
+- Tester : spec 21 (base locale et serveur complet requis). Non rejoué ici faute de base ; typé seulement.
+
+## Audit de #682, mineur 1 : énumération des magasins impossible, on conclut « inconnu »
+
+- Quoi : `kv.listDbs` (`offline-kv.ts`) ne rend plus une liste partielle quand `indexedDB.databases()` échoue : il relève l'erreur. `cacheOwnership` renvoie alors `"unknown"` (et plus `"ok"`) et `resumeOfflineRead` refuse la reprise sans rien rouvrir. `purgeAll` vide le compte sortant et l'ancien format, puis lève : `purgeOfflineSession` renvoie `false` (purge incomplète, le repère de déconnexion est gardé).
+- Pourquoi : avec une liste vide faute de pouvoir énumérer, la copie de lecture d'un autre compte restait invisible : reprise accordée sur un appareil partagé, purge déclarée complète.
+- Preuve du rouge : 2 des 3 nouveaux cas échouaient avant le correctif (« expected { userId: 7 ... } to be null », « expected true to be false »), puis vert.
+- Tester : `node node_modules/vitest/vitest.mjs run tests/unit/client/offline-resume-storage.test.ts` (bloc « énumération des magasins impossible »).
+- Non traité : `purgeOthers` garde `?? []` (changement de compte en ligne, hors du périmètre du mineur).
+
+## Audit de #682, mineur 2 : 404 sur /api/auth/me, compte supprimé
+
+- Quoi : `checkSession` traite un 404 comme un 401 (`anonymous`) : `resumeSession` efface le marqueur et expire le compte actif, `auth-bootstrap` retire la reprise hors ligne et affiche la connexion.
+- Pourquoi : `GET /api/auth/me` répond 404 quand le compte de la session n'existe plus. C'était classé « serveur injoignable avec code HTTP » : ni purge, ni arrêt de la lecture hors ligne d'un compte supprimé.
+- Preuve du rouge : 2 échecs avant le correctif (`session-check.test.ts` : 404 attendu `anonymous`, reçu `unreachable`; `auth-bootstrap.test.ts` : grant non effacé après le 404), puis vert.
+- Tester : `node node_modules/vitest/vitest.mjs run tests/unit/client/session-check.test.ts tests/unit/client/auth-bootstrap.test.ts`.
+
+## Audit de #682, mineur 3, et relecture, mineur 3 : profil sans accueil, voile au lieu d'un écran blanc
+
+- Quoi : `OfflineShellGate` rend le voile d'attente (`SessionUnreachableNotice`, exporté de `useAuth.tsx`, bouton « Réessayer » seulement si `onRetry` est fourni) quand le profil de lecture n'a pas d'accueil restreint, au lieu de `null`.
+- Pourquoi : avec une reprise accordée (`isLoading` faux), le voile habituel ne s'affiche pas, et la garde rendait `null` : écran blanc pour un profil ajouté au marqueur sans accueil.
+- Preuve du rouge : le cas « profil sans accueil restreint » échouait (« expected '' not to be '' »), puis vert. Les trois autres cas de la garde (routes, accueil chauffeur, renvoi vers l'accueil) sont figés aussi : c'est le test unitaire du voile du mineur 3 de la relecture (un seul commit pour les deux).
+- Tester : `node node_modules/vitest/vitest.mjs run tests/unit/client/offline-shell-gate.test.ts`.
+
+## Relecture de #682, mineur 1 : purge refaite sur le chemin 401 de la déconnexion en attente
+
+- Quoi : trois cas dans `pending-logout-purge.test.ts` pour le chemin « le serveur répond 401 au POST de déconnexion » (`pending-logout.ts`, `run`) : purge appelée avec le repère encore présent puis repère effacé, purge incomplète (faux) et purge qui lève : le repère reste.
+- Pourquoi : seul le chemin « 200 » était couvert ; la purge du chemin 401 pouvait disparaître sans qu'un test rougisse.
+- Preuve du rouge : purge retirée du chemin 401 (mutation temporaire) : 3 échecs ; code restauré : 8 verts. Aucun changement de code produit.
+- Tester : `node node_modules/vitest/vitest.mjs run tests/unit/client/pending-logout-purge.test.ts`.
+
+## Relecture de #682, mineur 2 : branche « appareil endormi » de la boucle de session
+
+- Quoi : deux cas dans `auth-bootstrap.test.ts`. L'horloge saute au-delà de l'échéance sans qu'aucun minuteur ne se déclenche (veille), `/me` reste injoignable : au tour suivant la boucle constate l'échéance et coupe la lecture (`expireOfflineGrant`, voile). Variante : réveil avant l'échéance, rien n'est coupé.
+- Pourquoi : la vérification à chaque tour (`auth-bootstrap.ts`, branche `state.offlineGrant && now >= expiresAt`) n'avait aucun test.
+- Preuve du rouge : branche neutralisée (mutation temporaire) : le cas « appareil endormi » échoue ; code restauré : 10 verts. Aucun changement de code produit.
+- Tester : `node node_modules/vitest/vitest.mjs run tests/unit/client/auth-bootstrap.test.ts`.
+
+## WIP : audit de #687, constat 1 (listDbs / registre local)
+
+- Quoi : `OfflineKv.listDbs` peut rendre `{ names, complete }`. Quand `indexedDB.databases()` échoue, `offline-kv` rend les noms du registre local avec `complete: false` (au lieu de lever). `purgeOthers` et `purgeAll` purgent ces noms puis signalent l'incomplétude (`purgeOthers` rend `false`, `purgeAll` lève) ; `cacheOwnership` trouve « foreign » si un nom du registre porte une copie, sinon « unknown » ; `activateOfflineUser` journalise et efface le marqueur de reprise du nouveau compte quand `purgeOthers` rend `false`.
+- Appelants de `listOfflineDbs` : `cacheOwnership` (lecture seule, unknown si incomplet), `purgeAll` (purge les noms, lève si incomplet), `purgeOthers` (purge les noms, `false` si incomplet). Seul `offline-kv.listDbs` implémente l'énumération réelle.
+- Rouge avant correctif : 3 échecs ("expected +0 to be false", "expected [ { …(2) } ] to deeply equal []", "expected 'unknown' to be 'foreign'").
+- Reste (non fait) : 2 échecs à examiner dans `offline-resume-replay.test.ts` (C1, vus sous `--pool=vmThreads`, car le pool par défaut échoue ici sur "Vitest failed to find the runner" pour une raison d'environnement), constat 2 (update() du SW, controllerchange, bandeau), mineur decodeURIComponent, notes polices/5,5 Mo, specs 21 et 33 sur base locale.
+
+## Audit de #687, constat 2 et mineurs
+
+- Constat 2 : `sw.js` appelle `self.registration.update()` quand la coquille en cache est servie après le délai de 4 s (rouge « expected +0 to be 1 », puis vert ; test inverse : réponse réseau dans le délai, aucun update). `pwa-update.ts` recharge une seule fois au `controllerchange` (sauf première prise de contrôle) et, si un brouillon de formulaire non vide existe (clés `fleetos-<forme>-v<n>-<user>`), affiche `PwaUpdateBanner` (« Nouvelle version disponible. Recharger », icône lucide) à la place. Tests : `tests/unit/client/pwa-update.test.ts` (rouge par mutation : retirer la garde « une seule fois » donne 2 échecs, « called 1 times, but got 3 times »).
+- Mineur : `scripts/e2e-static-shell.mjs` répond 400 à un pourcentage mal formé au lieu de lever.
+- Accepté : les polices Google (autre origine) ne sont pas en cache, la police système prend le relais hors ligne. Backlog : auto-héberger les polices.
+- Accepté : le précache pèse environ 5,5 Mo (30 fichiers) au premier chargement.
+
+## Correctifs de fin de lot (tests unitaires)
+
+- Quoi : l'icone de la bannière de mise à jour utilise `text-primary-text` (le test `token-pairs-contrast` interdit `text-primary` seul) ; le mock `navigator` de `pwa-register.test.ts` fournit `controller` et `addEventListener`, désormais lus par `pwa-register.ts`.
+- Comment tester : `vitest run tests/unit/client/pwa-register.test.ts tests/unit/client/token-pairs-contrast.test.ts tests/unit/client/pwa-update.test.ts tests/unit/client/offline-sw-cache.test.ts` (45 tests verts).
+- Rejeu navigateur sur build de production avec service worker, base jetable locale : spec 21 4/4, spec 33 4/4.

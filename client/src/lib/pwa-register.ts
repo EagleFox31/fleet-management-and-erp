@@ -1,4 +1,5 @@
 import { clientLogger } from "@/lib/logger";
+import { createControllerChangeHandler, hasNonEmptyDraft, markUpdateAvailable } from "@/lib/pwa-update";
 
 // Enregistrement du Service Worker PWA
 //
@@ -45,6 +46,17 @@ export function registerPwaServiceWorker(
       .catch(() => {});
     return;
   }
+
+  // Un nouveau worker prend le contrôle (skipWaiting + claim) : la page tourne sur l'ancien build.
+  navigator.serviceWorker.addEventListener(
+    'controllerchange',
+    createControllerChangeHandler({
+      hadController: navigator.serviceWorker.controller !== null,
+      hasDraft: () => hasNonEmptyDraft(),
+      reload: () => window.location.reload(),
+      onUpdateAvailable: markUpdateAvailable,
+    }),
+  );
 
   window.addEventListener('load', () => {
     navigator.serviceWorker

@@ -91,6 +91,12 @@ export function activateOfflineUser(
   cancelScheduledReplay();
   // Changement de compte : les copies et les envois en attente de l'autre compte sont détruits (S1).
   void offlineScope.purgeOthers(userId, { dropQueues: true }).then((count) => {
+    if (count === false) {
+      // Énumération impossible : purge incomplète, donc pas de reprise hors ligne pour ce compte.
+      clientLogger.warn("Purge des données hors ligne d'autres comptes incomplète : reprise hors ligne refusée");
+      void offlineResume.clear(userId).catch(logResumeFailure);
+      return;
+    }
     if (count > 0) {
       clientLogger.warn("Données hors ligne d'un autre compte supprimées", { count });
     }
@@ -242,7 +248,7 @@ export async function resumeOfflineRead(queryClient: QueryClient, now: number = 
   const grant = await offlineResume.read(now);
   if (!grant) return null;
   if (getActiveOfflineUserId() !== null || generation !== sessionGeneration) return null;
-  let ownership: "ok" | "foreign";
+  let ownership: "ok" | "foreign" | "unknown";
   try {
     ownership = await offlineScope.cacheOwnership(grant.userId);
   } catch (err) {
@@ -251,6 +257,11 @@ export async function resumeOfflineRead(queryClient: QueryClient, now: number = 
     return null;
   }
   if (getActiveOfflineUserId() !== null || generation !== sessionGeneration) return null;
+  if (ownership === "unknown") {
+    // Magasins non énumérables : impossible d'exclure la copie d'un autre compte, on ne rouvre rien.
+    clientLogger.warn("Magasins hors ligne non énumérables, reprise refusée");
+    return null;
+  }
   if (ownership === "foreign") {
     clientLogger.warn("Cache hors ligne d'un autre compte que le marqueur de reprise, purge locale");
     await purgeOfflineSession(queryClient);

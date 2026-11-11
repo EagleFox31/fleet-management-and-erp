@@ -1,5 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fakeIndexedDb } from "../../support/fake-indexeddb";
 
 // IndexedDB en mémoire : une Map par base, comme les magasins idb-keyval nommés.
 const idb = vi.hoisted(() => {
@@ -8,21 +9,26 @@ const idb = vi.hoisted(() => {
   return { dbs, gates };
 });
 
-vi.mock("idb-keyval", () => ({
-  createStore: (db: string) => db,
-  get: async (key: string, store?: string) => {
-    for (const gate of idb.gates) await gate();
-    const value = idb.dbs.get(store ?? "keyval-store")?.get(key);
-    return value === undefined ? undefined : structuredClone(value);
-  },
-  set: async (key: string, value: unknown, store?: string) => {
-    const name = store ?? "keyval-store";
-    if (!idb.dbs.has(name)) idb.dbs.set(name, new Map());
-    idb.dbs.get(name)!.set(key, structuredClone(value));
-  },
-  del: async (key: string, store?: string) => void idb.dbs.get(store ?? "keyval-store")?.delete(key),
-  clear: async (store?: string) => void idb.dbs.get(store ?? "keyval-store")?.clear(),
-}));
+// Un « store » idb-keyval est une fonction (transaction) : le faux en est une aussi, qui porte le nom de la base.
+vi.mock("idb-keyval", () => {
+  const nameOf = (store?: unknown): string => (typeof store === "function" ? (store as unknown as { dbName: string }).dbName : "keyval-store");
+  return {
+    createStore: (db: string) =>
+      Object.assign(async (_mode: string, run: (s: unknown) => unknown) => run({ transaction: { db: { close() {} } } }), { dbName: db }),
+    get: async (key: string, store?: unknown) => {
+      for (const gate of idb.gates) await gate();
+      const value = idb.dbs.get(nameOf(store))?.get(key);
+      return value === undefined ? undefined : structuredClone(value);
+    },
+    set: async (key: string, value: unknown, store?: unknown) => {
+      const name = nameOf(store);
+      if (!idb.dbs.has(name)) idb.dbs.set(name, new Map());
+      idb.dbs.get(name)!.set(key, structuredClone(value));
+    },
+    del: async (key: string, store?: unknown) => void idb.dbs.get(nameOf(store))?.delete(key),
+    clear: async (store?: unknown) => void idb.dbs.get(nameOf(store))?.clear(),
+  };
+});
 const toast = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/use-toast", () => ({ toast }));
 // Drapeaux hors ligne allumés : la file v2 refuse de mettre en file sans eux.
@@ -45,6 +51,7 @@ const action = { type: "fuel_entry" as const, endpoint: "/api/x", method: "POST"
 const queueOf = (userId: number) => offlineScope.readQueue<{ label: string }>(userId);
 
 beforeEach(() => {
+  vi.stubGlobal("indexedDB", fakeIndexedDb(idb.dbs));
   idb.dbs.clear();
   idb.gates.length = 0;
   toast.mockClear();

@@ -77,7 +77,7 @@ export function createFormDraftStorage<TData, TMeta = undefined>(options: {
 }
 
 /** Clé de brouillon : `fleetos-<formId>-v<version>-<userId|anonymous>` (voir `draftKey`). */
-const DRAFT_KEY_PATTERN = /^fleetos-.+-v\d+-(\d+|anonymous)$/;
+export const DRAFT_KEY_PATTERN = /^fleetos-.+-v\d+-(\d+|anonymous)$/;
 
 /** Clé globale (non liée à l'utilisateur) qui mémorise le dernier véhicule saisi dans un OT. */
 const GLOBAL_USER_KEYS = ["currentVehicleRegistration"] as const;

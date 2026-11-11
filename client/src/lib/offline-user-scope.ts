@@ -341,6 +341,11 @@ export function selectPersistableQueries<T extends CachedQueryLike>(
 // ---------------------------------------------------------------------------
 
 /** Stockage clé/valeur injecté : une base nommée par utilisateur. */
+export interface OfflineDbListing {
+  names: string[];
+  complete: boolean;
+}
+
 export interface OfflineKv {
   get<T>(db: string, key: string): Promise<T | undefined>;
   set(db: string, key: string, value: unknown): Promise<void>;
@@ -349,8 +354,11 @@ export interface OfflineKv {
   clearDb(db: string): Promise<void>;
   /** Supprime la base vidée (et son entrée du registre), pour ne pas laisser de base vide par compte. Facultatif, au mieux. */
   dropDb?(db: string): Promise<void>;
-  /** Noms des bases `fleetos-offline-u*` connues du navigateur. */
-  listDbs(): Promise<string[]>;
+  /**
+   * Noms des bases `fleetos-offline-u*` connues. Un tableau est une liste complète ; `complete: false` dit que
+   * l'énumération du navigateur a échoué et que seuls les noms du registre local sont rendus.
+   */
+  listDbs(): Promise<string[] | OfflineDbListing>;
   /** Supprime une clé du store par défaut (ancien format global). */
   delLegacy(key: string): Promise<void>;
 }
@@ -457,12 +465,15 @@ export function createOfflineScope(kv: OfflineKv) {
     return { count: losses.reduce((a, l) => a + l.count, 0), types };
   };
 
-  async function listOfflineDbs(): Promise<string[] | null> {
+  /** Magasins connus ; `complete: false` si l'énumération a échoué (les noms rendus ne sont alors que ceux du registre). */
+  async function listOfflineDbs(): Promise<OfflineDbListing> {
     try {
-      return (await kv.listDbs()).filter(isOfflineDbName);
+      const listed = await kv.listDbs();
+      const raw = Array.isArray(listed) ? { names: listed, complete: true } : listed;
+      return { names: raw.names.filter(isOfflineDbName), complete: raw.complete };
     } catch (err) {
       clientLogger.warn("Énumération des magasins hors ligne impossible", { err });
-      return null;
+      return { names: [], complete: false };
     }
   }
 
@@ -527,17 +538,19 @@ export function createOfflineScope(kv: OfflineKv) {
     /**
      * Avant toute reprise hors ligne : le cache de lecture appartient-il bien à `userId` ? « foreign » si
      * l'enveloppe de son magasin porte un autre propriétaire, ou si un autre compte garde une copie de
-     * lecture sur l'appareil (il n'y en a qu'une à la fois). Lecture seule, rien n'est supprimé ici.
+     * lecture sur l'appareil (il n'y en a qu'une à la fois). « unknown » si les magasins des autres comptes
+     * ne peuvent pas être énumérés : l'absence de preuve n'est pas une preuve, l'appelant refuse la reprise.
+     * Lecture seule, rien n'est supprimé ici.
      */
-    async cacheOwnership(userId: number): Promise<"ok" | "foreign"> {
+    async cacheOwnership(userId: number): Promise<"ok" | "foreign" | "unknown"> {
       const own = offlineDbName(userId);
       const saved = await kv.get<CacheEnvelope>(own, CACHE_RECORD_KEY);
       if (saved !== undefined && (saved === null || typeof saved !== "object" || saved.userId !== userId)) return "foreign";
-      const others = ((await listOfflineDbs()) ?? []).filter((name) => name !== own);
-      for (const name of others) {
+      const listed = await listOfflineDbs();
+      for (const name of listed.names.filter((db) => db !== own)) {
         if ((await kv.get<unknown>(name, CACHE_RECORD_KEY)) !== undefined) return "foreign";
       }
-      return "ok";
+      return listed.complete ? "ok" : "unknown";
     },
 
     async loadCache(userId: number, now = Date.now(), isFlagOn?: FlagReader): Promise<PersistedQuery[]> {
@@ -592,13 +605,16 @@ export function createOfflineScope(kv: OfflineKv) {
      * Avec `dropOtherQueues`, les magasins des autres comptes sont vidés entièrement, file
      * comprise (décision V5b : purge complète à la déconnexion).
      * Renvoie le nombre d'écritures du compte sortant détruites (journalisé).
+     * Lève, après avoir vidé le compte sortant et l'ancien format, si les magasins des autres comptes
+     * n'ont pas pu être énumérés : la purge est alors incomplète et l'appelant doit le savoir.
      */
     async purgeAll(
       activeUserId: number | null = getActiveOfflineUserId(),
       options: { dropOtherQueues?: boolean } = {},
     ): Promise<number> {
       const own = activeUserId !== null ? offlineDbName(activeUserId) : null;
-      const others = ((await listOfflineDbs()) ?? []).filter((name) => name !== own);
+      const listed = await listOfflineDbs();
+      const others = listed.names.filter((name) => name !== own);
       const ownLoss = own ? await summarizeQueued(own) : { count: 0, types: {} };
       const lost = ownLoss.count;
       const lostOthers = options.dropOtherQueues
@@ -609,6 +625,7 @@ export function createOfflineScope(kv: OfflineKv) {
         ...others.map(options.dropOtherQueues ? clearDb : dropReadCache),
       ]);
       await purgeLegacy();
+      if (!listed.complete) throw new Error("Magasins hors ligne des autres comptes non énumérables");
       if (lostOthers.count > 0) {
         clientLogger.warn("Écritures hors ligne d'autres comptes détruites à la déconnexion", {
           lost: lostOthers.count,
@@ -629,10 +646,13 @@ export function createOfflineScope(kv: OfflineKv) {
      * des autres comptes est supprimé ; leur file d'écritures est gardée pour leur
      * prochaine connexion, sauf avec `dropQueues` (purge complète, décision V5b).
      * Gardée, elle reste illisible ici : `readQueue` exige le même userId.
+     * Énumération impossible : les magasins du registre local sont purgés, puis `false` signale que la purge est
+     * incomplète (échec en mode fermé : l'appelant refuse la reprise hors ligne du nouveau compte).
      */
-    async purgeOthers(keepUserId: number, options: { dropQueues?: boolean } = {}): Promise<number> {
+    async purgeOthers(keepUserId: number, options: { dropQueues?: boolean } = {}): Promise<number | false> {
       const keep = offlineDbName(keepUserId);
-      const others = ((await listOfflineDbs()) ?? []).filter((name) => name !== keep);
+      const listed = await listOfflineDbs();
+      const others = listed.names.filter((name) => name !== keep);
       if (options.dropQueues) {
         const lost = mergeLoss(await Promise.all(others.map(summarizeQueued)));
         if (lost.count > 0) {
@@ -643,7 +663,7 @@ export function createOfflineScope(kv: OfflineKv) {
         }
       }
       await Promise.all(others.map(options.dropQueues ? clearDb : dropReadCache));
-      return others.length;
+      return listed.complete ? others.length : false;
     },
 
     purgeLegacy,

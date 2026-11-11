@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from "react";
 import { Redirect, useLocation } from "wouter";
-import { useAuth } from "@/hooks/useAuth";
+import { SessionUnreachableNotice, useAuth } from "@/hooks/useAuth";
 import { isOfflineReadOnly, offlineHomePathFor } from "@/lib/offline-read-only";
 import DriverDashboard from "@/pages/driver/dashboard";
 
@@ -24,7 +24,8 @@ export function OfflineShellGate({ children }: { children: ReactNode }) {
 
   const home = offlineHomePathFor(offlineGrant.profile);
   const Home = OFFLINE_HOME_BY_PROFILE[offlineGrant.profile];
-  if (home === null || !Home) return null;
+  // Profil de lecture sans accueil restreint : le voile d'attente prévu, jamais un écran blanc.
+  if (home === null || !Home) return <SessionUnreachableNotice />;
   if (location !== home) return <Redirect to={home} replace />;
   return <Home />;
 }

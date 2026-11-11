@@ -183,7 +183,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
-function SessionUnreachableNotice({ onRetry }: { onRetry: () => void }) {
+/** Voile d'attente de la session. Sans `onRetry`, pas de bouton : la relance reste automatique. */
+export function SessionUnreachableNotice({ onRetry }: { onRetry?: () => void }) {
   return (
     <div
       role="status"
@@ -196,14 +197,16 @@ function SessionUnreachableNotice({ onRetry }: { onRetry: () => void }) {
         <p className="text-sm text-muted-foreground">
           Votre session est conservée. Nouvelle tentative automatique en cours.
         </p>
-        <button
-          type="button"
-          onClick={onRetry}
-          className="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm text-foreground hover:bg-muted"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Réessayer maintenant
-        </button>
+        {onRetry ? (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-sm text-foreground hover:bg-muted"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Réessayer maintenant
+          </button>
+        ) : null}
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 import type { User } from "./auth";
 
 /**
- * Seul un 401 signifie « pas de session ». Un délai dépassé, un réseau coupé ou
+ * Seuls un 401 et un 404 (compte supprimé) signifient « pas de session ». Un délai dépassé, un réseau coupé ou
  * une 5xx disent seulement que le serveur n'a pas répondu : renvoyer alors vers
  * la connexion déconnectait l'utilisateur à chaque lenteur.
  */
@@ -39,7 +39,9 @@ export async function checkSession(
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchImpl("/api/auth/me", { credentials: "include", signal: controller.signal });
-    if (response.status === 401) return { status: "anonymous" };
+    // 404 : `/api/auth/me` ne retrouve plus le compte de la session (supprimé). Le serveur a répondu que cet
+    // utilisateur n'existe plus : même issue qu'un 401, purge et écran de connexion, jamais une lecture hors ligne.
+    if (response.status === 401 || response.status === 404) return { status: "anonymous" };
     if (!response.ok) return { status: "unreachable", httpStatus: response.status };
     // Une redirection (portail captif) ou une 200 qui n'est pas du JSON est une réponse HTTP, pas un
     // réseau coupé : jamais de restauration hors ligne sur elle.

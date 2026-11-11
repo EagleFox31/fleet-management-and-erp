@@ -7,6 +7,7 @@ import App from "./App";
 // les invalidations/patches temps réel tombaient dans un client fantôme.
 import { queryClient } from "@/lib/queryClient";
 import { registerPwaServiceWorker } from "@/lib/pwa-register";
+import { PwaUpdateBanner } from "@/components/pwa-update-banner";
 import { enableMocksIfRequested, mocksRequested } from "@/mocks/enable-mocks";
 import "./index.css";
 
@@ -18,6 +19,7 @@ void enableMocksIfRequested().finally(() => {
   createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={queryClient}>
     <App />
+    <PwaUpdateBanner />
   </QueryClientProvider>,
   );
 });

@@ -66,10 +66,13 @@ const idbKv: OfflineKv = {
           if (isOfflineDbName(db.name)) names.add(db.name);
         }
       } catch (err) {
+        // Énumération refusée : le registre local reste connu mais la liste n'est pas complète. On le dit
+        // au lieu de la rendre comme complète : l'appelant purge ces noms puis traite le reste comme inconnu.
         clientLogger.warn("Énumération des bases IndexedDB impossible", { err });
+        return { names: Array.from(names), complete: false };
       }
     }
-    return Array.from(names);
+    return { names: Array.from(names), complete: true };
   },
   delLegacy: (key) => del(key),
 };

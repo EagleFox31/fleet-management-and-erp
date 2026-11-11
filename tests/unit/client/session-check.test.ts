@@ -14,6 +14,10 @@ describe("checkSession : seul un 401 vaut déconnexion", () => {
     expect(await checkSession(respond(401))).toEqual({ status: "anonymous" });
   });
 
+  it("404 (compte supprimé, /api/auth/me ne le trouve plus) → anonyme, comme un 401", async () => {
+    expect(await checkSession(respond(404, { message: "Utilisateur non trouvé" }))).toEqual({ status: "anonymous" });
+  });
+
   it.each([403, 500, 502, 503])("%i → serveur injoignable, pas une déconnexion, avec le code HTTP", async (status) => {
     expect(await checkSession(respond(status))).toEqual({ status: "unreachable", httpStatus: status });
   });

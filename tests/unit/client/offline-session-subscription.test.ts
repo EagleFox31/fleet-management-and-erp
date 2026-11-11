@@ -1,5 +1,6 @@
 import { QueryClient } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fakeIndexedDb } from "../../support/fake-indexeddb";
 
 // IndexedDB en mémoire : une Map par base, comme les magasins idb-keyval nommés.
 const idb = vi.hoisted(() => {
@@ -61,6 +62,7 @@ import { activateOfflineUser, setupOfflinePersistence } from "@/lib/offline-stor
 import { getActiveOfflineUserId, setActiveOfflineUserId } from "@/lib/offline-user-scope";
 
 beforeEach(() => {
+  vi.stubGlobal("indexedDB", fakeIndexedDb(idb.dbs));
   vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
   channel.posted.length = 0;
   setActiveOfflineUserId(null);
