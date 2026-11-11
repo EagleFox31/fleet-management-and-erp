@@ -100,26 +100,33 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     expect(widths.header).toBe(widths.viewport);
   });
 
-  test(`${viewport.width} px : la route sépare le haut de page des profils, sur toute la largeur`, async ({ page }) => {
+  test(`${viewport.width} px : la route est dans le fondu vers les profils, sur toute la largeur, sans masquer le titre`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await page.goto("/");
-    const road = page.getByTestId("road-divider");
+    const road = page.locator("#profiles").getByTestId("road-divider");
     await road.waitFor({ state: "attached", timeout: 60_000 });
     await expect(road).toHaveAttribute("aria-hidden", "true");
-    await expect(road.locator("svg")).toHaveCount(1);
+    await expect(road.locator("svg path.landing-road-dash")).toHaveCount(1);
     expect(await road.locator("img, video").count()).toBe(0);
-    const layout = await road.evaluate((el) => ({
-      width: Math.round(el.getBoundingClientRect().width),
-      viewport: document.documentElement.clientWidth,
-      height: Math.round(el.getBoundingClientRect().height),
-      text: el.textContent?.trim() ?? "",
-      nextId: el.nextElementSibling?.id ?? "",
-    }));
+    const layout = await road.evaluate((el) => {
+      const section = document.getElementById("profiles")!;
+      const badge = section.querySelector("h2")!.previousElementSibling as HTMLElement;
+      const rect = el.getBoundingClientRect();
+      return {
+        width: Math.round(rect.width),
+        viewport: document.documentElement.clientWidth,
+        text: el.textContent?.trim() ?? "",
+        roadBottom: rect.bottom,
+        badgeTop: badge.getBoundingClientRect().top,
+        sectionBorderTop: getComputedStyle(section).borderTopWidth,
+        overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      };
+    });
     expect(layout.width).toBe(layout.viewport);
     expect(layout.text).toBe("");
-    expect(layout.nextId).toBe("profiles");
-    expect(layout.height).toBeGreaterThanOrEqual(viewport.width < 768 ? 24 : 40);
-    expect(layout.height).toBeLessThanOrEqual(viewport.width < 768 ? 32 : 56);
+    expect(layout.roadBottom).toBeLessThanOrEqual(layout.badgeTop);
+    expect(layout.sectionBorderTop).toBe("0px");
+    expect(layout.overflowX).toBe(0);
   });
 }
 
