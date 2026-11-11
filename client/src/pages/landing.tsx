@@ -30,6 +30,7 @@ import {
   KeyRound,
   Lightbulb,
   PlayCircle,
+  BookOpen,
   Calculator,
   Eye,
 } from "lucide-react";
@@ -136,30 +137,38 @@ function VideoBackground({ opacity = 0.85 }: { opacity?: number }) {
   );
 }
 
-// Types de profils utilisateurs (11 profils métier)
 /** Chapitre d'une vidéo de démonstration : titre court et début en secondes. */
 type DemoVideoChapter = { title: string; start: number };
 
-/** Vidéo de démonstration (client/public/demos), découpée en chapitres quand elle enchaîne plusieurs parcours. */
-type ProfileDemoVideo = { src: string; chapters?: DemoVideoChapter[] };
+/**
+ * Vidéo de démonstration (client/public/demos), découpée en chapitres quand elle enchaîne plusieurs parcours.
+ * `durationSeconds` : durée réelle du fichier (ffprobe), affichée sur le bouton « Voir la démo ».
+ */
+type ProfileDemoVideo = { src: string; durationSeconds: number; chapters?: DemoVideoChapter[] };
 
 /** Vidéo de démonstration par profil. Données de démonstration uniquement. */
 const PROFILE_DEMO_VIDEOS: Partial<Record<string, ProfileDemoVideo>> = {
-  workshop_manager: { src: "/demos/workshop_manager.mp4" },
-  technician: { src: "/demos/technician.mp4" },
-  warehouse: { src: "/demos/warehouse.mp4" },
+  workshop_manager: { src: "/demos/workshop_manager.mp4", durationSeconds: 123 },
+  technician: { src: "/demos/technician.mp4", durationSeconds: 98 },
+  warehouse: { src: "/demos/warehouse.mp4", durationSeconds: 89 },
   logistics: {
     src: "/demos/logistics.mp4",
+    durationSeconds: 215,
     chapters: [
       { title: "Organiser et facturer une mission", start: 0 },
       { title: "Suivre ses camions en mission", start: 108 },
     ],
   },
-  secretary: { src: "/demos/secretary.mp4" },
-  management: { src: "/demos/management.mp4" },
-  driver: { src: "/demos/driver.mp4" },
-  accountant: { src: "/demos/accountant.mp4" },
+  secretary: { src: "/demos/secretary.mp4", durationSeconds: 121 },
+  management: { src: "/demos/management.mp4", durationSeconds: 140 },
+  driver: { src: "/demos/driver.mp4", durationSeconds: 78 },
+  accountant: { src: "/demos/accountant.mp4", durationSeconds: 148 },
 };
+
+/** Durée lisible d'une démo, arrondie à la minute (jamais « 0 min »). */
+function formatDemoDuration(seconds: number): string {
+  return `${Math.max(1, Math.round(seconds / 60))} min`;
+}
 
 /** Index du chapitre en cours : le dernier dont le début est passé. */
 function currentChapterIndex(chapters: DemoVideoChapter[], time: number): number {
@@ -175,10 +184,16 @@ function formatChapterStart(seconds: number): string {
 }
 
 /** Lecteur de la fenêtre Guide, avec boutons de chapitre quand la vidéo en a. */
-function ProfileDemoPlayer({ profileId, video }: { profileId: string; video: ProfileDemoVideo }) {
+function ProfileDemoPlayer({ profileId, video, autoPlay = false }: { profileId: string; video: ProfileDemoVideo; autoPlay?: boolean }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [active, setActive] = useState(0);
   const chapters = video.chapters ?? [];
+
+  // Ouverte par « Voir la démo » : la vidéo démarre seule. Un navigateur qui refuse la lecture laisse les contrôles.
+  useEffect(() => {
+    if (!autoPlay) return;
+    void videoRef.current?.play().catch(() => undefined);
+  }, [autoPlay]);
 
   const goTo = (chapter: DemoVideoChapter, index: number) => {
     const el = videoRef.current;
@@ -222,107 +237,156 @@ function ProfileDemoPlayer({ profileId, video }: { profileId: string; video: Pro
   );
 }
 
-const userProfiles = [
-  {
-    id: "admin",
-    name: "Administrateur",
-    icon: Shield,
-    color: "text-red-500",
-    bgColor: "bg-red-500/10",
-    description: "Contrôle total du système avec accès à toutes les fonctionnalités",
-    permissions: ["Gestion complète", "Configuration", "Rapports", "Utilisateurs", "Sécurité", "Exports"],
-  },
-  {
-    id: "workshop_manager",
-    name: "Chef d'Atelier",
-    icon: Wrench,
-    color: "text-blue-500",
-    bgColor: "bg-blue-500/10",
-    description: "Supervision des opérations de maintenance et gestion d'équipe",
-    permissions: ["Ordres de travail", "Planification", "Équipe", "Rapports", "Pièces", "Validation"],
-  },
-  {
-    id: "technician",
-    name: "Technicien",
-    icon: Settings,
-    color: "text-orange-500",
-    bgColor: "bg-orange-500/10",
-    description: "Exécution des tâches de maintenance et interventions techniques",
-    permissions: ["Mes ordres", "Interventions", "Historique", "Demandes pièces", "Inspections pneus"],
-  },
-  {
-    id: "secretary",
-    name: "Secrétaire",
-    icon: FileText,
-    color: "text-purple-500",
-    bgColor: "bg-purple-500/10",
-    description: "Gestion administrative, conformité documentaire et facturation",
-    permissions: ["Documents flotte", "Factures fournisseurs", "Contrôle 3 voies", "Dossiers RH chauffeurs"],
-  },
+/** Familles de profils, dans l'ordre d'affichage de la landing. */
+type ProfileFamily = "operations" | "workshop" | "store" | "management" | "access";
+
+/**
+ * Sur grand écran (4 colonnes), une famille occupe autant de colonnes que de profils :
+ * Exploitation et Atelier partagent une rangée, Magasin et Gestion la suivante. Classes littérales pour Tailwind.
+ */
+const FAMILY_LAYOUT: Record<number, { span: string; cols: string }> = {
+  1: { span: "xl:col-span-1", cols: "xl:grid-cols-1" },
+  2: { span: "xl:col-span-2", cols: "xl:grid-cols-2" },
+  3: { span: "xl:col-span-3", cols: "xl:grid-cols-3" },
+  4: { span: "xl:col-span-4", cols: "xl:grid-cols-4" },
+};
+
+const PROFILE_FAMILIES: { id: ProfileFamily; title: string }[] = [
+  { id: "operations", title: "Exploitation" },
+  { id: "workshop", title: "Atelier" },
+  { id: "store", title: "Magasin" },
+  { id: "management", title: "Gestion et direction" },
+  { id: "access", title: "Accès" },
+];
+
+/**
+ * Profils métier, rangés par famille. `day` : la journée de la personne en une phrase ;
+ * `tasks` : 3 ou 4 tâches concrètes, chacune commençant par un verbe. Vocabulaire de garage, sans jargon.
+ */
+const userProfiles: {
+  id: string;
+  name: string;
+  family: ProfileFamily;
+  icon: ElementType;
+  color: string;
+  bgColor: string;
+  day: string;
+  tasks: string[];
+}[] = [
   {
     id: "logistics",
     name: "Logisticien",
+    family: "operations",
     icon: Truck,
-    color: "text-cyan-500",
+    color: "text-cyan-400",
     bgColor: "bg-cyan-500/10",
-    description: "Coordination des missions, suivi carburant et gestion de flotte",
-    permissions: ["Missions transport", "Consommation carburant", "Feuilles de route", "Affectations"],
-  },
-  {
-    id: "warehouse",
-    name: "Magasinier",
-    icon: Package,
-    color: "text-green-500",
-    bgColor: "bg-green-500/10",
-    description: "Gestion complète des stocks, pièces détachées et inventaire pneus",
-    permissions: ["Inventaire pièces", "Réceptions / Entrées", "Sorties stock OT", "Catalogue pneus"],
-  },
-  {
-    id: "management",
-    name: "Direction (DG)",
-    icon: Briefcase,
-    color: "text-emerald-400",
-    bgColor: "bg-emerald-500/10",
-    description: "Dashboard exécutif, marge brute après charges, rentabilité et CA",
-    permissions: ["CA facturé & encaissé", "Marge brute HT", "Top clients & lignes", "Rapport Direction PDF"],
-  },
-  {
-    id: "accountant",
-    name: "Comptable",
-    icon: Calculator,
-    color: "text-success",
-    bgColor: "bg-success/10",
-    description: "Règlements, trésorerie et suivi des encaissements",
-    permissions: ["Factures fournisseurs", "Facturation client", "Trésorerie & traites", "Carte carburant (consultation)"],
-  },
-  {
-    id: "viewer",
-    name: "Lecteur",
-    icon: Eye,
-    color: "text-muted-foreground",
-    bgColor: "bg-muted/30",
-    description: "Consultation seule de la flotte et des rapports, sans aucune saisie",
-    permissions: ["Véhicules & documents", "Rapports d'activité", "Aucune saisie", "Aucune donnée personnelle"],
-  },
-  {
-    id: "client",
-    name: "Client",
-    icon: Users,
-    color: "text-indigo-500",
-    bgColor: "bg-indigo-500/10",
-    description: "Consultation exclusive de vos véhicules, missions et factures",
-    permissions: ["Ses véhicules", "Ses missions", "Historique factures", "Export PDF"],
+    day: "Il organise les missions, choisit le camion et le chauffeur, puis suit chaque camion sur la route.",
+    tasks: ["Créer une mission et l'affecter", "Suivre un camion sur la carte", "Contrôler le carburant consommé", "Facturer une mission terminée"],
   },
   {
     id: "driver",
     name: "Chauffeur",
+    family: "operations",
     icon: KeyRound,
-    color: "text-amber-500",
+    color: "text-amber-400",
     bgColor: "bg-amber-500/10",
-    description: "Interface PWA mobile dédiée avec connexion rapide par code PIN",
-    permissions: ["Mission du jour", "Feuille de route", "Relevé km départ/arrivée", "Alertes incident"],
-  }
+    day: "Il ouvre l'application sur son téléphone avec son code et suit sa mission du jour.",
+    tasks: ["Voir sa mission du jour", "Noter le kilométrage au départ et à l'arrivée", "Signaler une panne ou un incident"],
+  },
+  {
+    id: "workshop_manager",
+    name: "Chef d'atelier",
+    family: "workshop",
+    icon: Wrench,
+    color: "text-blue-400",
+    bgColor: "bg-blue-500/10",
+    day: "Il ouvre les réparations, répartit les mécaniciens et suit les camions immobilisés.",
+    tasks: ["Ouvrir une réparation", "Affecter un mécanicien", "Valider une réparation terminée", "Suivre les camions immobilisés"],
+  },
+  {
+    id: "technician",
+    name: "Technicien",
+    family: "workshop",
+    icon: Settings,
+    color: "text-orange-400",
+    bgColor: "bg-orange-500/10",
+    day: "Il répare les camions qu'on lui confie et demande au magasin les pièces dont il a besoin.",
+    tasks: ["Voir ses réparations du jour", "Demander une pièce au magasin", "Noter le travail fait", "Contrôler l'usure des pneus"],
+  },
+  {
+    id: "warehouse",
+    name: "Magasinier",
+    family: "store",
+    icon: Package,
+    color: "text-green-400",
+    bgColor: "bg-green-500/10",
+    day: "Il reçoit les pièces et les pneus, les range, puis les sort pour l'atelier.",
+    tasks: ["Entrer une livraison en stock", "Sortir une pièce pour une réparation", "Repérer les pièces bientôt en rupture", "Tenir le stock de pneus"],
+  },
+  {
+    id: "management",
+    name: "Direction",
+    family: "management",
+    icon: Briefcase,
+    color: "text-emerald-400",
+    bgColor: "bg-emerald-500/10",
+    day: "La direction voit chaque mois ce que rapportent chaque camion et chaque client.",
+    tasks: ["Suivre le chiffre d'affaires du mois", "Voir la marge par camion et par client", "Télécharger le rapport de direction"],
+  },
+  {
+    id: "accountant",
+    name: "Comptable",
+    family: "management",
+    icon: Calculator,
+    color: "text-emerald-300",
+    bgColor: "bg-emerald-500/10",
+    day: "Il enregistre les paiements et suit l'argent qui entre et qui sort.",
+    tasks: ["Payer une facture fournisseur", "Suivre les factures clients à encaisser", "Suivre la trésorerie et les traites", "Consulter les dépenses de carburant"],
+  },
+  {
+    id: "secretary",
+    name: "Secrétaire",
+    family: "management",
+    icon: FileText,
+    color: "text-purple-400",
+    bgColor: "bg-purple-500/10",
+    day: "Il tient à jour les papiers des camions et des chauffeurs, et enregistre les factures fournisseurs.",
+    tasks: ["Suivre les papiers des camions", "Enregistrer une facture fournisseur", "Vérifier facture, commande et réception", "Tenir les dossiers des chauffeurs"],
+  },
+  {
+    id: "client",
+    name: "Client",
+    family: "access",
+    icon: Users,
+    color: "text-indigo-300",
+    bgColor: "bg-indigo-500/10",
+    day: "Le client suit les missions faites pour lui et ses factures, et rien d'autre.",
+    tasks: ["Suivre ses missions", "Consulter ses factures", "Télécharger un document en PDF"],
+  },
+  {
+    id: "viewer",
+    name: "Lecteur",
+    family: "access",
+    icon: Eye,
+    color: "text-slate-300",
+    bgColor: "bg-white/5",
+    day: "Il consulte la flotte et les rapports, sans pouvoir rien modifier.",
+    tasks: ["Consulter les camions et leurs papiers", "Lire les rapports d'activité", "Regarder sans rien changer"],
+  },
+  {
+    id: "admin",
+    name: "Administrateur",
+    family: "access",
+    icon: Shield,
+    color: "text-red-400",
+    bgColor: "bg-red-500/10",
+    day: "Il crée les comptes, donne à chacun son profil et règle l'application.",
+    tasks: ["Créer un compte", "Choisir le profil de chacun", "Régler l'application"],
+  },
 ];
+
+/** Profils d'une famille, dans l'ordre de la liste. */
+const profilesOf = (family: ProfileFamily) => userProfiles.filter((profile) => profile.family === family);
 
 /** Nombre de profils affiché partout sur la page : dérivé de la liste, jamais écrit en dur. */
 const ROLE_COUNT = userProfiles.length;
@@ -1133,7 +1197,7 @@ function StorytellingTransformationSection() {
                 <p className="text-slate-300 text-sm sm:text-base mt-3 leading-relaxed">
                   {tab === "before"
                     ? "Sans synchronisation en direct entre l'atelier, la route et la direction, chaque imprévu entraîne des retards coûteux, des litiges fournisseurs et une usure prématurée de la flotte."
-                    : "Grâce à la synchronisation WebSocket temps réel, les 11 profils collaborent sur la même vérité. Les pannes sont anticipées, le carburant est maîtrisé et la rentabilité est visible en direct."}
+                    : `Grâce à la synchronisation WebSocket temps réel, les ${ROLE_COUNT} profils collaborent sur la même vérité. Les pannes sont anticipées, le carburant est maîtrisé et la rentabilité est visible en direct.`}
                 </p>
               </div>
 
@@ -1237,6 +1301,13 @@ export default function LandingPage() {
   const { isAuthenticated, user } = useAuth();
   const [, setLocation] = useLocation();
   const [selectedProfile, setSelectedProfile] = useState<string | null>(null);
+  /** Fenêtre ouverte par « Voir la démo » (vidéo lancée) plutôt que par « Lire le guide ». */
+  const [openedOnDemo, setOpenedOnDemo] = useState(false);
+  const profileDialogRef = useRef<HTMLDivElement>(null);
+  const openProfile = (profileId: string, onDemo: boolean) => {
+    setOpenedOnDemo(onDemo);
+    setSelectedProfile(profileId);
+  };
 
   // Si connecté, rediriger vers le dashboard sans reload complet
   useEffect(() => {
@@ -1277,21 +1348,17 @@ export default function LandingPage() {
               Fonctionnalités
             </a>
             <a href="#profiles" className="hover:text-emerald-400 transition-colors">
-              {ROLE_COUNT} Rôles Métier
+              {ROLE_COUNT} profils
             </a>
             <a href="#transformation" className="hover:text-emerald-400 transition-colors">
-              Transformation
+              Avant / après
             </a>
             <a href="#stats" className="hover:text-emerald-400 transition-colors">
-              Chiffres Clés
+              Résultats
             </a>
           </nav>
 
           <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 text-xs text-slate-300">
-              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>Système actif</span>
-            </div>
             <Link href="/login">
               <Button data-testid="button-login-header" className="rounded-full h-9 px-5 text-sm font-semibold bg-white text-slate-950 hover:bg-slate-100 shadow-sm hover:shadow-md transition-all duration-200 active:scale-95 border-0">
                 Connexion
@@ -1356,7 +1423,7 @@ export default function LandingPage() {
                   <div className="text-xs text-slate-400">Traçabilité pièces & OT</div>
                 </div>
                 <div>
-                  <div className="text-2xl sm:text-3xl font-extrabold text-teal-300">{ROLE_COUNT} Rôles</div>
+                  <div className="text-2xl sm:text-3xl font-extrabold text-teal-300">{ROLE_COUNT} profils</div>
                   <div className="text-xs text-slate-400">Interconnectés en direct</div>
                 </div>
               </div>
@@ -1377,92 +1444,119 @@ export default function LandingPage() {
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-32 bg-emerald-500/5 blur-3xl -z-10 pointer-events-none" />
 
         <div className="container mx-auto px-4">
-          <div className="text-center max-w-3xl mx-auto mb-14">
-            <Badge variant="outline" className="mb-4 bg-emerald-500/10 text-emerald-300 border-emerald-500/30 px-3 py-1 inline-flex items-center gap-1.5 text-xs font-medium">
-              <Shield className="h-3.5 w-3.5 text-emerald-400" />
-              Gouvernance & Sécurité RBAC
+          <div className="text-center max-w-3xl mx-auto mb-12">
+            <Badge variant="outline" className="mb-4 bg-emerald-500/10 text-emerald-200 border-emerald-400/40 px-3 py-1 inline-flex items-center gap-1.5 text-xs font-medium">
+              <Users className="h-3.5 w-3.5 text-emerald-300" aria-hidden="true" />
+              Chacun voit ce qui le concerne
             </Badge>
             <h2 className="text-3xl md:text-5xl font-extrabold tracking-tight text-white mb-4">
-              {ROLE_COUNT} Profils Métier,{" "}
+              {ROLE_COUNT} profils,{" "}
               <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-300 bg-clip-text text-transparent">
-                une collaboration fluide
+                une seule équipe
               </span>
             </h2>
-            <p className="text-slate-400 text-base md:text-lg mb-4 leading-relaxed">
-              Des accès sur mesure et une séparation rigoureuse des responsabilités pour les {ROLE_COUNT} rôles clés de votre organisation.
+            <p className="text-slate-200 text-base md:text-lg leading-relaxed">
+              Du chauffeur à la direction, chacun retrouve son travail du jour, et seulement le sien.
+              Regardez la démo de votre métier : quelques minutes suffisent.
             </p>
-            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-1.5 text-xs text-slate-300">
-              <Info className="h-3.5 w-3.5 text-emerald-400" />
-              <span>Cliquez sur un profil pour ouvrir son guide d'utilisation pas à pas</span>
-            </div>
           </div>
 
-          {/* Grille des 11 cartes de profils avec effets glassmorphism */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-6 mb-20">
-            {userProfiles.map((profile, idx) => {
-              const Icon = profile.icon;
-              return (
-                <motion.div
-                  key={profile.id}
-                  initial={{ opacity: 0, y: 24 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.4, delay: idx * 0.05 }}
-                  className="h-full"
-                >
-                  <Card 
-                    className="h-full bg-slate-900/60 backdrop-blur-xl border-white/10 hover:border-emerald-500/40 hover:bg-slate-900/90 transition-all duration-300 cursor-pointer group flex flex-col justify-between hover:shadow-xl hover:shadow-emerald-950/30 hover:-translate-y-1.5 relative overflow-hidden" 
-                    data-testid={`card-profile-${profile.id}`}
-                    onClick={() => setSelectedProfile(profile.id)}
-                  >
-                    {/* Glow discret au survol */}
-                    <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-full blur-xl group-hover:bg-emerald-500/15 transition-all duration-500 pointer-events-none" />
+          {/* Profils rangés par famille, du terrain à l'administration */}
+          <div className="grid grid-cols-1 xl:grid-cols-4 gap-x-6 gap-y-12 mb-20">
+            {PROFILE_FAMILIES.map((family) => (
+              <section
+                key={family.id}
+                aria-labelledby={`profile-family-${family.id}`}
+                data-testid={`profile-family-${family.id}`}
+                className={FAMILY_LAYOUT[profilesOf(family.id).length]?.span}
+              >
+                <h3 id={`profile-family-${family.id}`} className="mb-5 flex items-center gap-4 text-xl font-bold text-white">
+                  {family.title}
+                  <span className="h-px flex-1 bg-white/15" aria-hidden="true" />
+                </h3>
+                <div className={`grid grid-cols-1 md:grid-cols-2 gap-6 ${FAMILY_LAYOUT[profilesOf(family.id).length]?.cols ?? ""}`}>
+                  {profilesOf(family.id).map((profile, idx) => {
+                    const Icon = profile.icon;
+                    const video = PROFILE_DEMO_VIDEOS[profile.id];
+                    const duration = video ? formatDemoDuration(video.durationSeconds) : null;
+                    return (
+                      <motion.div
+                        key={profile.id}
+                        initial={{ opacity: 0, y: 24 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        viewport={{ once: true }}
+                        transition={{ duration: 0.4, delay: idx * 0.05 }}
+                        className="h-full"
+                      >
+                        <Card
+                          className="h-full bg-slate-900/85 backdrop-blur-xl border-white/15 hover:border-emerald-400/50 transition-colors duration-300 cursor-pointer flex flex-col"
+                          data-testid={`card-profile-${profile.id}`}
+                          onClick={() => openProfile(profile.id, false)}
+                        >
+                          <CardHeader className="pb-3">
+                            <div className="flex items-center gap-3">
+                              <div className={`h-11 w-11 shrink-0 rounded-xl ${profile.bgColor} border border-white/10 flex items-center justify-center`}>
+                                <Icon className={`h-5 w-5 ${profile.color}`} aria-hidden="true" />
+                              </div>
+                              <CardTitle className="text-lg font-bold text-white">{profile.name}</CardTitle>
+                            </div>
+                            <CardDescription className="pt-2 text-sm text-slate-200 leading-relaxed">
+                              {profile.day}
+                            </CardDescription>
+                          </CardHeader>
 
-                    <CardHeader className="pb-3 relative z-10">
-                      <div className="flex items-center justify-between mb-3">
-                        <div className={`h-11 w-11 rounded-xl ${profile.bgColor} border border-white/10 flex items-center justify-center transition-transform group-hover:scale-105 duration-300`}>
-                          <Icon className={`h-5 w-5 ${profile.color}`} />
-                        </div>
-                        <span className="text-[11px] font-semibold text-slate-400 group-hover:text-emerald-300 flex items-center gap-1 transition-colors">
-                          {PROFILE_DEMO_VIDEOS[profile.id] && (
-                            <span className="flex items-center gap-1 mr-1.5 text-primary-text" data-testid={`badge-video-${profile.id}`}>
-                              <PlayCircle className="h-3.5 w-3.5" /> Vidéo
-                            </span>
-                          )}
-                          Guide <ChevronRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
-                        </span>
-                      </div>
-                      <CardTitle className="text-lg font-bold text-white group-hover:text-emerald-200 transition-colors">
-                        {profile.name}
-                      </CardTitle>
-                      <CardDescription className="text-xs text-slate-400 leading-relaxed min-h-[36px]">
-                        {profile.description}
-                      </CardDescription>
-                    </CardHeader>
+                          <CardContent className="flex flex-1 flex-col gap-5 pt-0">
+                            <div>
+                              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-200">Au quotidien</h4>
+                              <ul className="space-y-1.5">
+                                {profile.tasks.map((task) => (
+                                  <li key={task} className="flex items-start gap-2 text-sm text-slate-100">
+                                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" aria-hidden="true" />
+                                    <span>{task}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
 
-                    <CardContent className="space-y-3 pt-0 relative z-10">
-                      <div className="space-y-1.5">
-                        <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Périmètre d'action</div>
-                        <div className="flex flex-wrap gap-1">
-                          {profile.permissions.map((perm) => (
-                            <Badge key={perm} variant="secondary" className="text-[10px] px-2 py-0.5 bg-white/5 hover:bg-white/10 text-slate-300 border-white/5">
-                              {perm}
-                            </Badge>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="pt-3 border-t border-white/10 flex items-center justify-between text-xs text-slate-400">
-                        <span>Rôle système</span>
-                        <span className="font-semibold text-emerald-400 text-[11px] bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                          Actif
-                        </span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              );
-            })}
+                            <div className="mt-auto flex flex-col gap-2">
+                              {video && (
+                                <Button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    openProfile(profile.id, true);
+                                  }}
+                                  aria-label={`Voir la démo du profil ${profile.name}, ${duration}`}
+                                  data-testid={`button-demo-${profile.id}`}
+                                  className="min-h-[44px] w-full rounded-full bg-emerald-400 text-sm font-semibold text-slate-950 shadow-md hover:bg-emerald-300 focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
+                                >
+                                  <PlayCircle className="h-5 w-5" aria-hidden="true" />
+                                  Voir la démo · {duration}
+                                </Button>
+                              )}
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  openProfile(profile.id, false);
+                                }}
+                                aria-label={`Lire le guide du profil ${profile.name}`}
+                                data-testid={`button-guide-${profile.id}`}
+                                className="min-h-[44px] w-full rounded-full border border-white/25 text-sm font-medium text-slate-100 hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900"
+                              >
+                                <BookOpen className="h-4 w-4" aria-hidden="true" />
+                                Lire le guide
+                              </Button>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
           </div>
 
           {/* Tableau comparatif des permissions façon cockpit */}
@@ -1580,7 +1674,7 @@ export default function LandingPage() {
                 </Button>
               </Link>
               <Button size="lg" variant="outline" className="rounded-full h-12 sm:h-13 px-7 text-sm sm:text-base font-medium text-white border-white/20 bg-white/5 hover:bg-white/10 hover:border-white/30 backdrop-blur-md transition-all duration-200 active:scale-[0.98] min-w-[200px]" asChild>
-                <a href="#profiles">Explorer les {ROLE_COUNT} rôles</a>
+                <a href="#profiles">Explorer les {ROLE_COUNT} profils</a>
               </Button>
             </div>
 
@@ -1588,7 +1682,7 @@ export default function LandingPage() {
             <div className="pt-6 border-t border-white/10 flex flex-wrap items-center justify-center gap-6 text-xs sm:text-sm text-slate-400">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                <span>11 profils métier prêts à l'emploi</span>
+                <span>{ROLE_COUNT} profils métier prêts à l'emploi</span>
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 text-emerald-400" />
@@ -1613,7 +1707,17 @@ export default function LandingPage() {
 
       {/* Modal de tutoriel */}
       <Dialog open={selectedProfile !== null} onOpenChange={(open) => !open && setSelectedProfile(null)}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent
+          ref={profileDialogRef}
+          className="max-w-2xl max-h-[85vh] overflow-y-auto"
+          onOpenAutoFocus={(event) => {
+            // « Voir la démo » : focus sur la vidéo. « Lire le guide » : focus sur les étapes, sous la vidéo.
+            const target = profileDialogRef.current?.querySelector<HTMLElement>(openedOnDemo ? "video" : "[data-guide-start]");
+            if (!target) return;
+            event.preventDefault();
+            target.focus();
+          }}
+        >
           {selectedProfile && (
             <>
               <DialogHeader>
@@ -1627,13 +1731,13 @@ export default function LandingPage() {
                         <div className={`h-12 w-12 rounded-lg ${profile.bgColor} flex items-center justify-center`}>
                           <Icon className={`h-6 w-6 ${profile.color}`} />
                         </div>
-                        Guide {profile.name}
+                        {profile.name}
                       </>
                     );
                   })()}
                 </DialogTitle>
                 <DialogDescription>
-                  Guide d'utilisation pas à pas pour le profil {userProfiles.find(p => p.id === selectedProfile)?.name}
+                  {PROFILE_DEMO_VIDEOS[selectedProfile] ? "La démo en vidéo, puis le guide pas à pas." : "Le guide pas à pas."}
                 </DialogDescription>
               </DialogHeader>
 
@@ -1641,10 +1745,11 @@ export default function LandingPage() {
                 {PROFILE_DEMO_VIDEOS[selectedProfile] && (
                   <div>
                     <h4 className="font-semibold text-lg mb-3 flex items-center gap-2">
-                      <PlayCircle className="h-5 w-5 text-primary-text" /> Vidéo de démonstration
+                      <PlayCircle className="h-5 w-5 text-primary-text" aria-hidden="true" /> La démo · {formatDemoDuration(PROFILE_DEMO_VIDEOS[selectedProfile]!.durationSeconds)}
                     </h4>
                     <ProfileDemoPlayer
                       key={selectedProfile}
+                      autoPlay={openedOnDemo}
                       profileId={selectedProfile}
                       video={PROFILE_DEMO_VIDEOS[selectedProfile]!}
                     />
@@ -1653,21 +1758,21 @@ export default function LandingPage() {
 
                 {/* Identifiants et accès */}
                 <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-4">
-                  <h4 className="font-semibold text-emerald-400 mb-1 flex items-center gap-2">
-                    <ShieldCheck className="h-4 w-4" /> Accès &amp; Authentification
+                  <h4 className="font-semibold text-foreground mb-1 flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 text-emerald-700 dark:text-emerald-300" aria-hidden="true" /> Pour se connecter
                   </h4>
-                  <p className="text-xs text-slate-300">Connexion sécurisée via identifiants d'entreprise ou code PIN chauffeur personnel.</p>
+                  <p className="text-sm text-muted-foreground">Avec son identifiant de l'entreprise, ou avec son code personnel pour le chauffeur.</p>
                 </div>
 
                 {/* Étapes du guide */}
                 <div>
-                  <h4 className="font-semibold text-lg mb-3 flex items-center gap-2">
-                    <FileText className="h-5 w-5 text-emerald-400" /> Étapes à suivre
+                  <h4 data-guide-start tabIndex={-1} className="font-semibold text-lg mb-3 flex items-center gap-2 scroll-mt-4 outline-none">
+                    <FileText className="h-5 w-5 text-emerald-400" aria-hidden="true" /> Le guide pas à pas
                   </h4>
                   <ol className="space-y-3">
                     {profileTutorials[selectedProfile]?.steps.map((step, index) => (
                       <li key={index} className="flex gap-3">
-                        <span className="flex-shrink-0 h-6 w-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-sm font-medium">
+                        <span className="flex-shrink-0 h-6 w-6 rounded-full bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 flex items-center justify-center text-sm font-medium">
                           {index + 1}
                         </span>
                         <span className="text-sm text-foreground/90">{step}</span>
