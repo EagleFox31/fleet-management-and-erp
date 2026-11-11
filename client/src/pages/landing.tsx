@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { RoadDivider } from "@/components/landing/road-divider";
+import { SectionBackdrop, SectionDivider } from "@/components/landing/section-divider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -39,10 +39,6 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { useState, useEffect, useRef, type ElementType } from "react";
 import { motion, useScroll, useSpring } from "framer-motion";
-
-/** Fondu d'entrée de la section profils : aucun bord horizontal net avec le haut de page. */
-const PROFILES_FADE = "linear-gradient(to bottom, transparent 0, #000 180px)";
-const PROFILES_FADE_IN = { WebkitMaskImage: PROFILES_FADE, maskImage: PROFILES_FADE };
 
 // Composant CountUp pour animer les chiffres
 function CountUp({ end, duration = 2000, suffix = "", className = "text-3xl font-bold text-white" }: { end: number; duration?: number; suffix?: string; className?: string }) {
@@ -769,9 +765,11 @@ function FeatureStorySection() {
     <section
       id="features"
       ref={sectionRef}
-      className="relative bg-slate-950/75 backdrop-blur-sm text-white border-t border-white/10"
+      className="relative isolate text-white"
     >
-      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-500/50 to-transparent" />
+      <SectionBackdrop className="bg-slate-950/70 backdrop-blur-sm" />
+      {/* Avant / après -> fonctionnalités : empreinte de pneu */}
+      <SectionDivider variant="tire" className="absolute inset-x-0 top-1 h-14 lg:h-16" />
 
       <div className="container mx-auto px-4">
         <motion.div
@@ -1094,7 +1092,10 @@ function StorytellingTransformationSection() {
   const [tab, setTab] = useState<"before" | "after">("after");
 
   return (
-    <section className="relative py-20 lg:py-28 bg-slate-950/75 backdrop-blur-sm text-white overflow-hidden border-t border-white/10">
+    <section className="relative isolate py-20 lg:py-28 text-white overflow-hidden">
+      <SectionBackdrop className="bg-slate-950/70 backdrop-blur-sm" />
+      {/* Profils -> avant / après : trace GPS */}
+      <SectionDivider variant="gps" className="absolute inset-x-0 top-1 h-14 lg:h-16" />
       {/* Halo ambiant diffus */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[350px] bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-emerald-500/15 blur-3xl -z-10 pointer-events-none" />
 
@@ -1447,9 +1448,9 @@ export default function LandingPage() {
 
       {/* Section Profils Utilisateurs — le haut de page s'y fond, sans bord net */}
       <section id="profiles" className="relative isolate py-20 lg:py-28 text-white overflow-hidden">
-        {/* Fond translucide qui apparaît progressivement sur les 180 premiers px */}
-        <div aria-hidden="true" className="absolute inset-0 -z-10 bg-slate-950/70 backdrop-blur-sm" style={PROFILES_FADE_IN} />
-        <RoadDivider className="absolute inset-x-0 top-1 h-16 lg:h-24" />
+        {/* Fond fondu : aucun bord net avec le haut de page ni avec la section suivante */}
+        <SectionBackdrop top="clear" className="bg-slate-950/70 backdrop-blur-sm" />
+        <SectionDivider variant="road" strength="strong" className="absolute inset-x-0 top-1 h-16 lg:h-24" />
         {/* Halo sous la route */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-32 bg-emerald-500/5 blur-3xl -z-10 pointer-events-none" />
 
@@ -1649,7 +1650,10 @@ export default function LandingPage() {
       <FeatureStorySection />
 
       {/* Section Statistiques — Dark Glassmorphic Translucide */}
-      <section id="stats" className="relative py-20 bg-slate-950/70 backdrop-blur-sm text-white border-t border-white/10">
+      <section id="stats" className="relative isolate py-20 text-white">
+        <SectionBackdrop className="bg-slate-950/70 backdrop-blur-sm" />
+        {/* Fonctionnalités -> résultats : courbe d'indicateur */}
+        <SectionDivider variant="chart" className="absolute inset-x-0 top-1 h-14 lg:h-16" />
         <div className="container mx-auto px-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 text-center">
             <div className="space-y-2 p-6 rounded-2xl bg-slate-900/60 border border-white/10 backdrop-blur-xl">
@@ -1677,7 +1681,10 @@ export default function LandingPage() {
       </section>
 
       {/* Section CTA Finale — Google Cloud Style */}
-      <section className="relative py-24 bg-slate-950/65 backdrop-blur-sm text-white border-t border-white/10 overflow-hidden">
+      <section id="cta" className="relative isolate py-24 text-white overflow-hidden">
+        <SectionBackdrop className="bg-slate-950/70 backdrop-blur-sm" />
+        {/* Résultats -> appel final : la route revient et finit sur la ligne d'arrivée */}
+        <SectionDivider variant="finish" className="absolute inset-x-0 top-1 h-14 lg:h-16" />
         {/* Halo ambiant diffus */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[650px] h-[300px] bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-orange-500/15 blur-3xl -z-10 pointer-events-none" />
 
@@ -1730,7 +1737,8 @@ export default function LandingPage() {
       </section>
 
       {/* Footer Translucide */}
-      <footer className="relative py-8 border-t border-white/10 bg-slate-950/75 text-slate-400 backdrop-blur-sm">
+      <footer className="relative isolate py-8 text-slate-400">
+        <SectionBackdrop bottom="solid" fadePx={64} className="bg-slate-950/75 backdrop-blur-sm" />
         <div className="container mx-auto px-4 text-center text-sm">
           <p>&copy; {new Date().getFullYear()} Yaro FleetOS. Tous droits réservés.</p>
           <span className="mt-1.5 block text-slate-400"><span className="font-['Pinyon_Script'] text-2xl text-emerald-400 italic">by</span> Trigenys Group</span>
