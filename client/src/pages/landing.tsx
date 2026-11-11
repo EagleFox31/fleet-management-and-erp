@@ -281,8 +281,8 @@ const userProfiles: {
     name: "Logisticien",
     family: "operations",
     icon: Truck,
-    color: "text-cyan-400",
-    bgColor: "bg-cyan-500/10",
+    color: "text-orange-500",
+    bgColor: "bg-orange-500/10",
     day: "Il organise les missions, choisit le camion et le chauffeur, puis suit chaque camion sur la route.",
     tasks: ["Créer une mission et l'affecter", "Suivre un camion sur la carte", "Contrôler le carburant consommé", "Facturer une mission terminée"],
   },
@@ -301,8 +301,8 @@ const userProfiles: {
     name: "Chef d'atelier",
     family: "workshop",
     icon: Wrench,
-    color: "text-blue-400",
-    bgColor: "bg-blue-500/10",
+    color: "text-orange-200",
+    bgColor: "bg-orange-500/10",
     day: "Il ouvre les réparations, répartit les mécaniciens et suit les camions immobilisés.",
     tasks: ["Ouvrir une réparation", "Affecter un mécanicien", "Valider une réparation terminée", "Suivre les camions immobilisés"],
   },
@@ -361,8 +361,8 @@ const userProfiles: {
     name: "Client",
     family: "access",
     icon: Users,
-    color: "text-indigo-300",
-    bgColor: "bg-indigo-500/10",
+    color: "text-orange-300",
+    bgColor: "bg-orange-500/10",
     day: "Le client suit les missions faites pour lui et ses factures, et rien d'autre.",
     tasks: ["Suivre ses missions", "Consulter ses factures", "Télécharger un document en PDF"],
   },
@@ -452,7 +452,7 @@ const featureStoryChapters: FeatureStoryChapter[] = [
     ],
     metric: { value: "100%", label: "maintenance planifiée" },
     icon: Wrench,
-    accent: "from-blue-500 to-cyan-400",
+    accent: "from-orange-500 to-amber-400",
     visual: "maintenance",
   },
   {
@@ -503,7 +503,7 @@ const featureStoryChapters: FeatureStoryChapter[] = [
     ],
     metric: { value: "24/7", label: "suivi opérationnel" },
     icon: BarChart3,
-    accent: "from-cyan-500 to-sky-400",
+    accent: "from-amber-500 to-orange-400",
     visual: "analytics",
   },
   {
@@ -558,8 +558,8 @@ function FeatureStoryVisual({ type }: { type: FeatureStoryChapter["visual"] }) {
       <div className={shell}>
         <div className="p-5 space-y-4">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-blue-300">OT #2847</span>
-            <span className="rounded-full bg-blue-500/20 px-2.5 py-0.5 text-xs text-blue-200">En cours</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-orange-300">OT #2847</span>
+            <span className="rounded-full bg-orange-500/20 px-2.5 py-0.5 text-xs text-orange-200">En cours</span>
           </div>
           <p className="text-lg font-semibold text-white">Vidange + filtres — LT-9034</p>
           <div className="grid grid-cols-2 gap-3">
@@ -573,7 +573,7 @@ function FeatureStoryVisual({ type }: { type: FeatureStoryChapter["visual"] }) {
             </div>
           </div>
           <div className="h-2 rounded-full bg-white/10">
-            <div className="h-2 w-2/3 rounded-full bg-gradient-to-r from-blue-500 to-cyan-400" />
+            <div className="h-2 w-2/3 rounded-full bg-gradient-to-r from-orange-500 to-amber-400" />
           </div>
         </div>
       </div>
@@ -643,7 +643,7 @@ function FeatureStoryVisual({ type }: { type: FeatureStoryChapter["visual"] }) {
             {[40, 65, 52, 78, 60, 88].map((h, i) => (
               <div
                 key={i}
-                className="flex-1 rounded-t-md bg-gradient-to-t from-cyan-600 to-cyan-400"
+                className="flex-1 rounded-t-md bg-gradient-to-t from-orange-600 to-orange-400"
                 style={{ height: `${h}%` }}
               />
             ))}
@@ -968,7 +968,7 @@ function HeroLiveCockpit() {
   return (
     <div className="relative mx-auto w-full max-w-lg lg:max-w-none">
       {/* Halo de fond émeraude / cyan */}
-      <div className="absolute -inset-1.5 rounded-3xl bg-gradient-to-r from-emerald-500/20 via-teal-500/20 to-cyan-500/20 opacity-70 blur-2xl -z-10" />
+      <div className="absolute -inset-1.5 rounded-3xl bg-gradient-to-r from-emerald-500/20 via-teal-500/20 to-orange-500/20 opacity-70 blur-2xl -z-10" />
 
       {/* Cadre principal en verre sombre */}
       <motion.div
@@ -1036,11 +1036,11 @@ function HeroLiveCockpit() {
         </div>
 
         {/* Carte Ordre de Travail / Maintenance en cours */}
-        <div className="rounded-xl border border-blue-500/20 bg-gradient-to-br from-blue-950/30 to-slate-900/50 p-4 space-y-2.5">
+        <div className="rounded-xl border border-orange-500/20 bg-gradient-to-br from-orange-950/30 to-slate-900/50 p-4 space-y-2.5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Wrench className="h-4 w-4 text-blue-400" />
-              <span className="text-xs font-semibold text-blue-300">OT #2847 — Révision & Filtration</span>
+              <Wrench className="h-4 w-4 text-orange-400" />
+              <span className="text-xs font-semibold text-orange-300">OT #2847 — Révision & Filtration</span>
             </div>
             <span className="text-[11px] font-medium text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-md">
               En cours (75%)
@@ -1051,7 +1051,7 @@ function HeroLiveCockpit() {
             <span className="text-emerald-300">Sortie du stock : Validée</span>
           </div>
           <div className="h-1.5 w-full rounded-full bg-white/10 overflow-hidden">
-            <div className="h-full w-3/4 rounded-full bg-gradient-to-r from-blue-500 via-teal-400 to-emerald-400" />
+            <div className="h-full w-3/4 rounded-full bg-gradient-to-r from-orange-500 via-teal-400 to-emerald-400" />
           </div>
         </div>
 
@@ -1102,7 +1102,7 @@ function StorytellingTransformationSection() {
           </Badge>
           <h2 className="text-3xl md:text-5xl font-extrabold tracking-tight text-white mb-4">
             La transformation de votre{" "}
-            <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-300 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-orange-300 bg-clip-text text-transparent">
               quotidien logistique
             </span>
           </h2>
@@ -1395,7 +1395,7 @@ export default function LandingPage() {
 
               <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-white leading-[1.1]">
                 Pilotez votre flotte & vos ateliers avec une{" "}
-                <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-300 bg-clip-text text-transparent">
+                <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-orange-300 bg-clip-text text-transparent">
                   précision absolue
                 </span>
               </h1>
@@ -1454,7 +1454,7 @@ export default function LandingPage() {
             </Badge>
             <h2 className="text-3xl md:text-5xl font-extrabold tracking-tight text-white mb-4">
               {ROLE_COUNT} profils,{" "}
-              <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-300 bg-clip-text text-transparent">
+              <span className="bg-gradient-to-r from-emerald-400 via-teal-300 to-orange-300 bg-clip-text text-transparent">
                 une seule équipe
               </span>
             </h2>
@@ -1651,7 +1651,7 @@ export default function LandingPage() {
               <div className="text-sm text-slate-400">Véhicules sous contrôle</div>
             </div>
             <div className="space-y-2 p-6 rounded-2xl bg-slate-900/60 border border-white/10 backdrop-blur-xl">
-              <Clock className="h-8 w-8 text-blue-400 mx-auto" />
+              <Clock className="h-8 w-8 text-orange-400 mx-auto" />
               <CountUp end={100} suffix="%" className="text-3xl font-extrabold text-white" />
               <div className="text-sm text-slate-400">Maintenance planifiée</div>
             </div>
@@ -1661,7 +1661,7 @@ export default function LandingPage() {
               <div className="text-sm text-slate-400">Fournisseurs intégrés</div>
             </div>
             <div className="space-y-2 p-6 rounded-2xl bg-slate-900/60 border border-white/10 backdrop-blur-xl">
-              <BarChart3 className="h-8 w-8 text-cyan-400 mx-auto" />
+              <BarChart3 className="h-8 w-8 text-amber-400 mx-auto" />
               <div className="text-3xl font-extrabold text-white">24/7</div>
               <div className="text-sm text-slate-400">Suivi temps réel actif</div>
             </div>
@@ -1672,12 +1672,12 @@ export default function LandingPage() {
       {/* Section CTA Finale — Google Cloud Style */}
       <section className="relative py-24 bg-slate-950/65 backdrop-blur-sm text-white border-t border-white/10 overflow-hidden">
         {/* Halo ambiant diffus */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[650px] h-[300px] bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-cyan-500/15 blur-3xl -z-10 pointer-events-none" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[650px] h-[300px] bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-orange-500/15 blur-3xl -z-10 pointer-events-none" />
 
         <div className="container mx-auto px-4">
           <div className="max-w-4xl mx-auto rounded-3xl border border-white/15 bg-gradient-to-b from-slate-900/80 to-slate-950/90 backdrop-blur-2xl shadow-2xl p-8 sm:p-12 md:p-14 text-center relative overflow-hidden">
             {/* Ligne accent Google-like en haut */}
-            <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-400 via-teal-300 to-cyan-400" />
+            <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-emerald-400 via-teal-300 to-orange-400" />
 
             <Badge variant="outline" className="mb-4 bg-emerald-500/10 text-emerald-300 border-emerald-500/30 px-3.5 py-1 text-xs font-medium rounded-full inline-flex items-center gap-1.5">
               <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
