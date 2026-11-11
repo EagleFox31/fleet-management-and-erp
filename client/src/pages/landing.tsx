@@ -1,4 +1,5 @@
 import { Link, useLocation } from "wouter";
+import { RoadDivider } from "@/components/landing/road-divider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +39,10 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import { useState, useEffect, useRef, type ElementType } from "react";
 import { motion, useScroll, useSpring } from "framer-motion";
+
+/** Fondu d'entrée de la section profils : aucun bord horizontal net avec le haut de page. */
+const PROFILES_FADE = "linear-gradient(to bottom, transparent 0, #000 180px)";
+const PROFILES_FADE_IN = { WebkitMaskImage: PROFILES_FADE, maskImage: PROFILES_FADE };
 
 // Composant CountUp pour animer les chiffres
 function CountUp({ end, duration = 2000, suffix = "", className = "text-3xl font-bold text-white" }: { end: number; duration?: number; suffix?: string; className?: string }) {
@@ -1440,10 +1445,12 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Section Profils Utilisateurs — Transition fluide & translucide */}
-      <section id="profiles" className="relative py-20 lg:py-28 bg-slate-950/70 backdrop-blur-sm text-white overflow-hidden border-t border-white/10">
-        {/* Ligne séparatrice lumineuse supérieure et halo */}
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent" />
+      {/* Section Profils Utilisateurs — le haut de page s'y fond, sans bord net */}
+      <section id="profiles" className="relative isolate py-20 lg:py-28 text-white overflow-hidden">
+        {/* Fond translucide qui apparaît progressivement sur les 180 premiers px */}
+        <div aria-hidden="true" className="absolute inset-0 -z-10 bg-slate-950/70 backdrop-blur-sm" style={PROFILES_FADE_IN} />
+        <RoadDivider className="absolute inset-x-0 top-1 h-16 lg:h-24" />
+        {/* Halo sous la route */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-3/4 h-32 bg-emerald-500/5 blur-3xl -z-10 pointer-events-none" />
 
         <div className="container mx-auto px-4">

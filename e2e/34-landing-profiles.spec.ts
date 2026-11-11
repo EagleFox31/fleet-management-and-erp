@@ -99,7 +99,46 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     }));
     expect(widths.header).toBe(widths.viewport);
   });
+
+  test(`${viewport.width} px : la route est dans le fondu vers les profils, sur toute la largeur, sans masquer le titre`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+    const road = page.locator("#profiles").getByTestId("road-divider");
+    await road.waitFor({ state: "attached", timeout: 60_000 });
+    await expect(road).toHaveAttribute("aria-hidden", "true");
+    await expect(road.locator("svg path.landing-road-dash")).toHaveCount(1);
+    expect(await road.locator("img, video").count()).toBe(0);
+    const layout = await road.evaluate((el) => {
+      const section = document.getElementById("profiles")!;
+      const badge = section.querySelector("h2")!.previousElementSibling as HTMLElement;
+      const rect = el.getBoundingClientRect();
+      return {
+        width: Math.round(rect.width),
+        viewport: document.documentElement.clientWidth,
+        text: el.textContent?.trim() ?? "",
+        roadBottom: rect.bottom,
+        badgeTop: badge.getBoundingClientRect().top,
+        sectionBorderTop: getComputedStyle(section).borderTopWidth,
+        overflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      };
+    });
+    expect(layout.width).toBe(layout.viewport);
+    expect(layout.text).toBe("");
+    expect(layout.roadBottom).toBeLessThanOrEqual(layout.badgeTop);
+    expect(layout.sectionBorderTop).toBe("0px");
+    expect(layout.overflowX).toBe(0);
+  });
 }
+
+test("route : les pointillés défilent, et s'arrêtent sous prefers-reduced-motion", async ({ page }) => {
+  const dashAnimation = () =>
+    page.getByTestId("road-divider").locator(".landing-road-dash").evaluate((el) => getComputedStyle(el).animationName);
+  await page.goto("/");
+  await page.getByTestId("road-divider").waitFor({ state: "attached", timeout: 60_000 });
+  expect(await dashAnimation()).toBe("landing-road-dash");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  expect(await dashAnimation()).toBe("none");
+});
 
 test("1440 px : les cartes d'une même ligne ont la même hauteur, d'une famille à l'autre", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
