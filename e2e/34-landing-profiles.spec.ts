@@ -103,7 +103,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
   test(`${viewport.width} px : la route est dans le fondu vers les profils, sur toute la largeur, sans masquer le titre`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await page.goto("/");
-    const road = page.locator("#profiles").getByTestId("road-divider");
+    const road = page.locator("#profiles [data-testid=section-divider][data-variant=road]");
     await road.waitFor({ state: "attached", timeout: 60_000 });
     await expect(road).toHaveAttribute("aria-hidden", "true");
     await expect(road.locator("svg path.landing-road-dash")).toHaveCount(1);
@@ -128,16 +128,71 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     expect(layout.sectionBorderTop).toBe("0px");
     expect(layout.overflowX).toBe(0);
   });
+
+  test(`${viewport.width} px : chaque frontière a son motif pleine largeur, aucune section n'a de bordure haute`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+    await page.locator("footer").waitFor({ state: "attached", timeout: 60_000 });
+    const junctions = await page.evaluate(() => {
+      const topLevel = [...document.querySelectorAll("section, footer")].filter(
+        (el) => el.parentElement?.closest("section, footer") === null,
+      ) as HTMLElement[];
+      // Premier contenu visible : texte (feuille) ou bloc bordé, hors calques décoratifs.
+      const firstContentTop = (section: HTMLElement) => {
+        const tops = [...section.querySelectorAll<HTMLElement>(".container *")]
+          .filter((el) => !el.closest("[aria-hidden=true]") && el.getBoundingClientRect().height > 0)
+          .filter((el) => (el.children.length === 0 && el.textContent?.trim()) || parseFloat(getComputedStyle(el).borderTopWidth) > 0)
+          .map((el) => el.getBoundingClientRect().top);
+        return Math.min(...tops);
+      };
+      return topLevel.map((section) => {
+        const divider = section.querySelector<HTMLElement>(":scope > [data-testid=section-divider]");
+        const style = getComputedStyle(section);
+        const rect = divider?.getBoundingClientRect();
+        return {
+          section: section.id || section.tagName.toLowerCase(),
+          borderTop: parseFloat(style.borderTopWidth),
+          variant: divider?.dataset.variant ?? null,
+          width: rect ? Math.round(rect.width) : null,
+          ariaHidden: divider?.getAttribute("aria-hidden") ?? null,
+          text: divider?.textContent?.trim() ?? "",
+          overlap: rect ? rect.bottom - firstContentTop(section) : null,
+        };
+      });
+    });
+    const viewportWidth = await page.evaluate(() => document.documentElement.clientWidth);
+    const byVariant = Object.fromEntries(junctions.filter((j) => j.variant).map((j) => [j.variant, j]));
+    // Ordre métier des frontières : profils (route), avant / après (GPS), fonctionnalités (pneu), résultats (courbe), appel final (arrivée).
+    expect(junctions.filter((j) => j.variant).map((j) => j.variant)).toEqual(["road", "gps", "tire", "chart", "finish"]);
+    expect(byVariant.chart.section).toBe("stats");
+    expect(byVariant.finish.section).toBe("cta");
+    for (const junction of junctions) {
+      expect(junction.borderTop, junction.section).toBe(0);
+      if (!junction.variant) continue;
+      expect(junction.width, junction.section).toBe(viewportWidth);
+      expect(junction.ariaHidden, junction.section).toBe("true");
+      expect(junction.text, junction.section).toBe("");
+      expect(junction.overlap!, junction.section).toBeLessThanOrEqual(0);
+    }
+    expect(junctions.find((j) => j.section === "footer")?.variant).toBeNull();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBe(0);
+  });
 }
 
-test("route : les pointillés défilent, et s'arrêtent sous prefers-reduced-motion", async ({ page }) => {
-  const dashAnimation = () =>
-    page.getByTestId("road-divider").locator(".landing-road-dash").evaluate((el) => getComputedStyle(el).animationName);
+test("séparateurs : les animations tournent, et s'arrêtent sous prefers-reduced-motion", async ({ page }) => {
+  const animations = () =>
+    page.locator(".landing-road-dash, .landing-divider-pulse").evaluateAll((elements) =>
+      elements.map((el) => getComputedStyle(el).animationName),
+    );
   await page.goto("/");
-  await page.getByTestId("road-divider").waitFor({ state: "attached", timeout: 60_000 });
-  expect(await dashAnimation()).toBe("landing-road-dash");
+  await page.locator("#profiles [data-testid=section-divider]").waitFor({ state: "attached", timeout: 60_000 });
+  const running = await animations();
+  // Route du haut, trace GPS, courbe, route d'arrivée : une animation chacun.
+  expect(running.length).toBe(4);
+  expect(running.every((name) => name.startsWith("landing-"))).toBe(true);
   await page.emulateMedia({ reducedMotion: "reduce" });
-  expect(await dashAnimation()).toBe("none");
+  expect(new Set(await animations())).toEqual(new Set(["none"]))
 });
 
 test("1440 px : les cartes d'une même ligne ont la même hauteur, d'une famille à l'autre", async ({ page }) => {

@@ -135,12 +135,34 @@
   animation: landing-road-dash 3s linear infinite;
 }
 
+/* Landing : point « position » des séparateurs (trace GPS, courbe d'indicateur), halo qui s'élargit et s'efface. */
+@keyframes landing-divider-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+.landing-divider-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: landing-divider-pulse 2.8s ease-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .kpi-critical-vibrate {
     animation: none;
   }
 
   .landing-road-dash {
+    animation: none;
+  }
+
+  .landing-divider-pulse {
     animation: none;
   }
 
