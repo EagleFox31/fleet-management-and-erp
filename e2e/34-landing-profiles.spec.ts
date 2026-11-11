@@ -87,6 +87,20 @@ test("mobile 390 px : pas de défilement horizontal", async ({ page }) => {
   expect(overflow).toBe(0);
 });
 
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  test(`${viewport.width} px : l'en-tête occupe toute la largeur de la fenêtre`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+    const header = page.locator("header").first();
+    await header.waitFor({ timeout: 60_000 });
+    const widths = await header.evaluate((el) => ({
+      header: Math.round(el.getBoundingClientRect().width),
+      viewport: document.documentElement.clientWidth,
+    }));
+    expect(widths.header).toBe(widths.viewport);
+  });
+}
+
 test("1440 px : les cartes d'une même ligne ont la même hauteur, d'une famille à l'autre", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");

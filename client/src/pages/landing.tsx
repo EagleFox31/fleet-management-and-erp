@@ -495,9 +495,9 @@ const featureStoryChapters: FeatureStoryChapter[] = [
     eyebrow: "Chapitre 5 — Décision",
     title: "Décidez avec des chiffres, pas des intuitions",
     description:
-      "Tableaux de bord par rôle, KPI flotte et exports Excel en un clic. Chaque manager voit ce qui compte pour lui, du magasinier au directeur.",
+      "Tableaux de bord par profil, indicateurs de la flotte et exports Excel en un clic. Chaque manager voit ce qui compte pour lui, du magasinier au directeur.",
     bullets: [
-      "Dashboards adaptés à chaque profil utilisateur",
+      "Un tableau de bord pour chaque profil",
       "Exports inventaire, carburant et facturation",
       "Indicateurs opérationnels mis à jour en continu",
     ],
@@ -512,11 +512,11 @@ const featureStoryChapters: FeatureStoryChapter[] = [
     eyebrow: "Chapitre 6 — Sérénité",
     title: "Soyez alerté avant que le problème coûte cher",
     description:
-      "Documents expirés, stocks bas, retards fournisseurs, anomalies carburant : les alertes remontent au bon rôle, au bon moment, pour agir tôt.",
+      "Documents expirés, stocks bas, retards fournisseurs, anomalies carburant : les alertes remontent au bon profil, au bon moment, pour agir tôt.",
     bullets: [
       "Alertes maintenance et documents à échéance",
       "Seuils de stock et retards de livraison",
-      "Notifications temps réel via WebSocket",
+      "Alertes mises à jour en direct sur tous les écrans",
     ],
     metric: { value: "Proactif", label: "pas réactif" },
     icon: AlertTriangle,
@@ -638,7 +638,7 @@ function FeatureStoryVisual({ type }: { type: FeatureStoryChapter["visual"] }) {
     return (
       <div className={shell}>
         <div className="p-5">
-          <p className="mb-4 text-sm font-semibold text-white">KPI Flotte — Août</p>
+          <p className="mb-4 text-sm font-semibold text-white">Indicateurs flotte — Août</p>
           <div className="flex items-end gap-2 h-28">
             {[40, 65, 52, 78, 60, 88].map((h, i) => (
               <div
@@ -835,7 +835,7 @@ const profileTutorials: Record<string, { steps: string[]; tips: string[] }> = {
       "Gérez les utilisateurs via le menu 'Utilisateurs' - créez, modifiez ou désactivez des comptes",
       "Configurez les paramètres système dans 'Settings'",
       "Consultez les rapports globaux et exportez les données en Excel",
-      "Surveillez les alertes critiques et les KPIs en temps réel"
+      "Surveillez les alertes importantes et les indicateurs en temps réel"
     ],
     tips: [
       "Utilisez les filtres pour segmenter les données par période",
@@ -1048,7 +1048,7 @@ function HeroLiveCockpit() {
           </div>
           <div className="flex items-center justify-between text-xs text-slate-300">
             <span>Technicien : <strong className="text-white">K. Moussa</strong></span>
-            <span className="text-emerald-300">Sortie du stock : Validée</span>
+            <span className="text-emerald-300">Pièce sortie du stock</span>
           </div>
           <div className="h-1.5 w-full rounded-full bg-white/10 overflow-hidden">
             <div className="h-full w-3/4 rounded-full bg-gradient-to-r from-orange-500 via-teal-400 to-emerald-400" />
@@ -1066,7 +1066,7 @@ function HeroLiveCockpit() {
           <div className="flex items-center gap-2 rounded-lg bg-white/5 border border-white/10 px-3 py-2">
             <Sparkles className="h-4 w-4 text-teal-300 shrink-0" />
             <div className="text-[11px] leading-tight text-slate-300">
-              <strong className="text-white">Synchronisation</strong> : {ROLE_COUNT} rôles connectés
+              <strong className="text-white">Synchronisation</strong> : {ROLE_COUNT} profils connectés
             </div>
           </div>
         </div>
@@ -1264,7 +1264,7 @@ function StorytellingTransformationSection() {
                       <CheckCircle2 className="h-5 w-5 text-emerald-400 flex-shrink-0 mt-0.5" />
                       <div>
                         <span className="text-sm font-semibold text-white">Marge brute HT & Top rentabilité en temps réel</span>
-                        <p className="text-xs text-slate-300 mt-0.5">Dashboard exécutif pour le DG avec CA facturé, encaissé et board pack mensuel en PDF.</p>
+                        <p className="text-xs text-slate-300 mt-0.5">Tableau de bord de la direction : chiffre d'affaires facturé et encaissé, rapport mensuel en PDF.</p>
                       </div>
                     </div>
                   </>
@@ -1711,7 +1711,7 @@ export default function LandingPage() {
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                <span>Synchronisation temps réel WebSocket</span>
+                <span>Mise à jour en direct sur tous les écrans</span>
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="h-4 w-4 text-emerald-400" />
