@@ -3756,6 +3756,14 @@ Ces dettes sont connues, tracées ici faute d'entrée dédiée dans le dépôt. 
 - **Prévention vérifiable** : `tests/unit/client/gps-account-switch.test.ts` rejoue le scénario A/B (autre onglet et même onglet). Règle : tout stockage local par utilisateur s'abonne au canal de changement de compte (`activateOfflineUser`) et son test A/B le prouve ; sans ce test, le stockage n'est pas livré.
 - **Leçon généralisée** : une règle de cloison se branche sur l'événement « le compte actif change », pas sur la déconnexion seule ; la déconnexion n'est qu'un cas.
 
+## 2026-11-11 — Missions servies au technicien par des routes sœurs, puis par une fiche chauffeur liée à n'importe quel compte
+
+- **Contexte** : le technicien a perdu la liste et la fiche mission (#673). `launch-readiness`, `document-renewal-requests` et `/api/operations/missions*` lui servaient encore des missions (#684). Puis `/api/drivers/me` renvoyait la fiche et les missions (adresses, client) à tout compte lié à une fiche, technicien ou client compris (#688).
+- **Cause racine** : deux. Les routes sœurs ne portaient que le garde du montage (`isStaff`), sans garde propre : fermer une route n'en fermait aucune autre. Et `POST`/`PATCH /api/drivers` acceptaient de lier une fiche à un compte de n'importe quel rôle.
+- **Classification** : moindre donnée (R-03, R-13), récidive de « règle posée sur une route, routes sœurs restées ouvertes » (2026-11-06, plus haut).
+- **Résolution** : gardes `MISSION_READ_ROLES` sur chaque lecture (#684, #688) ; liaison d'une fiche refusée en 400 hors `MISSION_READ_ROLES` (`server/lib/driver-link.ts`). Les liaisons existantes ne sont pas modifiées : `scripts/audit-driver-links.ts` les recense en lecture seule.
+- **Prévention vérifiable** : `tests/unit/server/mission-read-routes-guard.test.ts` exige un garde de rôle propre (autre qu'`authenticate`) sur chaque `GET` des routeurs de missions, d'exploitation et de fiches chauffeur, et compte les déclarations pour qu'aucune n'échappe au parseur. Contrats `driver-link-role` (400 technicien et client, null permis) et `least-data-driver-technician` (un cas par chemin, sentinelles uniques).
+- **Leçon généralisée** : une récidive appelle un contrôle plus fort qu'un contrat de plus. Un garde de montage ne suffit pas quand le routeur sert plusieurs publics ; chaque lecture déclare son garde, et un test l'impose. Fermer une lecture impose aussi de fermer l'écriture qui ouvre un accès indirect (ici, la liaison de fiche).
 ## 2026-11-11 — « Clé de requête » affiché à l'utilisateur sur un rejeu refusé (#685, #691)
 
 - **Contexte** : l'idempotence des écritures d'argent (avoirs, échéances, trésorerie, saisies chauffeur) repose sur une `requestKey` générée par le client. Le serveur refuse en 409 une même clé avec un autre contenu.

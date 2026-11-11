@@ -9,6 +9,7 @@ import { AppError } from "../lib/app-error";
 import { parseRouteId } from "../lib/route-id";
 import { moduleLogger } from "../lib/logger";
 import { driverEventScopes } from "../lib/driver-realtime";
+import { assertDriverLinkableUser } from "../lib/driver-link";
 import { toFieldErrors } from "@shared/errors";
 import { DRIVER_DIRECTORY_READ_ROLES, MISSION_READ_ROLES, type AppRole } from "@shared/constants/roles";
 import { toExpiryDateOnly } from "@shared/constants/expiry-day";
@@ -266,6 +267,8 @@ router.get("/:id", driverSelfOrDirectory, async (req, res, next) => {
 router.post("/", isDriverManager, async (req, res, next) => {
   try {
     const parsed = createDriverSchema.parse(req.body);
+    // Compte lié : chauffeur ou personnel lecteur des missions seulement (`server/lib/driver-link.ts`).
+    await assertDriverLinkableUser(parsed.userId);
     const cpcStatus = cpcTrainingService.calculateCPCStatus(parsed.cpcTrainingDate);
 
     const [createdDriver] = await db
@@ -293,6 +296,7 @@ router.post("/", isDriverManager, async (req, res, next) => {
     broadcastDriverUpdate("driver_created", fullDriver, createdDriver.id);
     return res.status(201).json(fullDriver);
   } catch (error) {
+    if (error instanceof AppError) return next(error);
     if (isUniqueViolation(error)) {
       return res.status(409).json({
         message: "Matricule ou liaison utilisateur déjà utilisée",
@@ -352,6 +356,7 @@ router.patch("/:id", isDriverManager, async (req, res, next) => {
       updateData.isActive = parsed.isActive;
     }
     if (hasOwn("userId")) {
+      await assertDriverLinkableUser(parsed.userId);
       updateData.userId = parsed.userId ?? null;
     }
 
