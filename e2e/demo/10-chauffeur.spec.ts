@@ -1,7 +1,7 @@
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { desc, eq } from "drizzle-orm";
 import { db } from "../../server/db";
-import { assignments, incidents, missions, vehicles } from "../../shared/schema";
+import { assignments, incidents, missions, vehiclePositions, vehicles } from "../../shared/schema";
 import { beat, loginThroughForm, mark } from "./helpers";
 import { assertLocalDatabase, DEMO_ACCOUNTS, DEMO_DRIVER_DAY, DEMO_MISSION, seedDemo } from "./seed-demo";
 
@@ -16,6 +16,39 @@ import { assertLocalDatabase, DEMO_ACCOUNTS, DEMO_DRIVER_DAY, DEMO_MISSION, seed
  * `mark(...)` pose des repères de montage quand DEMO_MARKS_FILE est défini.
  */
 const ORDER = DEMO_DRIVER_DAY.orderNumber;
+
+/**
+ * Trajet simulé du camion, de Douala vers Bafoussam, par sauts de 2 à 4 km : chaque saut dépasse les 200 m
+ * qui déclenchent un relevé (`GPS_SAMPLE_DISTANCE_M`), donc chaque étape ajoute un point à la trace.
+ */
+const ROUTE = [
+  { latitude: 4.0511, longitude: 9.6870 },
+  { latitude: 4.0620, longitude: 9.7050 },
+  { latitude: 4.0790, longitude: 9.7260 },
+  { latitude: 4.0990, longitude: 9.7440 },
+  { latitude: 4.1230, longitude: 9.7580 },
+  { latitude: 4.1500, longitude: 9.7700 },
+  { latitude: 4.1780, longitude: 9.7850 },
+  { latitude: 4.2050, longitude: 9.8030 },
+] as const;
+const ROUTE_AFTER_REPAIR = [
+  { latitude: 4.2350, longitude: 9.8200 },
+  { latitude: 4.2700, longitude: 9.8350 },
+  { latitude: 4.3050, longitude: 9.8550 },
+] as const;
+
+/** Fait avancer le camion point par point, à l'écran : position et trace se mettent à jour. */
+async function drive(context: BrowserContext, page: Page, points: readonly { latitude: number; longitude: number }[]): Promise<void> {
+  for (const point of points) {
+    await context.setGeolocation({ ...point });
+    await beat(page, 1600);
+  }
+}
+
+/** Le tampon GPS est envoyé au retour du réseau : on déclenche l'envoi sans attendre les 2 min de cadence. */
+const flushGps = (page: Page) => page.evaluate(() => window.dispatchEvent(new Event("online")));
+const positionCount = async (missionId: number) =>
+  (await db.select({ id: vehiclePositions.id }).from(vehiclePositions).where(eq(vehiclePositions.missionId, missionId))).length;
 const VIEWPORT = { width: 1920, height: 1080 } as const;
 
 test.beforeAll(async () => {
@@ -26,9 +59,10 @@ test.beforeAll(async () => {
 const missionRow = async () => (await db.select({ id: missions.id, status: missions.status }).from(missions).where(eq(missions.orderNumber, ORDER)))[0];
 
 /** Contexte filmé en 1920x1080 quand E2E_RECORD=1 (une vidéo par profil, dans le dossier du test). */
-async function profileContext(browser: Browser, label: string): Promise<BrowserContext> {
+async function profileContext(browser: Browser, label: string, extra: Parameters<Browser["newContext"]>[0] = {}): Promise<BrowserContext> {
   const record = process.env.E2E_RECORD === "1";
   const context = await browser.newContext({
+    ...extra,
     viewport: { ...VIEWPORT },
     ...(record ? { recordVideo: { dir: test.info().outputPath(`video-${label}`), size: { ...VIEWPORT } } } : {}),
   });
@@ -51,11 +85,13 @@ test("démo chauffeur : mission programmée, départ confirmé, panne reçue par
   expect(await missionRow()).toBeUndefined();
 
   const logisticsContext = await profileContext(browser, "logisticien");
-  const driverContext = await profileContext(browser, "chauffeur");
+  // Le téléphone du chauffeur partage sa position (serveur lancé avec FEATURE_FLAGS=gps=on).
+  const driverContext = await profileContext(browser, "chauffeur", { geolocation: { ...ROUTE[0] }, permissions: ["geolocation"] });
   const workshopContext = await profileContext(browser, "chef-atelier");
   try {
     // Le chef d'atelier est connecté d'avance, sur son tableau de bord : il attend les alertes.
     const workshop = await workshopContext.newPage();
+    mark("page-chef-atelier"); // la vidéo de ce profil commence ici
     const workshopFrames = captureFrames(workshop);
     await loginThroughForm(workshop, DEMO_ACCOUNTS.workshopManager.username, DEMO_ACCOUNTS.workshopManager.password);
     await expect.poll(() => workshopFrames.some((f) => f.includes("auth_success")), { timeout: 30_000 }).toBe(true);
@@ -63,6 +99,7 @@ test("démo chauffeur : mission programmée, départ confirmé, panne reçue par
 
     // 1. Le logisticien programme la mission.
     const logistics = await logisticsContext.newPage();
+    mark("page-logisticien"); // la vidéo de ce profil commence ici
     mark("start");
     await loginThroughForm(logistics, DEMO_ACCOUNTS.logistics.username, DEMO_ACCOUNTS.logistics.password);
     mark("logistics-login-done");
@@ -141,6 +178,7 @@ test("démo chauffeur : mission programmée, départ confirmé, panne reçue par
 
     // 2. Le chauffeur se connecte avec son PIN, voit la mission du jour et confirme le départ.
     const driver = await driverContext.newPage();
+    mark("page-chauffeur"); // la vidéo de ce profil commence ici
     await driver.goto("/login", { waitUntil: "domcontentloaded" });
     mark("driver-login-open");
     await beat(driver, 1500);
@@ -166,6 +204,23 @@ test("démo chauffeur : mission programmée, départ confirmé, panne reçue par
     await expect.poll(async () => (await missionRow())?.status, { timeout: 30_000 }).toBe("in_progress");
     await beat(driver, 2500);
     mark("departure-done");
+
+    // 2 bis. En route : la position du téléphone est partagée, le camion avance sur la carte de la mission.
+    const gpsPanel = driver.getByTestId("driver-gps-panel");
+    await expect(driver.getByTestId("driver-gps-sharing")).toBeVisible({ timeout: 30_000 });
+    await gpsPanel.scrollIntoViewIfNeeded();
+    await beat(driver, 1500);
+    mark("gps-sharing");
+    await drive(driverContext, driver, ROUTE.slice(1));
+    mark("gps-trace");
+    await flushGps(driver);
+    // Assertion dure : les positions du trajet sont enregistrées sur la mission, côté serveur.
+    await expect.poll(() => positionCount(mission.id), { timeout: 30_000 }).toBeGreaterThanOrEqual(3);
+    await expect(driver.getByTestId("driver-gps-last-sent")).toBeVisible({ timeout: 30_000 });
+    await beat(driver, 2500);
+    mark("gps-sent");
+    await driver.evaluate(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+    await beat(driver, 1000);
 
     // 3. En route : la panne.
     await driver.getByRole("button", { name: "Signaler un problème" }).click();
@@ -206,6 +261,24 @@ test("démo chauffeur : mission programmée, départ confirmé, panne reçue par
     await expect(workshop.getByText(DEMO_DRIVER_DAY.vehicle).first()).toBeVisible({ timeout: 30_000 });
     await beat(workshop, 4000);
     mark("workshop-list");
+
+    // 5. La panne réglée, le chauffeur repart, arrive et confirme la livraison.
+    await driver.bringToFront();
+    await gpsPanel.scrollIntoViewIfNeeded();
+    await beat(driver, 1000);
+    mark("driver-back");
+    const positionsBefore = await positionCount(mission.id);
+    await drive(driverContext, driver, ROUTE_AFTER_REPAIR);
+    await flushGps(driver);
+    await expect.poll(() => positionCount(mission.id), { timeout: 30_000 }).toBeGreaterThan(positionsBefore);
+    mark("gps-arrived");
+    await driver.evaluate(() => window.scrollTo({ top: 0, behavior: "smooth" }));
+    await beat(driver, 1200);
+    await expect(start).toContainText("CONFIRMER LA LIVRAISON");
+    await start.click();
+    await expect.poll(async () => (await missionRow())?.status, { timeout: 30_000 }).toBe("delivered");
+    await beat(driver, 3000);
+    mark("delivered");
   } finally {
     await logisticsContext.close();
     await driverContext.close();
