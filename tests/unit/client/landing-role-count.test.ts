@@ -7,7 +7,9 @@ const source = readFileSync(resolve(__dirname, "../../../client/src/pages/landin
 
 /** Ids des profils déclarés dans le tableau `userProfiles` (entrées de premier niveau). */
 function landingProfileIds(): string[] {
-  const start = source.indexOf("const userProfiles = [");
+  // Le tableau peut porter une annotation de type : « const userProfiles: { … }[] = [ ».
+  const declaration = /^const userProfiles\b[^]*?= \[$/m.exec(source);
+  const start = declaration ? declaration.index : -1;
   const end = source.indexOf("\n];\n", start);
   expect(start).toBeGreaterThan(-1);
   expect(end).toBeGreaterThan(start);
