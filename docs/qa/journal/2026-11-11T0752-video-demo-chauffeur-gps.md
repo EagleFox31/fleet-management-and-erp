@@ -1,0 +1,12 @@
+## 2026-11-11T07:52+01:00 — Vidéo de démonstration chauffeur avec suivi GPS
+- **Statut** : fait (PR brouillon, spec de démo et vidéo, aucun code produit modifié)
+- **Quoi** : `e2e/demo/10-chauffeur.spec.ts` refaite, `client/public/demos/driver.mp4` remplacée (1280x720, 78 s).
+  - Le logisticien programme la mission et fixe les budgets ; le chauffeur se connecte par PIN, confirme le départ ; le panneau GPS affiche « Position partagée », le camion avance par étapes (`context.setGeolocation`), la carte montre sa position et sa trace.
+  - Panne déclarée, reçue par le chef d'atelier (trame `incident_reported`, liste « Pannes déclarées ») ; le chauffeur repart, arrive et confirme la livraison.
+  - La spec vérifie en base les lignes `vehicle_positions` de la mission (au moins 3 après le premier trajet, davantage après le second) et le statut `delivered`.
+  - Aucun seed GPS : les positions viennent du parcours. `seed-demo.ts` et `seed-demo-gps.ts` non modifiés.
+- **Comment tester (QA)** : base locale jetable (jamais le `.env` racine), serveur `FEATURE_FLAGS=gps=on`, puis `E2E_DEMO=1 E2E_RECORD=1 E2E_BASE_URL=http://127.0.0.1:<port> E2E_SKIP_ACCOUNT_CHECK=1 node node_modules/@playwright/test/cli.js test e2e/demo/10-chauffeur.spec.ts`. `DEMO_MARKS_FILE` donne les repères de montage.
+- **Preuve** : spec verte (1 passed, 3,0 min) ; vidéo : voix Guillaume, parole 84,0 %, plus long silence 1,3 s, sous-titres incrustés, mention « Données de démonstration » en haut à droite ; planche contact relue (connexion PIN, carte avec trace, panne, alerte atelier, livraison).
+- **Pourquoi** : tutoriel chauffeur demandé avec le suivi GPS visible, dans la limite de 2 min, en gardant le passage panne vers chef d'atelier.
+- **RAIDER** : D (spec existante gardée, assertions ajoutées), I (données de démo du seed, base jetable), E (aucun secret, clé de synthèse vocale hors dépôt). Ne s'appliquent pas : R, A, Retroactive.
+- **Reste / risques** : géolocalisation simulée ; la vidéo dépend des libellés actuels de l'écran mission chauffeur.
